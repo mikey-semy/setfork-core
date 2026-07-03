@@ -13,7 +13,7 @@ tonic = "0.12"
 prost = "0.13"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "json"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }
 

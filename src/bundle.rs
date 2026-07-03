@@ -74,38 +74,159 @@ fn list_json(v: &VersionData) -> String {
     s
 }
 
-/// README.md — человекочитаемый обзор (упрощённый; байт-точное выравнивание с TS — позже).
+/// JSON-строка (как JSON.stringify(s)) — для front-matter.
+fn json_str(s: &str) -> String {
+    serde_json::to_string(s).unwrap()
+}
+
+/// Ссылка → markdown-элемент (label или [label](url)).
+fn ref_item(r: &StepRef) -> String {
+    match &r.url {
+        Some(u) => format!("[{}]({})", r.label, u),
+        None => r.label.clone(),
+    }
+}
+
+/// README.md — точный порт serialize.ts readme().
 fn readme(v: &VersionData) -> String {
-    let mut out = String::new();
-    out.push_str(&format!("# {}\n\n", v.title));
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("# {}", v.title));
+    lines.push(String::new());
     if !v.desc.is_empty() {
-        out.push_str(&format!("{}\n\n", v.desc));
+        lines.push(v.desc.clone());
+        lines.push(String::new());
     }
     if !v.tags.is_empty() {
-        let tags: Vec<String> = v.tags.iter().map(|t| format!("`{}`", t)).collect();
-        out.push_str(&format!("{}\n\n", tags.join(" ")));
+        lines.push(v.tags.iter().map(|t| format!("`{}`", t)).collect::<Vec<_>>().join(" "));
+        lines.push(String::new());
     }
     let kind = if v.ordered { "Ordered list" } else { "Unordered set" };
-    out.push_str(&format!("> {} · v{} · {} items\n\n", kind, v.version, v.steps.len()));
+    lines.push(format!("> {} · v{} · {} items", kind, v.version, v.steps.len()));
+    lines.push(String::new());
+
+    let mut section = String::new();
     for (i, s) in v.steps.iter().enumerate() {
+        if !s.section.is_empty() && s.section != section {
+            section = s.section.clone();
+            lines.push(String::new());
+            lines.push(format!("## {}", section));
+            lines.push(String::new());
+        }
         let marker = if v.ordered { format!("{}.", i + 1) } else { "-".to_string() };
-        let lvl = if s.level != "required" { format!(" _({})_", s.level) } else { String::new() };
-        out.push_str(&format!("{} **{}**{}\n", marker, s.title, lvl));
+        let lvl = if !s.level.is_empty() && s.level != "required" {
+            format!(" _({})_", s.level)
+        } else {
+            String::new()
+        };
+        lines.push(format!("{} **{}**{}", marker, s.title, lvl));
         if !s.desc.is_empty() {
-            out.push_str(&format!("   {}\n", s.desc.replace('\n', "\n   ")));
+            lines.push(format!("   {}", s.desc.replace('\n', "\n   ")));
         }
         if !s.command.is_empty() {
-            out.push_str(&format!("\n   ```sh\n   {}\n   ```\n", s.command));
+            lines.push(String::new());
+            lines.push("   ```sh".to_string());
+            lines.push(format!("   {}", s.command));
+            lines.push("   ```".to_string());
+        }
+        if !s.why.is_empty() {
+            lines.push(format!("   > why: {}", s.why));
+        }
+        for st in &s.subtasks {
+            lines.push(format!("   - [ ] {}", st));
+        }
+        for r in &s.refs {
+            lines.push(format!("   - {}", ref_item(r)));
+        }
+        lines.push(String::new());
+    }
+
+    let mut out = lines.join("\n");
+    while out.contains("\n\n\n") {
+        out = out.replace("\n\n\n", "\n\n");
+    }
+    format!("{}\n", out.trim_end())
+}
+
+fn pad(n: i32, width: usize) -> String {
+    format!("{:0>width$}", n.to_string(), width = width)
+}
+
+/// slugifyStep из serialize.ts: [^a-z0-9а-я]+ → '-', trim '-', 40 симв., default 'step'.
+fn slugify_step(s: &str) -> String {
+    let lower = s.to_lowercase();
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for c in lower.chars() {
+        let keep = c.is_ascii_lowercase() || c.is_ascii_digit() || ('а'..='я').contains(&c);
+        if keep {
+            out.push(c);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
         }
     }
-    out
+    let sliced: String = out.trim_matches('-').chars().take(40).collect();
+    if sliced.is_empty() {
+        "step".to_string()
+    } else {
+        sliced
+    }
+}
+
+/// steps/NN-slug.md — точный порт serialize.ts stepFile().
+fn step_file(s: &SerStep, width: usize) -> (String, String) {
+    let mut front: Vec<String> = vec![
+        "---".to_string(),
+        format!("title: {}", json_str(&s.title)),
+        format!("level: {}", s.level),
+    ];
+    if !s.section.is_empty() {
+        front.push(format!("section: {}", json_str(&s.section)));
+    }
+    if !s.command.is_empty() {
+        front.push(format!("command: {}", json_str(&s.command)));
+    }
+    front.push("---".to_string());
+    front.push(String::new());
+
+    let mut body: Vec<String> = Vec::new();
+    if !s.desc.is_empty() {
+        body.push(s.desc.clone());
+        body.push(String::new());
+    }
+    if !s.why.is_empty() {
+        body.push(format!("**Why:** {}", s.why));
+        body.push(String::new());
+    }
+    if !s.subtasks.is_empty() {
+        for st in &s.subtasks {
+            body.push(format!("- [ ] {}", st));
+        }
+        body.push(String::new());
+    }
+    if !s.refs.is_empty() {
+        for r in &s.refs {
+            body.push(format!("- {}", ref_item(r)));
+        }
+        body.push(String::new());
+    }
+
+    let content = format!("{}{}\n", front.join("\n"), body.join("\n").trim_end());
+    let path = format!("steps/{}-{}.md", pad(s.n, width), slugify_step(&s.title));
+    (path, content)
 }
 
 fn version_files(v: &VersionData) -> Vec<(String, String)> {
-    vec![
+    let width = std::cmp::max(2, v.steps.len().to_string().len());
+    let mut files = vec![
         ("README.md".to_string(), readme(v)),
         ("list.json".to_string(), list_json(v)),
-    ]
+    ];
+    for s in &v.steps {
+        files.push(step_file(s, width));
+    }
+    files
 }
 
 fn run_git(args: &[&str], dates: Option<i64>) -> io::Result<()> {

@@ -62,7 +62,8 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
     let ordered: bool = trow.get("ordered");
 
     let vrows = sqlx::query(
-        "select id, version, note, extract(epoch from created_at)::bigint as ts \
+        // floor, не round: git усекает дробные секунды ISO-даты (TS передаёт .toISOString()).
+        "select id, version, note, floor(extract(epoch from created_at))::bigint as ts \
          from template_versions where template_id = $1 order by version asc",
     )
     .bind(list_id)
