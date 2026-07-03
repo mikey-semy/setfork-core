@@ -3,6 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use git2::{ObjectType, Oid, Repository, Signature, Time};
+
 // Доменные структуры для сериализации версии в git-дерево (порт serialize.ts/bundle.ts).
 pub struct StepRef {
     pub label: String,
@@ -30,12 +32,9 @@ pub struct VersionData {
     pub steps: Vec<SerStep>,
 }
 
-const IDENT: [&str; 8] = [
-    "-c", "user.name=SetFork",
-    "-c", "user.email=git@setfork.com",
-    "-c", "commit.gpgsign=false",
-    "-c", "core.autocrlf=false",
-];
+// Идентичность коммитов — ОДИНАКОВО с TS (store.ts/bundle.ts) для детерминированных SHA.
+const AUTHOR_NAME: &str = "SetFork";
+const AUTHOR_EMAIL: &str = "git@setfork.com";
 
 /// list.json — машиночитаемый снимок версии (то, что парсит проекция при push).
 fn list_json(v: &VersionData) -> String {
@@ -229,14 +228,8 @@ pub fn version_files(v: &VersionData) -> Vec<(String, String)> {
     files
 }
 
-fn run_git(args: &[&str], dates: Option<i64>) -> io::Result<()> {
-    let mut cmd = Command::new("git");
-    cmd.args(args);
-    if let Some(ts) = dates {
-        let d = format!("{} +0000", ts);
-        cmd.env("GIT_AUTHOR_DATE", &d).env("GIT_COMMITTER_DATE", &d);
-    }
-    let out = cmd.output()?;
+fn run_git(args: &[&str]) -> io::Result<()> {
+    let out = Command::new("git").args(args).output()?;
     if !out.status.success() {
         return Err(io::Error::new(
             io::ErrorKind::Other,
@@ -246,69 +239,88 @@ fn run_git(args: &[&str], dates: Option<i64>) -> io::Result<()> {
     Ok(())
 }
 
-fn reset_tree(dir: &Path) -> io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        if entry.file_name() == ".git" {
-            continue;
-        }
-        let p = entry.path();
-        if p.is_dir() {
-            fs::remove_dir_all(&p)?;
-        } else {
-            fs::remove_file(&p)?;
-        }
-    }
-    Ok(())
+fn git_io(e: git2::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, format!("git2: {e}"))
 }
 
-/// Материализует историю версий в git-репо (шелл git, детерминированные SHA)
-/// и возвращает путь к рабочему каталогу. Синхронно — вызывать через spawn_blocking.
-/// ВЫЗЫВАЮЩИЙ обязан удалить каталог (`fs::remove_dir_all`) после использования.
+// Сообщение коммита: `git commit -m` добавляет завершающий \n — воспроизводим для SHA-идентичности.
+fn commit_message(v: &VersionData) -> String {
+    let boilerplate = matches!(v.note.as_str(), "initial" | "edit" | "seeded");
+    let msg = if !v.note.is_empty() && !boilerplate {
+        format!("v{}: {}", v.version, v.note)
+    } else {
+        format!("v{}", v.version)
+    };
+    format!("{msg}\n")
+}
+
+// Дерево версии из version_files (README.md, list.json, steps/NN.md); поддерево steps/.
+// treebuilder.write() канонично сортирует записи — как git, поэтому SHA дерева совпадает.
+fn build_tree(repo: &Repository, v: &VersionData) -> Result<Oid, git2::Error> {
+    let mut root = repo.treebuilder(None)?;
+    let mut steps = repo.treebuilder(None)?;
+    let mut has_steps = false;
+    for (path, content) in version_files(v) {
+        let blob = repo.blob(content.as_bytes())?;
+        if let Some(name) = path.strip_prefix("steps/") {
+            steps.insert(name, blob, 0o100644)?;
+            has_steps = true;
+        } else {
+            root.insert(path.as_str(), blob, 0o100644)?;
+        }
+    }
+    if has_steps {
+        let steps_oid = steps.write()?;
+        root.insert("steps", steps_oid, 0o040000)?;
+    }
+    root.write()
+}
+
+// Один коммит версии с фиксированной идентичностью/датой (SHA-идентично `git commit`).
+fn commit_version(repo: &Repository, parent: Option<Oid>, v: &VersionData) -> Result<Oid, git2::Error> {
+    let tree = repo.find_tree(build_tree(repo, v)?)?;
+    let sig = Signature::new(AUTHOR_NAME, AUTHOR_EMAIL, &Time::new(v.ts, 0))?; // offset 0 → +0000
+    let msg = commit_message(v);
+    let parents: Vec<git2::Commit> = match parent {
+        Some(oid) => vec![repo.find_commit(oid)?],
+        None => vec![],
+    };
+    let refs: Vec<&git2::Commit> = parents.iter().collect();
+    repo.commit(None, &sig, &sig, &msg, &tree, &refs) // update_ref=None: main выставим в конце
+}
+
+// Строит историю версий: коммиты + теги vN + refs/heads/main + HEAD→main. Возвращает tip.
+fn build_history(repo: &Repository, versions: &[VersionData], mut parent: Option<Oid>) -> Result<Option<Oid>, git2::Error> {
+    for v in versions {
+        let oid = commit_version(repo, parent, v)?;
+        let obj = repo.find_object(oid, Some(ObjectType::Commit))?;
+        repo.tag_lightweight(&format!("v{}", v.version), &obj, true)?;
+        parent = Some(oid);
+    }
+    if let Some(tip) = parent {
+        repo.reference("refs/heads/main", tip, true, "setfork")?;
+        let _ = repo.set_head("refs/heads/main");
+    }
+    Ok(parent)
+}
+
+/// Материализует историю версий в bare-репо (git2, детерминированные SHA) и возвращает путь.
+/// ВЫЗЫВАЮЩИЙ обязан удалить каталог. Синхронно — вызывать через spawn_blocking.
 pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
     if versions.is_empty() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "no versions"));
     }
     let work = std::env::temp_dir().join(format!("setfork-git-{}", uuid::Uuid::new_v4()));
-    fs::create_dir_all(&work)?;
-    let work_s = work.to_string_lossy().to_string();
-
-    let build = (|| -> io::Result<()> {
-        run_git(&["init", "-q", "-b", "main", &work_s], None)?;
-        for v in versions {
-            reset_tree(&work)?;
-            for (path, content) in version_files(v) {
-                let full = work.join(&path);
-                if let Some(parent) = full.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::write(&full, content)?;
-            }
-            let boilerplate = matches!(v.note.as_str(), "initial" | "edit" | "seeded");
-            let msg = if !v.note.is_empty() && !boilerplate {
-                format!("v{}: {}", v.version, v.note)
-            } else {
-                format!("v{}", v.version)
-            };
-            let mut add = IDENT.to_vec();
-            add.extend(["-C", &work_s, "add", "-A"]);
-            run_git(&add, None)?;
-            let mut commit = IDENT.to_vec();
-            commit.extend(["-C", &work_s, "commit", "-q", "--allow-empty", "-m", &msg]);
-            run_git(&commit, Some(v.ts))?;
-            let tag = format!("v{}", v.version);
-            let mut tagcmd = IDENT.to_vec();
-            tagcmd.extend(["-C", &work_s, "tag", "-f", &tag]);
-            let _ = run_git(&tagcmd, None);
-        }
+    let build = (|| -> Result<(), git2::Error> {
+        let repo = Repository::init_bare(&work)?;
+        build_history(&repo, versions, None)?;
         Ok(())
     })();
-
     match build {
         Ok(()) => Ok(work),
         Err(e) => {
             let _ = fs::remove_dir_all(&work);
-            Err(e)
+            Err(git_io(e))
         }
     }
 }
@@ -329,83 +341,52 @@ fn install_hook(bare: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Бутстрап персистентного bare-репо из полной истории версий (порт store.ts ensureRepo).
-/// Материализует временный репо → `git clone --bare` → ставит pre-receive hook.
+/// Бутстрап персистентного bare-репо из полной истории версий (git2) + pre-receive hook.
+/// Больше нет temp-репо и `git clone --bare` — коммиты пишутся прямо в bare через git2.
 pub fn bootstrap_bare(versions: &[VersionData], bare: &Path) -> io::Result<()> {
-    let work = materialize_repo(versions)?;
-    let work_s = work.to_string_lossy().to_string();
-    let bare_s = bare.to_string_lossy().to_string();
+    if versions.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "no versions"));
+    }
     if let Some(parent) = bare.parent() {
         fs::create_dir_all(parent)?;
     }
-    let result = run_git(&["clone", "--bare", "--quiet", &work_s, &bare_s], None);
-    let _ = fs::remove_dir_all(&work);
-    result?;
+    (|| -> Result<(), git2::Error> {
+        let repo = Repository::init_bare(bare)?;
+        build_history(&repo, versions, None)?;
+        Ok(())
+    })()
+    .map_err(git_io)?;
     install_hook(bare)
 }
 
-/// Дописывает недостающие веб-версии поверх текущего main (порт store.ts appendVersions),
-/// сохраняя ранее запушенные коммиты. `versions` — только те, что нужно добавить (version > have).
+/// Дописывает недостающие веб-версии поверх текущего main (git2), сохраняя запушенные коммиты.
+/// `versions` — только те, что добавить (version > have). Без worktree.
 pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<()> {
     if versions.is_empty() {
         return Ok(());
     }
-    let bare_s = bare.to_string_lossy().to_string();
-    let wt = std::env::temp_dir().join(format!("setfork-wt-{}", uuid::Uuid::new_v4()));
-    let wt_s = wt.to_string_lossy().to_string();
-
-    let result = (|| -> io::Result<()> {
-        run_git(&["-C", &bare_s, "worktree", "add", "--quiet", "--detach", &wt_s, "main"], None)?;
-        for v in versions {
-            reset_tree(&wt)?;
-            for (path, content) in version_files(v) {
-                let full = wt.join(&path);
-                if let Some(parent) = full.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                fs::write(&full, content)?;
-            }
-            let boilerplate = matches!(v.note.as_str(), "initial" | "edit" | "seeded");
-            let msg = if !v.note.is_empty() && !boilerplate {
-                format!("v{}: {}", v.version, v.note)
-            } else {
-                format!("v{}", v.version)
-            };
-            let mut add = IDENT.to_vec();
-            add.extend(["-C", &wt_s, "add", "-A"]);
-            run_git(&add, None)?;
-            let mut commit = IDENT.to_vec();
-            commit.extend(["-C", &wt_s, "commit", "-q", "--allow-empty", "-m", &msg]);
-            run_git(&commit, Some(v.ts))?;
-            let tag = format!("v{}", v.version);
-            let mut tagcmd = IDENT.to_vec();
-            tagcmd.extend(["-C", &wt_s, "tag", "-f", &tag]);
-            let _ = run_git(&tagcmd, None);
-        }
-        let tip = {
-            let out = Command::new("git").args(["-C", &wt_s, "rev-parse", "HEAD"]).output()?;
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        };
-        run_git(&["-C", &bare_s, "update-ref", "refs/heads/main", &tip], None)?;
+    (|| -> Result<(), git2::Error> {
+        let repo = Repository::open_bare(bare)?;
+        let parent = repo.refname_to_id("refs/heads/main").ok();
+        build_history(&repo, versions, parent)?;
         Ok(())
-    })();
-
-    let _ = run_git(&["-C", &bare_s, "worktree", "remove", "--force", &wt_s], None);
-    let _ = fs::remove_dir_all(&wt);
-    result
+    })()
+    .map_err(git_io)
 }
 
-/// Максимальный номер версии среди тегов v* (порт store.ts maxTagVersion).
+/// Максимальный номер версии среди тегов v* (git2).
 pub fn max_tag_version(bare: &Path) -> i32 {
-    let bare_s = bare.to_string_lossy().to_string();
-    let out = match Command::new("git").args(["-C", &bare_s, "tag", "--list", "v*"]).output() {
-        Ok(o) => o,
+    let repo = match Repository::open_bare(bare) {
+        Ok(r) => r,
+        Err(_) => return 0,
+    };
+    let names = match repo.tag_names(Some("v*")) {
+        Ok(n) => n,
         Err(_) => return 0,
     };
     let mut max = 0i32;
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let t = line.trim();
-        if let Some(num) = t.strip_prefix('v') {
+    for name in names.iter().flatten() {
+        if let Some(num) = name.strip_prefix('v') {
             if let Ok(n) = num.parse::<i32>() {
                 max = max.max(n);
             }
@@ -414,8 +395,8 @@ pub fn max_tag_version(bare: &Path) -> i32 {
     max
 }
 
-/// Материализует репо и возвращает bundle всех рефов (порт bundle.ts).
-/// Синхронно — вызывать через spawn_blocking.
+/// Материализует репо (git2) и возвращает bundle всех рефов.
+/// `git bundle` — через шелл (libgit2 не умеет формат bundle). Синхронно — через spawn_blocking.
 pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
     let work = materialize_repo(versions)?;
     let work_s = work.to_string_lossy().to_string();
@@ -423,9 +404,7 @@ pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
     let bundle_s = bundle_path.to_string_lossy().to_string();
 
     let result = (|| -> io::Result<Vec<u8>> {
-        let mut bcmd = IDENT.to_vec();
-        bcmd.extend(["-C", &work_s, "bundle", "create", &bundle_s, "--all"]);
-        run_git(&bcmd, None)?;
+        run_git(&["-C", &work_s, "bundle", "create", &bundle_s, "--all"])?;
         fs::read(&bundle_path)
     })();
 

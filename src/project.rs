@@ -2,7 +2,6 @@ use crate::db;
 use serde::Deserialize;
 use sqlx::PgPool;
 use std::path::Path;
-use std::process::Command;
 use uuid::Uuid;
 
 // Спроецированный шаг (строки; LocaleText соберётся в db::add_version как {"en": …}).
@@ -47,13 +46,27 @@ struct RawList {
     steps: Option<Vec<RawStep>>,
 }
 
-fn git_out(bare: &str, args: &[&str]) -> Option<Vec<u8>> {
-    let out = Command::new("git").arg("-C").arg(bare).args(args).output().ok()?;
-    if out.status.success() {
-        Some(out.stdout)
-    } else {
-        None
-    }
+// Читает tip main через git2: (hex tip, содержимое list.json, subject коммита).
+// Все git2-объекты — не Send, поэтому извлекаем owned-данные ДО любого await.
+fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String)> {
+    let repo = git2::Repository::open_bare(bare).ok()?;
+    let tip = repo.refname_to_id("refs/heads/main").ok()?;
+    let commit = repo.find_commit(tip).ok()?;
+    let tree = commit.tree().ok()?;
+    let entry = tree.get_path(Path::new("list.json")).ok()?;
+    let blob = entry.to_object(&repo).ok()?;
+    let raw = blob.as_blob()?.content().to_vec();
+    let subject = commit.summary().unwrap_or("").to_string();
+    Some((tip.to_string(), raw, subject))
+}
+
+// Тег vN на запушенный tip (git2, force).
+fn tag_version(bare: &Path, ver: i32, tip_hex: &str) -> Result<(), git2::Error> {
+    let repo = git2::Repository::open_bare(bare)?;
+    let oid = git2::Oid::from_str(tip_hex)?;
+    let obj = repo.find_object(oid, Some(git2::ObjectType::Commit))?;
+    repo.tag_lightweight(&format!("v{ver}"), &obj, true)?;
+    Ok(())
 }
 
 /// Срезает префикс "vN: " из subject коммита (порт /^v\d+:\s*/).
@@ -78,17 +91,11 @@ fn strip_v_prefix(s: &str) -> String {
 /// Проецирует запушенный tip main → новая версия списка (порт project.ts projectPushedCommit).
 /// Источник контента — list.json в корне дерева. Возвращает номер версии или None.
 pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Option<i32> {
-    let bare_s = bare.to_string_lossy().to_string();
-    let tip = String::from_utf8_lossy(&git_out(&bare_s, &["rev-parse", "main"])?)
-        .trim()
-        .to_string();
-    let raw = git_out(&bare_s, &["show", &format!("{}:list.json", tip)])?;
+    // git2-объекты не Send → читаем всё owned до await.
+    let (tip, raw, subject) = read_tip(bare)?;
     let parsed: RawList = serde_json::from_slice(&raw).ok()?;
     let steps_raw = parsed.steps.as_ref()?;
 
-    let subject = String::from_utf8_lossy(&git_out(&bare_s, &["log", "-1", "--format=%s", &tip])?)
-        .trim()
-        .to_string();
     let note: String = {
         let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();
         if stripped.trim().is_empty() {
@@ -128,8 +135,6 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
     let ver = db::add_version(pool, template_id, &note, &steps).await.ok()?;
     let _ = db::update_meta(pool, template_id, parsed.title.clone(), parsed.desc.clone(), parsed.tags.clone(), parsed.ordered).await;
     // Тег vN на запушенный коммит (для maxTagVersion/истории).
-    let _ = Command::new("git")
-        .args(["-C", &bare_s, "tag", "-f", &format!("v{}", ver), &tip])
-        .output();
+    let _ = tag_version(bare, ver, &tip);
     Some(ver)
 }
