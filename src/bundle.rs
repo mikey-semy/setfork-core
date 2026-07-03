@@ -395,6 +395,77 @@ pub fn max_tag_version(bare: &Path) -> i32 {
     max
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn step(n: i32, title: &str) -> SerStep {
+        SerStep {
+            n,
+            title: title.into(),
+            desc: String::new(),
+            command: String::new(),
+            level: "required".into(),
+            why: String::new(),
+            section: String::new(),
+            subtasks: vec![],
+            refs: vec![],
+        }
+    }
+    fn ver(steps: Vec<SerStep>) -> VersionData {
+        VersionData {
+            version: 3,
+            note: "add caching".into(),
+            ts: 0,
+            title: "Redis Caching".into(),
+            desc: "Set up".into(),
+            tags: vec!["redis".into()],
+            ordered: true,
+            steps,
+        }
+    }
+
+    #[test]
+    fn version_files_paths() {
+        let files = version_files(&ver(vec![step(1, "Install Redis"), step(2, "Configure")]));
+        let paths: Vec<_> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(paths, vec!["README.md", "list.json", "steps/01-install-redis.md", "steps/02-configure.md"]);
+    }
+
+    #[test]
+    fn list_json_key_order_and_trailing_newline() {
+        let files = version_files(&ver(vec![step(1, "Install Redis")]));
+        let lj = &files.iter().find(|(p, _)| p == "list.json").unwrap().1;
+        assert!(lj.starts_with("{\n  \"title\": \"Redis Caching\","), "key order title-first");
+        assert!(lj.ends_with('\n'));
+    }
+
+    #[test]
+    fn slugify_matches_ts() {
+        assert_eq!(slugify_step("Install Redis!!!"), "install-redis");
+        assert_eq!(slugify_step("Установка Redis"), "установка-redis");
+        assert_eq!(slugify_step("@#$%^&*()"), "step");
+        assert_eq!(slugify_step(&"a".repeat(60)), "a".repeat(40));
+    }
+
+    #[test]
+    fn pad_widths() {
+        assert_eq!(pad(7, 2), "07");
+        assert_eq!(pad(1, 3), "001");
+        assert_eq!(pad(100, 2), "100");
+    }
+
+    #[test]
+    fn commit_message_strips_boilerplate_and_appends_newline() {
+        let mut v = ver(vec![step(1, "x")]);
+        assert_eq!(commit_message(&v), "v3: add caching\n");
+        v.note = "edit".into(); // boilerplate → без note
+        assert_eq!(commit_message(&v), "v3\n");
+        v.note = String::new();
+        assert_eq!(commit_message(&v), "v3\n");
+    }
+}
+
 /// Материализует репо (git2) и возвращает bundle всех рефов.
 /// `git bundle` — через шелл (libgit2 не умеет формат bundle). Синхронно — через spawn_blocking.
 pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {

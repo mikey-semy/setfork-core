@@ -138,3 +138,18 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
     let _ = tag_version(bare, ver, &tip);
     Some(ver)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::strip_v_prefix;
+
+    #[test]
+    fn strips_vn_prefix() {
+        assert_eq!(strip_v_prefix("v12: pushed via git"), "pushed via git");
+        assert_eq!(strip_v_prefix("v1:   spaced"), "spaced");
+        assert_eq!(strip_v_prefix("v3"), "v3"); // нет двоеточия — не трогаем
+        assert_eq!(strip_v_prefix("hello world"), "hello world");
+        assert_eq!(strip_v_prefix("version 2"), "version 2"); // не vN:
+        assert_eq!(strip_v_prefix("v7: "), "");
+    }
+}
