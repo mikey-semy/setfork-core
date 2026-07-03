@@ -4,24 +4,22 @@ Rust git-ядро SetFork (Gitaly-стиль): реализует `proto/git.pro
 и обслуживает тяжёлые git-операции для Next-BFF. Часть Фазы 2 плана
 `sethub-app/docs/rust-core-plan.md` + `sethub-app/docs/phase1-wire-contract.md`.
 
-## Статус: СКЕЛЕТ (не собран в среде разработки — см. ниже)
+## Статус: собирается, запускается, читает Postgres ✅
 
-- ✅ Cargo-проект: `tonic` (gRPC) + `prost` + `tokio`; `build.rs` кодогенит из `proto/git.proto`
-  (protoc — из крейта `protoc-bin-vendored`, системный не нужен).
-- ✅ `src/main.rs`: tonic-сервер + трейт `GitCore` со всеми 5 RPC (пока `unimplemented`).
-- ⚠️ **НЕ скомпилировано в текущей среде: заблокирован `crates.io`** (npm-реестр доступен, cargo —
-  нет; firewall-allowlist). Собери там, где у cargo есть сеть (твоя машина / CI с доступом к crates.io).
+- ✅ Cargo-проект: `tonic` (gRPC) + `prost` + `tokio` + `sqlx` (Postgres); `build.rs` кодогенит из
+  `proto/git.proto` (protoc — из крейта `protoc-bin-vendored`, системный не нужен).
+- ✅ `src/main.rs`: tonic-сервер + трейт `GitCore` (5 RPC пока `unimplemented`).
+- ✅ `src/db.rs`: sqlx-подключение (`DATABASE_URL` из `.env`, та же БД что у Next), резолв
+  owner/slug→list, self-check при старте. **Проверено:** `cargo build` ок; запуск подключается к
+  Postgres, считает списки и резолвит `demo/redis-…` → uuid+версия.
 
-## Сборка / запуск (где cargo имеет сеть)
+## Сборка / запуск
 
 ```sh
-cargo build            # скачает tonic/tokio/prost, сгенерит стабы из proto
-cargo run              # поднимет gRPC-сервер на 127.0.0.1:50051 (SETFORK_CORE_ADDR — переопределить)
+cp .env.example .env   # или задать DATABASE_URL (та же Postgres, что у sethub-app)
+cargo build            # скачает tonic/tokio/prost/sqlx, сгенерит стабы из proto
+cargo run              # self-check БД + gRPC-сервер на 127.0.0.1:50051 (SETFORK_CORE_ADDR — override)
 ```
-
-Если crates.io недоступен и на твоей стороне — варианты: `cargo vendor` на машине с доступом →
-коммит `vendor/` + `.cargo/config.toml [source.crates-io] replace-with="vendored-sources"`; либо
-корпоративный зеркало-реестр в `~/.cargo/config.toml`.
 
 ## Что дальше (Фаза 2, послойно)
 
