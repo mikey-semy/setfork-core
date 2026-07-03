@@ -1,0 +1,37 @@
+# Обычный (локальный) стек git-ядра: Postgres (pgvector) + сам core.
+# Запуск: docker compose up --build. gRPC доступен на localhost:50051.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sethub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sethub}
+      POSTGRES_DB: ${POSTGRES_DB:-sethub}
+    ports:
+      - '${DB_PORT:-5439}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-sethub} -d ${POSTGRES_DB:-sethub}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  core:
+    build: { context: ., target: runtime }
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sethub}:${POSTGRES_PASSWORD:-sethub}@db:5432/${POSTGRES_DB:-sethub}
+      SETFORK_CORE_ADDR: 0.0.0.0:50051
+      GIT_DATA_DIR: /data/git
+    ports:
+      - '${CORE_PORT:-50051}:50051'
+    volumes:
+      - gitdata:/data/git # персистентные bare-репо (git = источник правды)
+    depends_on:
+      db: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  gitdata:

@@ -1,0 +1,23 @@
+# Деплой git-ядра в Dokploy (standalone). Живёт в общей сети dokploy-network;
+# Postgres и том git-объектов — общие с фронтом (setfork-frontend).
+# .env: DATABASE_URL (на общий db по имени сервиса в dokploy-network), GIT_DATA_DIR=/data/git.
+# Порты наружу НЕ публикуем — gRPC только внутри сети (фронт зовёт core:50051).
+services:
+  core:
+    build: { context: ., target: runtime }
+    container_name: setfork-core
+    restart: always
+    env_file: .env
+    environment:
+      SETFORK_CORE_ADDR: 0.0.0.0:50051
+      GIT_DATA_DIR: /data/git
+    volumes:
+      - setfork_git:/data/git
+    networks: [dokploy-network]
+
+volumes:
+  setfork_git:
+
+networks:
+  dokploy-network:
+    external: true

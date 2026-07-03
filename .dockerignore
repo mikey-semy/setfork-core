@@ -1,0 +1,7 @@
+target
+.git
+.env
+*.bundle
+Dockerfile
+docker-compose*.yml
+README.md
