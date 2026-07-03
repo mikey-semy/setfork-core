@@ -1,6 +1,7 @@
 use sqlx::postgres::PgPool;
 use tonic::{transport::Server, Request, Response, Status};
 
+mod bundle;
 mod db;
 
 pub mod pb {
@@ -10,11 +11,25 @@ pub mod pb {
 use pb::git_core_server::{GitCore, GitCoreServer};
 use pb::{BytesResponse, InfoRefsRequest, PostRequest, ReceivePackResponse, RepoRef};
 
-// Скелет git-ядра. Держит пул Postgres (для резолва/проекции). RPC пока unimplemented;
-// реализация (материализация репо + gix/git2 + проекция) добавляется послойно.
 struct GitCoreSvc {
-    #[allow(dead_code)]
     pool: PgPool,
+}
+
+impl GitCoreSvc {
+    // Общая реализация bundle: резолв → загрузка версий → материализация → git bundle.
+    async fn build(&self, owner: &str, slug: &str) -> Result<Vec<u8>, Status> {
+        let (id, _v) = db::resolve_list(&self.pool, owner, slug)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("list not found"))?;
+        let versions = db::load_bundle_data(&self.pool, id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        tokio::task::spawn_blocking(move || bundle::build_bundle(&versions))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| Status::internal(e.to_string()))
+    }
 }
 
 #[tonic::async_trait]
@@ -36,22 +51,32 @@ impl GitCore for GitCoreSvc {
         Err(Status::unimplemented("receive_pack — Фаза 2 WIP"))
     }
     async fn create_bundle(&self, req: Request<RepoRef>) -> Result<Response<BytesResponse>, Status> {
-        let _ = req.into_inner();
-        Err(Status::unimplemented("create_bundle — Фаза 2 WIP"))
+        let RepoRef { owner, slug } = req.into_inner();
+        let data = self.build(&owner, &slug).await?;
+        Ok(Response::new(BytesResponse { data }))
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
-
-    // Подключение к Postgres + self-check (доказательство pipeline Rust↔БД).
     let pool = db::connect().await?;
+
+    // CLI-режим для проверки: `setfork-core bundle <owner> <slug> <out.bundle>`
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(|s| s.as_str()) == Some("bundle") {
+        let owner = args.get(2).expect("usage: bundle <owner> <slug> <out>");
+        let slug = args.get(3).expect("usage: bundle <owner> <slug> <out>");
+        let out = args.get(4).expect("usage: bundle <owner> <slug> <out>");
+        let svc = GitCoreSvc { pool };
+        let data = svc.build(owner, slug).await.map_err(|e| e.to_string())?;
+        std::fs::write(out, &data)?;
+        println!("wrote {} bytes → {}", data.len(), out);
+        return Ok(());
+    }
+
     let n = db::published_count(&pool).await?;
     println!("setfork-core: connected to Postgres — {n} published public lists");
-    if let Some((id, ver)) = db::resolve_list(&pool, "demo", "redis-caching-setup-for-web-apps").await? {
-        println!("setfork-core: resolved demo/redis-caching-setup-for-web-apps → {id} (v{ver})");
-    }
 
     let addr = std::env::var("SETFORK_CORE_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())

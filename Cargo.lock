@@ -1453,6 +1453,7 @@ dependencies = [
  "dotenvy",
  "prost",
  "protoc-bin-vendored",
+ "serde_json",
  "sqlx",
  "tokio",
  "tonic",
