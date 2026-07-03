@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 // Доменные структуры для сериализации версии в git-дерево (порт serialize.ts/bundle.ts).
@@ -263,17 +263,17 @@ fn reset_tree(dir: &Path) -> io::Result<()> {
 }
 
 /// Материализует историю версий в git-репо (шелл git, детерминированные SHA)
-/// и возвращает bundle всех рефов. Синхронно — вызывать через spawn_blocking.
-pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
+/// и возвращает путь к рабочему каталогу. Синхронно — вызывать через spawn_blocking.
+/// ВЫЗЫВАЮЩИЙ обязан удалить каталог (`fs::remove_dir_all`) после использования.
+pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
     if versions.is_empty() {
         return Err(io::Error::new(io::ErrorKind::NotFound, "no versions"));
     }
     let work = std::env::temp_dir().join(format!("setfork-git-{}", uuid::Uuid::new_v4()));
-    let bundle_path = std::env::temp_dir().join(format!("setfork-{}.bundle", uuid::Uuid::new_v4()));
     fs::create_dir_all(&work)?;
     let work_s = work.to_string_lossy().to_string();
 
-    let result = (|| -> io::Result<Vec<u8>> {
+    let build = (|| -> io::Result<()> {
         run_git(&["init", "-q", "-b", "main", &work_s], None)?;
         for v in versions {
             reset_tree(&work)?;
@@ -301,7 +301,27 @@ pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
             tagcmd.extend(["-C", &work_s, "tag", "-f", &tag]);
             let _ = run_git(&tagcmd, None);
         }
-        let bundle_s = bundle_path.to_string_lossy().to_string();
+        Ok(())
+    })();
+
+    match build {
+        Ok(()) => Ok(work),
+        Err(e) => {
+            let _ = fs::remove_dir_all(&work);
+            Err(e)
+        }
+    }
+}
+
+/// Материализует репо и возвращает bundle всех рефов (порт bundle.ts).
+/// Синхронно — вызывать через spawn_blocking.
+pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
+    let work = materialize_repo(versions)?;
+    let work_s = work.to_string_lossy().to_string();
+    let bundle_path = std::env::temp_dir().join(format!("setfork-{}.bundle", uuid::Uuid::new_v4()));
+    let bundle_s = bundle_path.to_string_lossy().to_string();
+
+    let result = (|| -> io::Result<Vec<u8>> {
         let mut bcmd = IDENT.to_vec();
         bcmd.extend(["-C", &work_s, "bundle", "create", &bundle_s, "--all"]);
         run_git(&bcmd, None)?;
