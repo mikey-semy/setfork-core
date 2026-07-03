@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+// SetFork git-core — контракт провода Rust↔Next (Connect/gRPC).
+// Каноничная копия — sethub-app/proto/git.proto. Соответствует @/core GitCore.
+
+package setfork.git.v1;
+
+message RepoRef {
+  string owner = 1;
+  string slug = 2;
+}
+
+message InfoRefsRequest {
+  RepoRef repo = 1;
+  string git_protocol = 2;
+}
+
+message PostRequest {
+  RepoRef repo = 1;
+  bytes body = 2;
+  string git_protocol = 3;
+}
+
+message BytesResponse {
+  bytes data = 1;
+}
+
+message ReceivePackResponse {
+  bytes data = 1;
+  int32 new_version = 2;
+}
+
+service GitCore {
+  rpc InfoRefsUploadPack(InfoRefsRequest) returns (BytesResponse);
+  rpc InfoRefsReceivePack(InfoRefsRequest) returns (BytesResponse);
+  rpc UploadPack(PostRequest) returns (BytesResponse);
+  rpc ReceivePack(PostRequest) returns (ReceivePackResponse);
+  rpc CreateBundle(RepoRef) returns (BytesResponse);
+}
