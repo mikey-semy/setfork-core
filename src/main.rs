@@ -6,6 +6,8 @@ mod db;
 mod project;
 mod repo;
 mod smart_http;
+#[cfg(test)]
+mod roundtrip_tests;
 
 use bundle::VersionData;
 use std::path::PathBuf;
