@@ -3,9 +3,13 @@ use tonic::{transport::Server, Request, Response, Status};
 
 mod bundle;
 mod db;
+mod project;
+mod repo;
 mod smart_http;
 
 use bundle::VersionData;
+use std::path::PathBuf;
+use uuid::Uuid;
 
 pub mod pb {
     tonic::include_proto!("setfork.git.v1");
@@ -38,6 +42,14 @@ impl GitCoreSvc {
             .map_err(|e| Status::internal(e.to_string()))?
             .map_err(|e| Status::internal(e.to_string()))
     }
+
+    // Персистентный bare-репо (bootstrap/append под локом) — общий вход read/write RPC.
+    async fn ensure(&self, owner: &str, slug: &str) -> Result<(PathBuf, Uuid), Status> {
+        repo::ensure_repo(&self.pool, owner, slug)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("list not found"))
+    }
 }
 
 // Материализует репо во временный каталог, выполняет `op` над ним и гарантированно
@@ -65,48 +77,56 @@ impl GitCore for GitCoreSvc {
     async fn info_refs_upload_pack(&self, req: Request<InfoRefsRequest>) -> Result<Response<BytesResponse>, Status> {
         let InfoRefsRequest { repo, git_protocol } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
-        let versions = self.load(&repo.owner, &repo.slug).await?;
-        let data = tokio::task::spawn_blocking(move || {
-            with_materialized(versions, |dir| smart_http::upload_pack_advertise(dir, opt(&git_protocol)))
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let data = tokio::task::spawn_blocking(move || smart_http::upload_pack_advertise(&bare, opt(&git_protocol)))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(BytesResponse { data }))
     }
     async fn info_refs_receive_pack(&self, req: Request<InfoRefsRequest>) -> Result<Response<BytesResponse>, Status> {
         let InfoRefsRequest { repo, git_protocol } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
-        let versions = self.load(&repo.owner, &repo.slug).await?;
-        let data = tokio::task::spawn_blocking(move || {
-            with_materialized(versions, |dir| smart_http::receive_pack_advertise(dir, opt(&git_protocol)))
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let data = tokio::task::spawn_blocking(move || smart_http::receive_pack_advertise(&bare, opt(&git_protocol)))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(BytesResponse { data }))
     }
     async fn upload_pack(&self, req: Request<PostRequest>) -> Result<Response<BytesResponse>, Status> {
         let PostRequest { repo, body, git_protocol } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
-        let versions = self.load(&repo.owner, &repo.slug).await?;
-        let data = tokio::task::spawn_blocking(move || {
-            with_materialized(versions, |dir| smart_http::upload_pack_rpc(dir, &body, opt(&git_protocol)))
-        })
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let data = tokio::task::spawn_blocking(move || smart_http::upload_pack_rpc(&bare, &body, opt(&git_protocol)))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(BytesResponse { data }))
     }
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
-        let _ = req.into_inner();
-        // Пуш = приём пака + проекция list.json → новая версия в Postgres.
-        // Отдельный (пишущий) шаг — см. docs/rust-core-plan.md.
-        Err(Status::unimplemented("receive_pack — write-path, следующий шаг"))
+        let PostRequest { repo, body, git_protocol } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Критическая секция: receive-pack + проекция под одним локом репо
+        // (ленивый append не вклинивается между приёмом и проекцией).
+        let _guard = repo::repo_lock(id).await;
+        let bare_recv = bare.clone();
+        let data = tokio::task::spawn_blocking(move || smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol)))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| Status::internal(e.to_string()))?;
+        // Проекция list.json запушенного tip → новая версия (0 = не спроецировано).
+        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        Ok(Response::new(ReceivePackResponse { data, new_version }))
     }
     async fn create_bundle(&self, req: Request<RepoRef>) -> Result<Response<BytesResponse>, Status> {
         let RepoRef { owner, slug } = req.into_inner();
-        let data = self.build(&owner, &slug).await?;
+        // Персистентный репо (как TS bundleRepo) — bundle включает запушенные коммиты.
+        let data = repo::bundle_repo(&self.pool, &owner, &slug)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("list not found"))?;
         Ok(Response::new(BytesResponse { data }))
     }
 }

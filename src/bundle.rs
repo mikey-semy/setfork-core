@@ -217,7 +217,7 @@ fn step_file(s: &SerStep, width: usize) -> (String, String) {
     (path, content)
 }
 
-fn version_files(v: &VersionData) -> Vec<(String, String)> {
+pub fn version_files(v: &VersionData) -> Vec<(String, String)> {
     let width = std::cmp::max(2, v.steps.len().to_string().len());
     let mut files = vec![
         ("README.md".to_string(), readme(v)),
@@ -311,6 +311,107 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
             Err(e)
         }
     }
+}
+
+// pre-receive hook (порт store.ts PRE_RECEIVE): каждый пушнутый коммит обязан нести list.json.
+const PRE_RECEIVE: &str = "#!/bin/sh\n# SetFork: каждый пушнутый коммит обязан содержать list.json в корне.\nwhile read old new ref; do\n  case \"$new\" in *0000000000000000000000000000000000000000) continue ;; esac\n  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then\n    echo \"SetFork: list.json is required at the repo root\" >&2\n    exit 1\n  fi\ndone\nexit 0\n";
+
+fn install_hook(bare: &Path) -> io::Result<()> {
+    let hooks = bare.join("hooks");
+    fs::create_dir_all(&hooks)?;
+    fs::write(hooks.join("pre-receive"), PRE_RECEIVE)?;
+    // executable bit — только на unix; на Windows git-for-windows берёт хук через sh.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(hooks.join("pre-receive"), fs::Permissions::from_mode(0o755));
+    }
+    Ok(())
+}
+
+/// Бутстрап персистентного bare-репо из полной истории версий (порт store.ts ensureRepo).
+/// Материализует временный репо → `git clone --bare` → ставит pre-receive hook.
+pub fn bootstrap_bare(versions: &[VersionData], bare: &Path) -> io::Result<()> {
+    let work = materialize_repo(versions)?;
+    let work_s = work.to_string_lossy().to_string();
+    let bare_s = bare.to_string_lossy().to_string();
+    if let Some(parent) = bare.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let result = run_git(&["clone", "--bare", "--quiet", &work_s, &bare_s], None);
+    let _ = fs::remove_dir_all(&work);
+    result?;
+    install_hook(bare)
+}
+
+/// Дописывает недостающие веб-версии поверх текущего main (порт store.ts appendVersions),
+/// сохраняя ранее запушенные коммиты. `versions` — только те, что нужно добавить (version > have).
+pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<()> {
+    if versions.is_empty() {
+        return Ok(());
+    }
+    let bare_s = bare.to_string_lossy().to_string();
+    let wt = std::env::temp_dir().join(format!("setfork-wt-{}", uuid::Uuid::new_v4()));
+    let wt_s = wt.to_string_lossy().to_string();
+
+    let result = (|| -> io::Result<()> {
+        run_git(&["-C", &bare_s, "worktree", "add", "--quiet", "--detach", &wt_s, "main"], None)?;
+        for v in versions {
+            reset_tree(&wt)?;
+            for (path, content) in version_files(v) {
+                let full = wt.join(&path);
+                if let Some(parent) = full.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&full, content)?;
+            }
+            let boilerplate = matches!(v.note.as_str(), "initial" | "edit" | "seeded");
+            let msg = if !v.note.is_empty() && !boilerplate {
+                format!("v{}: {}", v.version, v.note)
+            } else {
+                format!("v{}", v.version)
+            };
+            let mut add = IDENT.to_vec();
+            add.extend(["-C", &wt_s, "add", "-A"]);
+            run_git(&add, None)?;
+            let mut commit = IDENT.to_vec();
+            commit.extend(["-C", &wt_s, "commit", "-q", "--allow-empty", "-m", &msg]);
+            run_git(&commit, Some(v.ts))?;
+            let tag = format!("v{}", v.version);
+            let mut tagcmd = IDENT.to_vec();
+            tagcmd.extend(["-C", &wt_s, "tag", "-f", &tag]);
+            let _ = run_git(&tagcmd, None);
+        }
+        let tip = {
+            let out = Command::new("git").args(["-C", &wt_s, "rev-parse", "HEAD"]).output()?;
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        run_git(&["-C", &bare_s, "update-ref", "refs/heads/main", &tip], None)?;
+        Ok(())
+    })();
+
+    let _ = run_git(&["-C", &bare_s, "worktree", "remove", "--force", &wt_s], None);
+    let _ = fs::remove_dir_all(&wt);
+    result
+}
+
+/// Максимальный номер версии среди тегов v* (порт store.ts maxTagVersion).
+pub fn max_tag_version(bare: &Path) -> i32 {
+    let bare_s = bare.to_string_lossy().to_string();
+    let out = match Command::new("git").args(["-C", &bare_s, "tag", "--list", "v*"]).output() {
+        Ok(o) => o,
+        Err(_) => return 0,
+    };
+    let mut max = 0i32;
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        let t = line.trim();
+        if let Some(num) = t.strip_prefix('v') {
+            if let Ok(n) = num.parse::<i32>() {
+                max = max.max(n);
+            }
+        }
+    }
+    max
 }
 
 /// Материализует репо и возвращает bundle всех рефов (порт bundle.ts).
