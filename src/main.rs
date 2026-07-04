@@ -196,10 +196,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::var("SETFORK_CORE_ADDR")
         .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
         .parse()?;
+
+    // gRPC health-check (grpc.health.v1) — для проб оркестратора/LB.
+    let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter.set_serving::<GitCoreServer<GitCoreSvc>>().await;
+
+    // Graceful shutdown: по SIGTERM/SIGINT сперва снимаем SERVING (оркестратор
+    // уводит трафик), затем serve_with_shutdown перестаёт принимать и до-обслуживает
+    // текущие RPC (напр. идущий receive-pack не обрывается на середине).
+    let shutdown = async move {
+        wait_for_signal().await;
+        let mut health_reporter = health_reporter;
+        health_reporter.set_not_serving::<GitCoreServer<GitCoreSvc>>().await;
+        println!("setfork-core: получен сигнал остановки — дренаж активных RPC…");
+    };
+
     println!("setfork-core git-core listening on {addr}");
     Server::builder()
+        .add_service(health_service)
         .add_service(GitCoreServer::new(GitCoreSvc { pool }))
-        .serve(addr)
+        .serve_with_shutdown(addr, shutdown)
         .await?;
+    println!("setfork-core: остановлен чисто");
     Ok(())
+}
+
+/// Ждёт первый из сигналов остановки: Ctrl-C (SIGINT) или SIGTERM (docker stop / k8s).
+async fn wait_for_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.expect("не удалось повесить обработчик Ctrl-C");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("не удалось повесить обработчик SIGTERM")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
 }

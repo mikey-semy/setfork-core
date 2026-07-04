@@ -51,7 +51,19 @@ fn loc(v: &serde_json::Value) -> String {
 // (без compile-time проверки), чтобы сборка не требовала живой БД.
 pub async fn connect() -> Result<PgPool, sqlx::Error> {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL не задан (см. .env)");
-    PgPoolOptions::new().max_connections(5).connect(&url).await
+    // Размер пула — под нагрузку/лимиты Postgres (PGPOOL_MAX, по умолч. 10).
+    // acquire_timeout — быстрый отказ вместо зависания, если пул исчерпан;
+    // test_before_acquire — не отдаём мёртвое соединение после рестарта БД.
+    let max = std::env::var("PGPOOL_MAX")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(10);
+    PgPoolOptions::new()
+        .max_connections(max)
+        .acquire_timeout(std::time::Duration::from_secs(10))
+        .test_before_acquire(true)
+        .connect(&url)
+        .await
 }
 
 /// Резолв списка по owner handle + slug → (template_id, current_version).
