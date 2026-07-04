@@ -1,6 +1,7 @@
 use crate::db;
 use serde::Deserialize;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -46,9 +47,10 @@ struct RawList {
     steps: Option<Vec<RawStep>>,
 }
 
-// Читает tip main через git2: (hex tip, содержимое list.json, subject коммита).
+// Читает tip main через git2: (hex tip, содержимое list.json, subject коммита, файлы steps/*.md).
 // Все git2-объекты — не Send, поэтому извлекаем owned-данные ДО любого await.
-fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String)> {
+// steps: map "NN" (базовое имя без slug/расширения → 1-based индекс) → содержимое .md.
+fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
     let repo = git2::Repository::open_bare(bare).ok()?;
     let tip = repo.refname_to_id("refs/heads/main").ok()?;
     let commit = repo.find_commit(tip).ok()?;
@@ -57,7 +59,116 @@ fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String)> {
     let blob = entry.to_object(&repo).ok()?;
     let raw = blob.as_blob()?.content().to_vec();
     let subject = commit.summary().unwrap_or("").to_string();
-    Some((tip.to_string(), raw, subject))
+    let steps = read_step_files(&repo, &tree);
+    Some((tip.to_string(), raw, subject, steps))
+}
+
+// Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.
+// Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).
+fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {
+    let mut out = HashMap::new();
+    let steps_tree = match tree.get_path(Path::new("steps")).ok().and_then(|e| e.to_object(repo).ok()) {
+        Some(obj) => match obj.into_tree() {
+            Ok(t) => t,
+            Err(_) => return out,
+        },
+        None => return out,
+    };
+    for e in steps_tree.iter() {
+        let name = match e.name() {
+            Some(n) => n,
+            None => continue,
+        };
+        if !name.ends_with(".md") {
+            continue;
+        }
+        // NN — цифры до первого '-' (или до '.md', если slug пуст).
+        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let n: i32 = match digits.parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok()) {
+            if let Ok(s) = String::from_utf8(blob.content().to_vec()) {
+                out.insert(n, s);
+            }
+        }
+    }
+    out
+}
+
+/// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),
+/// которое можно однозначно распарсить обратно из формата bundle::step_file.
+#[derive(Debug, PartialEq)]
+pub struct ParsedStepMd {
+    pub title: Option<String>,
+    pub desc: Option<String>,
+    pub command: Option<String>,
+}
+
+/// Значение front-matter вида `key: <json-строка>` или `key: raw` → строка.
+/// version_files пишет title/section/command как JSON.stringify(...), level — сырьём.
+fn front_value(raw: &str) -> String {
+    let t = raw.trim();
+    if t.starts_with('"') {
+        serde_json::from_str::<String>(t).unwrap_or_else(|_| t.to_string())
+    } else {
+        t.to_string()
+    }
+}
+
+/// Обратный парс steps/NN-*.md → title/desc/command (зеркало bundle::step_file).
+/// Возвращает None для полей, которых нет в файле; вызывающий берёт их из list.json.
+/// Безопасное подмножество: subtasks/refs/why/section/level НЕ реэкспортируем
+/// (их источник — list.json), чтобы round-trip оставался идемпотентным.
+pub fn parse_step_md(content: &str) -> ParsedStepMd {
+    let mut title = None;
+    let mut command = None;
+
+    // 1) Front-matter между первой парой строк "---".
+    let mut lines = content.lines();
+    let mut body_start = 0usize; // индекс строки, с которой начинается тело
+    if lines.next() == Some("---") {
+        let mut idx = 1usize;
+        for line in content.lines().skip(1) {
+            idx += 1;
+            if line.trim_end() == "---" {
+                body_start = idx; // после закрывающего "---"
+                break;
+            }
+            if let Some(rest) = line.strip_prefix("title:") {
+                title = Some(front_value(rest));
+            } else if let Some(rest) = line.strip_prefix("command:") {
+                command = Some(front_value(rest));
+            }
+        }
+    }
+
+    // 2) Тело: desc — это текст ДО первого маркера (**Why:**, subtask "- [ ]", ref "- ").
+    //    version_files кладёт desc первым блоком и отделяет пустой строкой.
+    let body: Vec<&str> = content.lines().skip(body_start).collect();
+    let mut desc_lines: Vec<&str> = Vec::new();
+    for line in &body {
+        let t = line.trim_start();
+        if t.starts_with("**Why:**") || t.starts_with("- [ ] ") || t.starts_with("- ") {
+            break;
+        }
+        desc_lines.push(line);
+    }
+    // Обрезаем ведущие/замыкающие пустые строки (front-matter отделён пустой строкой).
+    while desc_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        desc_lines.remove(0);
+    }
+    while desc_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        desc_lines.pop();
+    }
+    let desc = if desc_lines.is_empty() {
+        None
+    } else {
+        Some(desc_lines.join("\n"))
+    };
+
+    ParsedStepMd { title, desc, command }
 }
 
 // Тег vN на запушенный tip (git2, force).
@@ -92,7 +203,7 @@ fn strip_v_prefix(s: &str) -> String {
 /// Источник контента — list.json в корне дерева. Возвращает номер версии или None.
 pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Option<i32> {
     // git2-объекты не Send → читаем всё owned до await.
-    let (tip, raw, subject) = read_tip(bare)?;
+    let (tip, raw, subject, step_md) = read_tip(bare)?;
     let parsed: RawList = serde_json::from_slice(&raw).ok()?;
     let steps_raw = parsed.steps.as_ref()?;
 
@@ -105,7 +216,7 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
         }
     };
 
-    let steps: Vec<ProjStep> = steps_raw
+    let mut steps: Vec<ProjStep> = steps_raw
         .iter()
         .filter(|s| !s.title.as_deref().unwrap_or("").trim().is_empty())
         .map(|s| ProjStep {
@@ -132,6 +243,25 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
         })
         .collect();
 
+    // list.json — источник истины для НАБОРА/порядка шагов; steps/NN-*.md — опциональные
+    // per-step оверрайды контента. Для шага с 1-based индексом NN (совпадает с именем файла)
+    // берём title/desc/command из .md там, где они ОТЛИЧАЮТСЯ от list.json.
+    // Отсутствующий/непарсибельный .md → значения list.json (без ошибки).
+    for (i, step) in steps.iter_mut().enumerate() {
+        let nn = (i as i32) + 1;
+        let Some(content) = step_md.get(&nn) else { continue };
+        let md = parse_step_md(content);
+        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {
+            step.title = t;
+        }
+        if let Some(d) = md.desc.filter(|d| *d != step.desc) {
+            step.desc = d;
+        }
+        if let Some(c) = md.command.filter(|c| *c != step.command) {
+            step.command = c;
+        }
+    }
+
     let ver = db::add_version(pool, template_id, &note, &steps).await.ok()?;
     let _ = db::update_meta(pool, template_id, parsed.title.clone(), parsed.desc.clone(), parsed.tags.clone(), parsed.ordered).await;
     // Тег vN на запушенный коммит (для maxTagVersion/истории).
@@ -141,7 +271,8 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
 
 #[cfg(test)]
 mod tests {
-    use super::strip_v_prefix;
+    use super::{parse_step_md, strip_v_prefix, ParsedStepMd};
+    use crate::bundle::{SerStep, StepRef};
 
     #[test]
     fn strips_vn_prefix() {
@@ -151,5 +282,90 @@ mod tests {
         assert_eq!(strip_v_prefix("hello world"), "hello world");
         assert_eq!(strip_v_prefix("version 2"), "version 2"); // не vN:
         assert_eq!(strip_v_prefix("v7: "), "");
+    }
+
+    fn ser(title: &str, desc: &str, command: &str) -> SerStep {
+        SerStep {
+            n: 1,
+            title: title.into(),
+            desc: desc.into(),
+            command: command.into(),
+            level: "required".into(),
+            why: "always".into(),
+            section: "Setup".into(),
+            subtasks: vec!["sub a".into(), "sub b".into()],
+            refs: vec![StepRef { label: "docs".into(), url: Some("https://x".into()) }],
+        }
+    }
+
+    // Генерирует контент .md ровно так, как это делает version_files (bundle::step_file).
+    fn gen_md(s: &SerStep) -> String {
+        crate::bundle::version_files(&crate::bundle::VersionData {
+            version: 1,
+            note: String::new(),
+            ts: 0,
+            title: "L".into(),
+            desc: String::new(),
+            tags: vec![],
+            ordered: true,
+            steps: vec![SerStep {
+                n: s.n,
+                title: s.title.clone(),
+                desc: s.desc.clone(),
+                command: s.command.clone(),
+                level: s.level.clone(),
+                why: s.why.clone(),
+                section: s.section.clone(),
+                subtasks: s.subtasks.clone(),
+                refs: s.refs.iter().map(|r| StepRef { label: r.label.clone(), url: r.url.clone() }).collect(),
+            }],
+        })
+        .into_iter()
+        .find(|(p, _)| p.starts_with("steps/"))
+        .unwrap()
+        .1
+    }
+
+    #[test]
+    fn roundtrip_recovers_title_desc_command() {
+        // generate → parse обязан вернуть исходные title/desc/command.
+        let step = ser("Install Redis", "Grab the binary\nand run it", "brew install redis");
+        let md = gen_md(&step);
+        let p = parse_step_md(&md);
+        assert_eq!(p.title.as_deref(), Some("Install Redis"));
+        assert_eq!(p.desc.as_deref(), Some("Grab the binary\nand run it"));
+        assert_eq!(p.command.as_deref(), Some("brew install redis"));
+    }
+
+    #[test]
+    fn roundtrip_stable_without_desc_or_command() {
+        // Пустые desc/command → в файле их нет → parse отдаёт None (берём из list.json).
+        let step = ser("Just a title", "", "");
+        let md = gen_md(&step);
+        let p = parse_step_md(&md);
+        assert_eq!(p.title.as_deref(), Some("Just a title"));
+        assert_eq!(p.desc, None);
+        assert_eq!(p.command, None);
+    }
+
+    #[test]
+    fn modified_md_overrides_listjson() {
+        // Пользователь отредактировал .md: изменённые поля должны отличаться от list.json.
+        let orig = ser("Old title", "old desc", "old cmd");
+        let mut edited = orig;
+        edited.title = "New title".into();
+        edited.desc = "new desc".into();
+        edited.command = "new cmd".into();
+        let p = parse_step_md(&gen_md(&edited));
+        assert_eq!(p.title.as_deref(), Some("New title"));
+        assert_eq!(p.desc.as_deref(), Some("new desc"));
+        assert_eq!(p.command.as_deref(), Some("new cmd"));
+    }
+
+    #[test]
+    fn parse_handles_unusual_content() {
+        // Мусор/без front-matter → безопасно: title/command None, тело как desc.
+        let p = parse_step_md("no front matter here");
+        assert_eq!(p, ParsedStepMd { title: None, desc: Some("no front matter here".into()), command: None });
     }
 }
