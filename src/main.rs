@@ -112,7 +112,9 @@ impl GitCore for GitCoreSvc {
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Критическая секция: receive-pack + проекция под одним локом репо
         // (ленивый append не вклинивается между приёмом и проекцией).
-        let _guard = repo::repo_lock(id).await;
+        let _guard = repo::repo_guard(&self.pool, id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
         let bare_recv = bare.clone();
         let data = tokio::task::spawn_blocking(move || smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol)))
             .await
