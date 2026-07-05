@@ -4,6 +4,7 @@ use tonic::{transport::Server, Request, Response, Status};
 mod bundle;
 mod db;
 mod domain_read;
+mod domain_write;
 mod project;
 mod repo;
 mod smart_http;
@@ -231,7 +232,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             domain_read::ListReadSvc { pool: pool.clone() },
         ))
         .add_service(pb_domain::curation_read_server::CurationReadServer::new(
-            domain_read::CurationReadSvc { pool },
+            domain_read::CurationReadSvc { pool: pool.clone() },
+        ))
+        .add_service(pb_domain::list_write_server::ListWriteServer::new(
+            domain_write::ListWriteSvc { pool },
         ))
         .serve_with_shutdown(addr, shutdown)
         .await?;
