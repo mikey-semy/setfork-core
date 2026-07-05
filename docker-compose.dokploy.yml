@@ -13,6 +13,9 @@ services:
       GIT_DATA_DIR: /data/git
       # Auth канала Next↔ядро: тот же токен задать фронту. Пусто = канал открыт.
       SETFORK_CORE_TOKEN: ${SETFORK_CORE_TOKEN:-}
+      # Rate-limit RPC: обычные/тяжёлые методы, запросов в минуту (0 = выкл).
+      SETFORK_RPC_RPM: ${SETFORK_RPC_RPM:-600}
+      SETFORK_RPC_RPM_HEAVY: ${SETFORK_RPC_RPM_HEAVY:-60}
     volumes:
       - setfork_git:/data/git
     networks: [dokploy-network]

@@ -2,6 +2,7 @@ use sqlx::postgres::PgPool;
 use tonic::{transport::Server, Request, Response, Status};
 
 mod bundle;
+mod ratelimit;
 mod db;
 mod domain_read;
 mod domain_write;
@@ -543,6 +544,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     Server::builder()
+        .layer(ratelimit::RateLimitLayer::from_env())
         .add_service(health_service)
         .add_service(GitCoreServer::with_interceptor(GitCoreSvc { pool: pool.clone() }, check_auth))
         .add_service(pb_domain::list_read_server::ListReadServer::with_interceptor(
