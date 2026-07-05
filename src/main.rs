@@ -23,7 +23,14 @@ pub mod pb_domain {
 }
 
 use pb::git_core_server::{GitCore, GitCoreServer};
-use pb::{Branch, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, InfoRefsRequest, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
+use pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, DeleteBranchRequest, InfoRefsRequest, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
+
+// Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
+fn valid_branch(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && !name.contains("..")
+}
 
 struct GitCoreSvc {
     pool: PgPool,
@@ -186,8 +193,7 @@ impl GitCore for GitCoreSvc {
     ) -> Result<Response<BranchSnapshotResponse>, Status> {
         let BranchSnapshotRequest { repo, branch } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
-        // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
-        if branch.is_empty() || !branch.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.') || branch.contains("..") {
+        if !valid_branch(&branch) {
             return Err(Status::invalid_argument("bad branch name"));
         }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
@@ -222,6 +228,55 @@ impl GitCore for GitCoreSvc {
                 })
                 .collect(),
         }))
+    }
+
+    async fn create_branch(&self, req: Request<CreateBranchRequest>) -> Result<Response<BranchOpResponse>, Status> {
+        let CreateBranchRequest { repo, name, from } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        let from = if from.is_empty() { "main".to_string() } else { from };
+        if !valid_branch(&name) || !valid_branch(&from) {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let tip = tokio::task::spawn_blocking(move || -> Result<String, Status> {
+            let repo = git2::Repository::open_bare(&bare).map_err(|e| Status::internal(e.to_string()))?;
+            let base = repo
+                .refname_to_id(&format!("refs/heads/{from}"))
+                .map_err(|_| Status::not_found("base branch not found"))?;
+            let commit = repo.find_commit(base).map_err(|e| Status::internal(e.to_string()))?;
+            // force=false: существующая ветка → ошибка (already_exists наружу).
+            // .map(|_| ()) сразу дропает Branch<'_> (заимствует repo).
+            match repo.branch(&name, &commit, false).map(|_| ()) {
+                Ok(()) => Ok(base.to_string()),
+                Err(e) if e.code() == git2::ErrorCode::Exists => Err(Status::already_exists("branch exists")),
+                Err(e) => Err(Status::internal(e.to_string())),
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))??;
+        Ok(Response::new(BranchOpResponse { tip_sha: tip }))
+    }
+
+    async fn delete_branch(&self, req: Request<DeleteBranchRequest>) -> Result<Response<BranchOpResponse>, Status> {
+        let DeleteBranchRequest { repo, name } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&name) {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        if name == "main" {
+            return Err(Status::failed_precondition("main is protected"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        tokio::task::spawn_blocking(move || -> Result<(), Status> {
+            let repo = git2::Repository::open_bare(&bare).map_err(|e| Status::internal(e.to_string()))?;
+            let mut branch = repo
+                .find_branch(&name, git2::BranchType::Local)
+                .map_err(|_| Status::not_found("branch not found"))?;
+            branch.delete().map_err(|e| Status::internal(e.to_string()))
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))??;
+        Ok(Response::new(BranchOpResponse { tip_sha: String::new() }))
     }
 }
 
