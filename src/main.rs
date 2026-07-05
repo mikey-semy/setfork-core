@@ -23,7 +23,7 @@ pub mod pb_domain {
 }
 
 use pb::git_core_server::{GitCore, GitCoreServer};
-use pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest, MergeBranchResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
+use pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
 fn valid_branch(name: &str) -> bool {
@@ -83,6 +83,34 @@ fn opt<'a>(s: &'a str) -> Option<&'a str> {
         None
     } else {
         Some(s)
+    }
+}
+
+// BranchSnapshotData -> pb-снапшот (переиспользуется snapshot-RPC и merge-state).
+fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
+    BranchSnapshotResponse {
+        found: true,
+        tip_sha: sn.tip,
+        title: sn.title,
+        desc: sn.desc,
+        tags: sn.tags,
+        ordered: sn.ordered,
+        steps: sn
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(i, st)| SnapshotStep {
+                n: (i as i32) + 1,
+                title: st.title.clone(),
+                desc: st.desc.clone(),
+                command: st.command.clone(),
+                level: st.level.clone(),
+                why: st.why.clone(),
+                section: st.section.clone(),
+                subtasks: st.subtasks.clone(),
+                refs: st.refs.iter().map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() }).collect(),
+            })
+            .collect(),
     }
 }
 
@@ -204,30 +232,7 @@ impl GitCore for GitCoreSvc {
         let Some(sn) = snap else {
             return Ok(Response::new(BranchSnapshotResponse { found: false, ..Default::default() }));
         };
-        Ok(Response::new(BranchSnapshotResponse {
-            found: true,
-            tip_sha: sn.tip,
-            title: sn.title,
-            desc: sn.desc,
-            tags: sn.tags,
-            ordered: sn.ordered,
-            steps: sn
-                .steps
-                .iter()
-                .enumerate()
-                .map(|(i, st)| SnapshotStep {
-                    n: (i as i32) + 1,
-                    title: st.title.clone(),
-                    desc: st.desc.clone(),
-                    command: st.command.clone(),
-                    level: st.level.clone(),
-                    why: st.why.clone(),
-                    section: st.section.clone(),
-                    subtasks: st.subtasks.clone(),
-                    refs: st.refs.iter().map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() }).collect(),
-                })
-                .collect(),
-        }))
+        Ok(Response::new(to_snapshot_pb(sn)))
     }
 
     async fn create_branch(&self, req: Request<CreateBranchRequest>) -> Result<Response<BranchOpResponse>, Status> {
@@ -334,6 +339,98 @@ impl GitCore for GitCoreSvc {
         // main сдвинулся → проекция новой версии (0 = list.json не изменился).
         let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: ff }))
+    }
+
+    async fn get_merge_state(&self, req: Request<MergeStateRequest>) -> Result<Response<MergeStateResponse>, Status> {
+        let MergeStateRequest { repo, branch } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&branch) || branch == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let state = tokio::task::spawn_blocking(move || -> Result<Option<(String, project::BranchSnapshotData, project::BranchSnapshotData, project::BranchSnapshotData)>, String> {
+            let repo = git2::Repository::open_bare(&bare).map_err(|e| e.to_string())?;
+            let Ok(branch_tip) = repo.refname_to_id(&format!("refs/heads/{branch}")) else {
+                return Ok(None);
+            };
+            let main_tip = repo.refname_to_id("refs/heads/main").map_err(|e| e.to_string())?;
+            let Ok(base_oid) = repo.merge_base(main_tip, branch_tip) else {
+                return Ok(None);
+            };
+            drop(repo); // commit_snapshot открывает репо сам
+            let base = project::commit_snapshot(&bare, &base_oid.to_string());
+            let ours = project::branch_snapshot(&bare, "refs/heads/main");
+            let theirs = project::branch_snapshot(&bare, &format!("refs/heads/{branch}"));
+            match (base, ours, theirs) {
+                (Some(b), Some(o), Some(t)) => Ok(Some((base_oid.to_string(), b, o, t))),
+                _ => Ok(None),
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(Status::internal)?;
+        let Some((base_sha, b, o, t)) = state else {
+            return Ok(Response::new(MergeStateResponse { found: false, ..Default::default() }));
+        };
+        Ok(Response::new(MergeStateResponse {
+            found: true,
+            merge_base_sha: base_sha,
+            base: Some(to_snapshot_pb(b)),
+            ours: Some(to_snapshot_pb(o)),
+            theirs: Some(to_snapshot_pb(t)),
+        }))
+    }
+
+    async fn merge_resolved(&self, req: Request<MergeResolvedRequest>) -> Result<Response<MergeBranchResponse>, Status> {
+        let MergeResolvedRequest { repo, branch, list_json } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&branch) || branch == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        // Контент обязан быть валидным JSON-объектом (list.json — канон).
+        if serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&list_json).is_err() {
+            return Err(Status::invalid_argument("list_json is not a JSON object"));
+        }
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let _guard = repo::repo_guard(&self.pool, id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let bare_merge = bare.clone();
+        let tip = tokio::task::spawn_blocking(move || -> Result<String, Status> {
+            let repo = git2::Repository::open_bare(&bare_merge).map_err(|e| Status::internal(e.to_string()))?;
+            let branch_tip = repo
+                .refname_to_id(&format!("refs/heads/{branch}"))
+                .map_err(|_| Status::not_found("branch not found"))?;
+            let main_tip = repo
+                .refname_to_id("refs/heads/main")
+                .map_err(|e| Status::internal(e.to_string()))?;
+            if main_tip == branch_tip {
+                return Err(Status::failed_precondition("nothing-to-merge"));
+            }
+            // Дерево = дерево main c заменённым list.json и БЕЗ steps/ (см. proto).
+            let ours = repo.find_commit(main_tip).map_err(|e| Status::internal(e.to_string()))?;
+            let theirs = repo.find_commit(branch_tip).map_err(|e| Status::internal(e.to_string()))?;
+            let blob = repo.blob(&list_json).map_err(|e| Status::internal(e.to_string()))?;
+            let mut tb = repo
+                .treebuilder(Some(&ours.tree().map_err(|e| Status::internal(e.to_string()))?))
+                .map_err(|e| Status::internal(e.to_string()))?;
+            tb.insert("list.json", blob, 0o100644).map_err(|e| Status::internal(e.to_string()))?;
+            if tb.get("steps").map_err(|e| Status::internal(e.to_string()))?.is_some() {
+                tb.remove("steps").map_err(|e| Status::internal(e.to_string()))?;
+            }
+            let tree_id = tb.write().map_err(|e| Status::internal(e.to_string()))?;
+            let tree = repo.find_tree(tree_id).map_err(|e| Status::internal(e.to_string()))?;
+            let sig = git2::Signature::now("SetFork", "git@setfork.com").map_err(|e| Status::internal(e.to_string()))?;
+            let msg = format!("Merge branch '{branch}' (resolved)");
+            let merged = repo
+                .commit(Some("refs/heads/main"), &sig, &sig, &msg, &tree, &[&ours, &theirs])
+                .map_err(|e| Status::internal(e.to_string()))?;
+            Ok(merged.to_string())
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))??;
+        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: false }))
     }
 }
 
