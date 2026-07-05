@@ -325,10 +325,12 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
     }
 }
 
-// pre-receive hook (порт store.ts PRE_RECEIVE): каждый пушнутый коммит обязан нести list.json.
-const PRE_RECEIVE: &str = "#!/bin/sh\n# SetFork: каждый пушнутый коммит обязан содержать list.json в корне.\nwhile read old new ref; do\n  case \"$new\" in *0000000000000000000000000000000000000000) continue ;; esac\n  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then\n    echo \"SetFork: list.json is required at the repo root\" >&2\n    exit 1\n  fi\ndone\nexit 0\n";
+// pre-receive hook (порт store.ts PRE_RECEIVE): main защищён от удаления и
+// non-fast-forward (канон версий; черновики force-push'абельны), плюс каждый
+// пушнутый коммит обязан нести list.json в корне.
+const PRE_RECEIVE: &str = "#!/bin/sh\nzero=0000000000000000000000000000000000000000\nwhile read old new ref; do\n  if [ \"$ref\" = \"refs/heads/main\" ]; then\n    if [ \"$new\" = \"$zero\" ]; then\n      echo \"SetFork: ветка main защищена от удаления\" >&2\n      exit 1\n    fi\n    if [ \"$old\" != \"$zero\" ] && ! git merge-base --is-ancestor \"$old\" \"$new\"; then\n      echo \"SetFork: non-fast-forward push в main запрещён (перезапись истории)\" >&2\n      exit 1\n    fi\n  fi\n  case \"$new\" in *$zero) continue ;; esac\n  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then\n    echo \"SetFork: list.json is required at the repo root\" >&2\n    exit 1\n  fi\ndone\nexit 0\n";
 
-fn install_hook(bare: &Path) -> io::Result<()> {
+pub fn install_hook(bare: &Path) -> io::Result<()> {
     let hooks = bare.join("hooks");
     fs::create_dir_all(&hooks)?;
     fs::write(hooks.join("pre-receive"), PRE_RECEIVE)?;

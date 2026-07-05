@@ -85,7 +85,13 @@ pub async fn ensure_repo(pool: &PgPool, owner: &str, slug: &str) -> Result<Optio
         return Ok(Some((bare, id)));
     }
 
-    // репо есть → дописать недостающие веб-версии (сохраняя запушенные коммиты)
+    // репо есть → освежаем pre-receive hook (идемпотентно; так обновления правил
+    // докатываются и до уже существующих на диске репо), затем дописываем версии.
+    let bare_hook = bare.clone();
+    tokio::task::spawn_blocking(move || bundle::install_hook(&bare_hook))
+        .await
+        .map_err(join_err)?
+        .map_err(join_err)?;
     let bare_tag = bare.clone();
     let have = tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag))
         .await
