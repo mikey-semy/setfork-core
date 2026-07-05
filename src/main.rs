@@ -228,7 +228,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(health_service)
         .add_service(GitCoreServer::new(GitCoreSvc { pool: pool.clone() }))
         .add_service(pb_domain::list_read_server::ListReadServer::new(
-            domain_read::ListReadSvc { pool },
+            domain_read::ListReadSvc { pool: pool.clone() },
+        ))
+        .add_service(pb_domain::curation_read_server::CurationReadServer::new(
+            domain_read::CurationReadSvc { pool },
         ))
         .serve_with_shutdown(addr, shutdown)
         .await?;

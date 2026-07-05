@@ -352,3 +352,61 @@ impl ListRead for ListReadSvc {
         Ok(Response::new(ContributorsResponse { contributors: out }))
     }
 }
+
+// ── CurationRead: READ-часть порта CurationStore (простые exists/count) ──
+use crate::pb_domain::curation_read_server::CurationRead;
+use crate::pb_domain::{BoolResponse, CountResponse, IdsResponse, UserList};
+
+pub struct CurationReadSvc {
+    pub pool: PgPool,
+}
+
+#[tonic::async_trait]
+impl CurationRead for CurationReadSvc {
+    async fn is_starred(&self, req: Request<UserList>) -> Result<Response<BoolResponse>, Status> {
+        let UserList { list_id, user_id } = req.into_inner();
+        let (tid, uid) = (parse_id(&list_id)?, parse_id(&user_id)?);
+        let row: Option<(i32,)> =
+            sqlx::query_as("select 1 from stars where template_id = $1 and user_id = $2 limit 1")
+                .bind(tid)
+                .bind(uid)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(internal)?;
+        Ok(Response::new(BoolResponse { value: row.is_some() }))
+    }
+
+    async fn is_watching(&self, req: Request<UserList>) -> Result<Response<BoolResponse>, Status> {
+        let UserList { list_id, user_id } = req.into_inner();
+        let (tid, uid) = (parse_id(&list_id)?, parse_id(&user_id)?);
+        let row: Option<(i32,)> =
+            sqlx::query_as("select 1 from watches where template_id = $1 and user_id = $2 limit 1")
+                .bind(tid)
+                .bind(uid)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(internal)?;
+        Ok(Response::new(BoolResponse { value: row.is_some() }))
+    }
+
+    async fn watch_count(&self, req: Request<ListId>) -> Result<Response<CountResponse>, Status> {
+        let tid = parse_id(&req.into_inner().id)?;
+        let (n,): (i64,) = sqlx::query_as("select count(*) from watches where template_id = $1")
+            .bind(tid)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(Response::new(CountResponse { value: n as i32 }))
+    }
+
+    async fn watcher_ids(&self, req: Request<ListId>) -> Result<Response<IdsResponse>, Status> {
+        let tid = parse_id(&req.into_inner().id)?;
+        let rows: Vec<(Uuid,)> =
+            sqlx::query_as("select user_id from watches where template_id = $1 order by created_at asc")
+                .bind(tid)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(internal)?;
+        Ok(Response::new(IdsResponse { ids: rows.iter().map(|r| r.0.to_string()).collect() }))
+    }
+}
