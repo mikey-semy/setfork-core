@@ -58,14 +58,19 @@ fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String, HashMap<i32, String
 pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
     let repo = git2::Repository::open_bare(bare).ok()?;
     let tip = repo.refname_to_id(refname).ok()?;
-    let commit = repo.find_commit(tip).ok()?;
+    read_commit_data(&repo, tip)
+}
+
+// Общее чтение материализации из конкретного коммита (ref-tip или merge-base).
+fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
+    let commit = repo.find_commit(oid).ok()?;
     let tree = commit.tree().ok()?;
     let entry = tree.get_path(Path::new("list.json")).ok()?;
-    let blob = entry.to_object(&repo).ok()?;
+    let blob = entry.to_object(repo).ok()?;
     let raw = blob.as_blob()?.content().to_vec();
     let subject = commit.summary().unwrap_or("").to_string();
-    let steps = read_step_files(&repo, &tree);
-    Some((tip.to_string(), raw, subject, steps))
+    let steps = read_step_files(repo, &tree);
+    Some((oid.to_string(), raw, subject, steps))
 }
 
 // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.
@@ -269,8 +274,20 @@ pub struct BranchSnapshotData {
 
 pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {
     let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;
-    let parsed: RawList = serde_json::from_slice(&raw).ok()?;
-    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), &step_md);
+    snapshot_from_data(tip, &raw, &step_md)
+}
+
+/// Материализация произвольного коммита (merge-base для трёхстороннего merge).
+pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {
+    let repo = git2::Repository::open_bare(bare).ok()?;
+    let oid = git2::Oid::from_str(sha).ok()?;
+    let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;
+    snapshot_from_data(tip, &raw, &step_md)
+}
+
+fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -> Option<BranchSnapshotData> {
+    let parsed: RawList = serde_json::from_slice(raw).ok()?;
+    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), step_md);
     Some(BranchSnapshotData {
         tip,
         title: parsed.title.unwrap_or_default(),
