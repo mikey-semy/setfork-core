@@ -410,3 +410,69 @@ impl CurationRead for CurationReadSvc {
         Ok(Response::new(IdsResponse { ids: rows.iter().map(|r| r.0.to_string()).collect() }))
     }
 }
+
+// ── CurationWrite: WRITE-часть порта (звёзды/watch) ──────────────────────
+// Зеркалит src/features/curation/adapter.ts: toggle возвращает НОВОЕ состояние;
+// звезда двигает templates.stars_count под одной транзакцией.
+use crate::pb_domain::curation_write_server::CurationWrite;
+
+pub struct CurationWriteSvc {
+    pub pool: PgPool,
+}
+
+#[tonic::async_trait]
+impl CurationWrite for CurationWriteSvc {
+    async fn toggle_star(&self, req: Request<UserList>) -> Result<Response<BoolResponse>, Status> {
+        let UserList { list_id, user_id } = req.into_inner();
+        let (tid, uid) = (parse_id(&list_id)?, parse_id(&user_id)?);
+        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let existed: Option<(i32,)> = sqlx::query_as("select 1 from stars where user_id = $1 and template_id = $2 limit 1")
+            .bind(uid)
+            .bind(tid)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(internal)?;
+        let now_starred = if existed.is_some() {
+            sqlx::query("delete from stars where user_id = $1 and template_id = $2").bind(uid).bind(tid).execute(&mut *tx).await.map_err(internal)?;
+            sqlx::query("update templates set stars_count = GREATEST(stars_count - 1, 0) where id = $1").bind(tid).execute(&mut *tx).await.map_err(internal)?;
+            false
+        } else {
+            sqlx::query("insert into stars (user_id, template_id) values ($1, $2) on conflict do nothing").bind(uid).bind(tid).execute(&mut *tx).await.map_err(internal)?;
+            sqlx::query("update templates set stars_count = stars_count + 1 where id = $1").bind(tid).execute(&mut *tx).await.map_err(internal)?;
+            true
+        };
+        tx.commit().await.map_err(internal)?;
+        Ok(Response::new(BoolResponse { value: now_starred }))
+    }
+
+    async fn toggle_watch(&self, req: Request<UserList>) -> Result<Response<BoolResponse>, Status> {
+        let UserList { list_id, user_id } = req.into_inner();
+        let (tid, uid) = (parse_id(&list_id)?, parse_id(&user_id)?);
+        let existed: Option<(i32,)> = sqlx::query_as("select 1 from watches where user_id = $1 and template_id = $2 limit 1")
+            .bind(uid)
+            .bind(tid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(internal)?;
+        let now_watching = if existed.is_some() {
+            sqlx::query("delete from watches where user_id = $1 and template_id = $2").bind(uid).bind(tid).execute(&self.pool).await.map_err(internal)?;
+            false
+        } else {
+            sqlx::query("insert into watches (user_id, template_id) values ($1, $2) on conflict do nothing").bind(uid).bind(tid).execute(&self.pool).await.map_err(internal)?;
+            true
+        };
+        Ok(Response::new(BoolResponse { value: now_watching }))
+    }
+
+    async fn ensure_watch(&self, req: Request<UserList>) -> Result<Response<BoolResponse>, Status> {
+        let UserList { list_id, user_id } = req.into_inner();
+        let (tid, uid) = (parse_id(&list_id)?, parse_id(&user_id)?);
+        sqlx::query("insert into watches (user_id, template_id) values ($1, $2) on conflict do nothing")
+            .bind(uid)
+            .bind(tid)
+            .execute(&self.pool)
+            .await
+            .map_err(internal)?;
+        Ok(Response::new(BoolResponse { value: true }))
+    }
+}
