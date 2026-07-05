@@ -25,6 +25,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-sethub}:${POSTGRES_PASSWORD:-sethub}@db:5432/${POSTGRES_DB:-sethub}
       SETFORK_CORE_ADDR: 0.0.0.0:50051
       GIT_DATA_DIR: /data/git
+      SETFORK_CORE_TOKEN: ${SETFORK_CORE_TOKEN:-}
     ports:
       - '${CORE_PORT:-50051}:50051'
     volumes:
