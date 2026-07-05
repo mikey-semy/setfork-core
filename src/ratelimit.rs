@@ -40,6 +40,10 @@ pub struct RateLimitLayer {
 struct State {
     rpm: u32,
     rpm_heavy: u32,
+    // Ожидаемый `Bearer <token>` (если канал закрыт). Неавторизованные запросы
+    // НЕ расходуют окно — иначе кто угодно с доступом к порту исчерпает бюджет
+    // метода и положит обслуживание (DoS-амплификация до интерцептора auth).
+    expected_auth: Option<String>,
     windows: Mutex<HashMap<String, VecDeque<Instant>>>,
 }
 
@@ -47,9 +51,13 @@ impl RateLimitLayer {
     pub fn from_env() -> Self {
         let rpm = env_limit("SETFORK_RPC_RPM", 600);
         let rpm_heavy = env_limit("SETFORK_RPC_RPM_HEAVY", 60);
+        let expected_auth = std::env::var("SETFORK_CORE_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
+            .map(|t| format!("Bearer {t}"));
         println!("setfork-core: rate-limit {rpm}/мин (тяжёлые {rpm_heavy}/мин; 0 = выкл)");
         Self {
-            inner: Arc::new(State { rpm, rpm_heavy, windows: Mutex::new(HashMap::new()) }),
+            inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }),
         }
     }
 }
@@ -69,10 +77,18 @@ pub struct RateLimited<S> {
 
 impl<S> RateLimited<S> {
     /// true = запрос пропускаем. Путь вида /setfork.git.v1.GitCore/ReceivePack.
-    fn allow(&self, path: &str) -> bool {
+    fn allow(&self, path: &str, auth: Option<&str>) -> bool {
         // health и рефлексия — без лимита (docker/k8s-пробы).
         if path.starts_with("/grpc.health") {
             return true;
+        }
+        // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже
+        // всё равно вернёт unauthenticated. Так лимит защищает только реальный
+        // (авторизованный) трафик, а не служит вектором DoS.
+        if let Some(expected) = &self.state.expected_auth {
+            if auth != Some(expected.as_str()) {
+                return true;
+            }
         }
         let method = path.rsplit('/').next().unwrap_or(path);
         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };
@@ -110,7 +126,8 @@ where
     }
 
     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {
-        if self.allow(req.uri().path()) {
+        let auth = req.headers().get("authorization").and_then(|v| v.to_str().ok()).map(str::to_owned);
+        if self.allow(req.uri().path(), auth.as_deref()) {
             futures_util::future::Either::Left(self.inner.call(req))
         } else {
             // gRPC-отказ без вызова inner: RESOURCE_EXHAUSTED в trailers-only ответе.
