@@ -3,6 +3,7 @@ use tonic::{transport::Server, Request, Response, Status};
 
 mod bundle;
 mod db;
+mod domain_read;
 mod project;
 mod repo;
 mod smart_http;
@@ -15,6 +16,9 @@ use uuid::Uuid;
 
 pub mod pb {
     tonic::include_proto!("setfork.git.v1");
+}
+pub mod pb_domain {
+    tonic::include_proto!("setfork.domain.v1");
 }
 
 use pb::git_core_server::{GitCore, GitCoreServer};
@@ -174,6 +178,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("wrote {} bytes → {}", data.len(), cli(4));
                 return Ok(());
             }
+            // Golden-сверка READ-портов: канонический JSON (см. domain_read::golden_json)
+            //   domain-read <owner> <slug> <out.json>
+            "domain-read" => {
+                let v = domain_read::golden_json(&pool, &cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
+                std::fs::write(cli(4), serde_json::to_string_pretty(&v)?)?;
+                println!("wrote domain-read json → {}", cli(4));
+                return Ok(());
+            }
             "upload-pack" => {
                 let versions = svc.load(&cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
                 let body = std::fs::read(cli(4))?;
@@ -214,7 +226,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("setfork-core git-core listening on {addr}");
     Server::builder()
         .add_service(health_service)
-        .add_service(GitCoreServer::new(GitCoreSvc { pool }))
+        .add_service(GitCoreServer::new(GitCoreSvc { pool: pool.clone() }))
+        .add_service(pb_domain::list_read_server::ListReadServer::new(
+            domain_read::ListReadSvc { pool },
+        ))
         .serve_with_shutdown(addr, shutdown)
         .await?;
     println!("setfork-core: остановлен чисто");
