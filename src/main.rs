@@ -23,7 +23,7 @@ pub mod pb_domain {
 }
 
 use pb::git_core_server::{GitCore, GitCoreServer};
-use pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, DeleteBranchRequest, InfoRefsRequest, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
+use pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest, MergeBranchResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
 fn valid_branch(name: &str) -> bool {
@@ -277,6 +277,63 @@ impl GitCore for GitCoreSvc {
         .await
         .map_err(|e| Status::internal(e.to_string()))??;
         Ok(Response::new(BranchOpResponse { tip_sha: String::new() }))
+    }
+
+    async fn merge_branch(&self, req: Request<MergeBranchRequest>) -> Result<Response<MergeBranchResponse>, Status> {
+        let MergeBranchRequest { repo, name } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&name) || name == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Merge двигает main → критическая секция с проекцией (как receive_pack).
+        let _guard = repo::repo_guard(&self.pool, id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let bare_merge = bare.clone();
+        let (tip, ff) = tokio::task::spawn_blocking(move || -> Result<(String, bool), Status> {
+            let repo = git2::Repository::open_bare(&bare_merge).map_err(|e| Status::internal(e.to_string()))?;
+            let branch_tip = repo
+                .refname_to_id(&format!("refs/heads/{name}"))
+                .map_err(|_| Status::not_found("branch not found"))?;
+            let main_tip = repo
+                .refname_to_id("refs/heads/main")
+                .map_err(|e| Status::internal(e.to_string()))?;
+            let (ahead, _behind) = repo
+                .graph_ahead_behind(branch_tip, main_tip)
+                .map_err(|e| Status::internal(e.to_string()))?;
+            if ahead == 0 {
+                return Err(Status::failed_precondition("nothing-to-merge"));
+            }
+            // main — предок ветки → fast-forward: просто двигаем ref.
+            if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) {
+                repo.reference("refs/heads/main", branch_tip, true, &format!("merge {name}: fast-forward"))
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                return Ok((branch_tip.to_string(), true));
+            }
+            // Расхождение → merge-commit; конфликт индекса = failed_precondition.
+            let ours = repo.find_commit(main_tip).map_err(|e| Status::internal(e.to_string()))?;
+            let theirs = repo.find_commit(branch_tip).map_err(|e| Status::internal(e.to_string()))?;
+            let mut idx = repo
+                .merge_commits(&ours, &theirs, None)
+                .map_err(|e| Status::internal(e.to_string()))?;
+            if idx.has_conflicts() {
+                return Err(Status::failed_precondition("conflict"));
+            }
+            let tree_id = idx.write_tree_to(&repo).map_err(|e| Status::internal(e.to_string()))?;
+            let tree = repo.find_tree(tree_id).map_err(|e| Status::internal(e.to_string()))?;
+            let sig = git2::Signature::now("SetFork", "git@setfork.com").map_err(|e| Status::internal(e.to_string()))?;
+            let msg = format!("Merge branch '{name}'");
+            let merged = repo
+                .commit(Some("refs/heads/main"), &sig, &sig, &msg, &tree, &[&ours, &theirs])
+                .map_err(|e| Status::internal(e.to_string()))?;
+            Ok((merged.to_string(), false))
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))??;
+        // main сдвинулся → проекция новой версии (0 = list.json не изменился).
+        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: ff }))
     }
 }
 
