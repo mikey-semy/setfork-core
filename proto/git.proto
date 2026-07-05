@@ -36,4 +36,51 @@ service GitCore {
   rpc UploadPack(PostRequest) returns (BytesResponse);
   rpc ReceivePack(PostRequest) returns (ReceivePackResponse);
   rpc CreateBundle(RepoRef) returns (BytesResponse);
+  // Ветки (фаза A: read-only срез). main — канон, прочие — черновики без проекции.
+  rpc ListBranches(RepoRef) returns (BranchesResponse);
+  rpc GetBranchSnapshot(BranchSnapshotRequest) returns (BranchSnapshotResponse);
+}
+
+message Branch {
+  string name = 1;      // без префикса refs/heads/
+  string tip_sha = 2;
+  bool is_default = 3;  // main
+  int32 ahead = 4;      // коммитов впереди main
+  int32 behind = 5;     // коммитов позади main
+}
+
+message BranchesResponse {
+  repeated Branch branches = 1; // main первым, остальные по имени
+}
+
+message BranchSnapshotRequest {
+  RepoRef repo = 1;
+  string branch = 2; // имя ветки (без refs/heads/)
+}
+
+message SnapshotStep {
+  int32 n = 1;
+  string title = 2;
+  string desc = 3;
+  string command = 4;
+  string level = 5;
+  string why = 6;
+  string section = 7;
+  repeated string subtasks = 8;
+  repeated SnapshotRef refs = 9;
+}
+
+message SnapshotRef {
+  string label = 1;
+  string url = 2; // '' = нет
+}
+
+message BranchSnapshotResponse {
+  bool found = 1;
+  string tip_sha = 2;
+  string title = 3;
+  string desc = 4;
+  repeated string tags = 5;
+  bool ordered = 6;
+  repeated SnapshotStep steps = 7;
 }

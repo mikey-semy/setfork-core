@@ -51,8 +51,13 @@ struct RawList {
 // Все git2-объекты — не Send, поэтому извлекаем owned-данные ДО любого await.
 // steps: map "NN" (базовое имя без slug/расширения → 1-based индекс) → содержимое .md.
 fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
+    read_ref_tip(bare, "refs/heads/main")
+}
+
+// То же для произвольного ref (ветки) — база просмотра списка «на ветке».
+pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
     let repo = git2::Repository::open_bare(bare).ok()?;
-    let tip = repo.refname_to_id("refs/heads/main").ok()?;
+    let tip = repo.refname_to_id(refname).ok()?;
     let commit = repo.find_commit(tip).ok()?;
     let tree = commit.tree().ok()?;
     let entry = tree.get_path(Path::new("list.json")).ok()?;
@@ -201,21 +206,8 @@ fn strip_v_prefix(s: &str) -> String {
 
 /// Проецирует запушенный tip main → новая версия списка (порт project.ts projectPushedCommit).
 /// Источник контента — list.json в корне дерева. Возвращает номер версии или None.
-pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Option<i32> {
-    // git2-объекты не Send → читаем всё owned до await.
-    let (tip, raw, subject, step_md) = read_tip(bare)?;
-    let parsed: RawList = serde_json::from_slice(&raw).ok()?;
-    let steps_raw = parsed.steps.as_ref()?;
-
-    let note: String = {
-        let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();
-        if stripped.trim().is_empty() {
-            "pushed via git".to_string()
-        } else {
-            stripped
-        }
-    };
-
+// Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).
+fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {
     let mut steps: Vec<ProjStep> = steps_raw
         .iter()
         .filter(|s| !s.title.as_deref().unwrap_or("").trim().is_empty())
@@ -261,6 +253,50 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
             step.command = c;
         }
     }
+
+    steps
+}
+
+/// Снапшот произвольного ref (ветки): мета list.json + шаги. Для read-only рендера.
+pub struct BranchSnapshotData {
+    pub tip: String,
+    pub title: String,
+    pub desc: String,
+    pub tags: Vec<String>,
+    pub ordered: bool,
+    pub steps: Vec<ProjStep>,
+}
+
+pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {
+    let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;
+    let parsed: RawList = serde_json::from_slice(&raw).ok()?;
+    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), &step_md);
+    Some(BranchSnapshotData {
+        tip,
+        title: parsed.title.unwrap_or_default(),
+        desc: parsed.desc.unwrap_or_default(),
+        tags: parsed.tags.unwrap_or_default(),
+        ordered: parsed.ordered.unwrap_or(true),
+        steps,
+    })
+}
+
+pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Option<i32> {
+    // git2-объекты не Send → читаем всё owned до await.
+    let (tip, raw, subject, step_md) = read_tip(bare)?;
+    let parsed: RawList = serde_json::from_slice(&raw).ok()?;
+    let steps_raw = parsed.steps.as_ref()?;
+
+    let note: String = {
+        let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();
+        if stripped.trim().is_empty() {
+            "pushed via git".to_string()
+        } else {
+            stripped
+        }
+    };
+
+    let steps = parse_steps(steps_raw, &step_md);
 
     let ver = db::add_version(pool, template_id, &note, &steps).await.ok()?;
     let _ = db::update_meta(pool, template_id, parsed.title.clone(), parsed.desc.clone(), parsed.tags.clone(), parsed.ordered).await;

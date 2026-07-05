@@ -23,7 +23,7 @@ pub mod pb_domain {
 }
 
 use pb::git_core_server::{GitCore, GitCoreServer};
-use pb::{BytesResponse, InfoRefsRequest, PostRequest, ReceivePackResponse, RepoRef};
+use pb::{Branch, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, InfoRefsRequest, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
 
 struct GitCoreSvc {
     pool: PgPool,
@@ -138,7 +138,93 @@ impl GitCore for GitCoreSvc {
             .ok_or_else(|| Status::not_found("list not found"))?;
         Ok(Response::new(BytesResponse { data }))
     }
+
+    async fn list_branches(&self, req: Request<RepoRef>) -> Result<Response<BranchesResponse>, Status> {
+        let RepoRef { owner, slug } = req.into_inner();
+        let (bare, _id) = self.ensure(&owner, &slug).await?;
+        // git2-объекты не Send → всё в spawn_blocking, наружу только owned-данные.
+        let branches = tokio::task::spawn_blocking(move || -> Result<Vec<Branch>, String> {
+            let repo = git2::Repository::open_bare(&bare).map_err(|e| e.to_string())?;
+            let main_tip = repo.refname_to_id("refs/heads/main").map_err(|e| e.to_string())?;
+            let mut out: Vec<Branch> = Vec::new();
+            for b in repo.branches(Some(git2::BranchType::Local)).map_err(|e| e.to_string())? {
+                let (branch, _) = b.map_err(|e| e.to_string())?;
+                let name = branch.name().ok().flatten().unwrap_or("").to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let tip = match branch.get().target() {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let (ahead, behind) = if name == "main" {
+                    (0, 0)
+                } else {
+                    repo.graph_ahead_behind(tip, main_tip).unwrap_or((0, 0))
+                };
+                out.push(Branch {
+                    name: name.clone(),
+                    tip_sha: tip.to_string(),
+                    is_default: name == "main",
+                    ahead: ahead as i32,
+                    behind: behind as i32,
+                });
+            }
+            // main первым, остальные по имени.
+            out.sort_by(|a, b| b.is_default.cmp(&a.is_default).then(a.name.cmp(&b.name)));
+            Ok(out)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(Status::internal)?;
+        Ok(Response::new(BranchesResponse { branches }))
+    }
+
+    async fn get_branch_snapshot(
+        &self,
+        req: Request<BranchSnapshotRequest>,
+    ) -> Result<Response<BranchSnapshotResponse>, Status> {
+        let BranchSnapshotRequest { repo, branch } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
+        if branch.is_empty() || !branch.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.') || branch.contains("..") {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let refname = format!("refs/heads/{branch}");
+        let snap = tokio::task::spawn_blocking(move || project::branch_snapshot(&bare, &refname))
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let Some(sn) = snap else {
+            return Ok(Response::new(BranchSnapshotResponse { found: false, ..Default::default() }));
+        };
+        Ok(Response::new(BranchSnapshotResponse {
+            found: true,
+            tip_sha: sn.tip,
+            title: sn.title,
+            desc: sn.desc,
+            tags: sn.tags,
+            ordered: sn.ordered,
+            steps: sn
+                .steps
+                .iter()
+                .enumerate()
+                .map(|(i, st)| SnapshotStep {
+                    n: (i as i32) + 1,
+                    title: st.title.clone(),
+                    desc: st.desc.clone(),
+                    command: st.command.clone(),
+                    level: st.level.clone(),
+                    why: st.why.clone(),
+                    section: st.section.clone(),
+                    subtasks: st.subtasks.clone(),
+                    refs: st.refs.iter().map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() }).collect(),
+                })
+                .collect(),
+        }))
+    }
 }
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
