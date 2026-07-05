@@ -555,6 +555,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             domain_read::CurationReadSvc { pool: pool.clone() },
             check_auth,
         ))
+        .add_service(pb_domain::curation_write_server::CurationWriteServer::with_interceptor(
+            domain_read::CurationWriteSvc { pool: pool.clone() },
+            check_auth,
+        ))
         .add_service(pb_domain::list_write_server::ListWriteServer::with_interceptor(
             domain_write::ListWriteSvc { pool },
             check_auth,
