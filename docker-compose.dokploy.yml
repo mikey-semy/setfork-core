@@ -11,6 +11,8 @@ services:
     environment:
       SETFORK_CORE_ADDR: 0.0.0.0:50051
       GIT_DATA_DIR: /data/git
+      # Auth канала Next↔ядро: тот же токен задать фронту. Пусто = канал открыт.
+      SETFORK_CORE_TOKEN: ${SETFORK_CORE_TOKEN:-}
     volumes:
       - setfork_git:/data/git
     networks: [dokploy-network]

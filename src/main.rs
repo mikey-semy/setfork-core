@@ -520,17 +520,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("setfork-core git-core listening on {addr}");
+    // Auth канала Next↔ядро: общий Bearer-токен (SETFORK_CORE_TOKEN).
+    // Токен не задан → канал открыт (локальный dev). Health остаётся без
+    // авторизации — docker/k8s-пробам токен не раздаём.
+    let token: Option<&'static str> = std::env::var("SETFORK_CORE_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
+        .map(|t| &*Box::leak(format!("Bearer {t}").into_boxed_str()));
+    if token.is_some() {
+        println!("setfork-core: канал защищён Bearer-токеном");
+    } else {
+        println!("setfork-core: SETFORK_CORE_TOKEN не задан — канал без авторизации (dev)");
+    }
+    let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
+        let Some(expected) = token else { return Ok(req) };
+        match req.metadata().get("authorization").and_then(|v| v.to_str().ok()) {
+            // constant-time не нужен: токен длинный и случайный, тайминг не течёт полезно,
+            // но сравнение всё равно полное (eq по всей строке).
+            Some(got) if got == expected => Ok(req),
+            _ => Err(Status::unauthenticated("invalid core token")),
+        }
+    };
+
     Server::builder()
         .add_service(health_service)
-        .add_service(GitCoreServer::new(GitCoreSvc { pool: pool.clone() }))
-        .add_service(pb_domain::list_read_server::ListReadServer::new(
+        .add_service(GitCoreServer::with_interceptor(GitCoreSvc { pool: pool.clone() }, check_auth))
+        .add_service(pb_domain::list_read_server::ListReadServer::with_interceptor(
             domain_read::ListReadSvc { pool: pool.clone() },
+            check_auth,
         ))
-        .add_service(pb_domain::curation_read_server::CurationReadServer::new(
+        .add_service(pb_domain::curation_read_server::CurationReadServer::with_interceptor(
             domain_read::CurationReadSvc { pool: pool.clone() },
+            check_auth,
         ))
-        .add_service(pb_domain::list_write_server::ListWriteServer::new(
+        .add_service(pb_domain::list_write_server::ListWriteServer::with_interceptor(
             domain_write::ListWriteSvc { pool },
+            check_auth,
         ))
         .serve_with_shutdown(addr, shutdown)
         .await?;
