@@ -24,7 +24,7 @@ pub mod pb_domain {
 }
 
 use pb::git_core_server::{GitCore, GitCoreServer};
-use pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep};
+use pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse};
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
 fn valid_branch(name: &str) -> bool {
@@ -432,6 +432,58 @@ impl GitCore for GitCoreSvc {
         .map_err(|e| Status::internal(e.to_string()))??;
         let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: false }))
+    }
+
+    async fn create_tag(&self, req: Request<CreateTagRequest>) -> Result<Response<BranchOpResponse>, Status> {
+        let CreateTagRequest { repo, name, version } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&name) {
+            return Err(Status::invalid_argument("bad tag name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let sha = tokio::task::spawn_blocking(move || -> Result<String, Status> {
+            let repo = git2::Repository::open_bare(&bare).map_err(|e| Status::internal(e.to_string()))?;
+            // Коммит версии: у каждой версии уже есть лёгкий тег vN.
+            let target = repo
+                .refname_to_id(&format!("refs/tags/v{version}"))
+                .map_err(|_| Status::not_found("version not found"))?;
+            let obj = repo.find_object(target, None).map_err(|e| Status::internal(e.to_string()))?;
+            // force=true: повторный релиз с тем же именем перевесит тег.
+            repo.tag_lightweight(&name, &obj, true).map_err(|e| Status::internal(e.to_string()))?;
+            Ok(target.to_string())
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))??;
+        Ok(Response::new(BranchOpResponse { tip_sha: sha }))
+    }
+
+    async fn list_tags(&self, req: Request<RepoRef>) -> Result<Response<TagsResponse>, Status> {
+        let RepoRef { owner, slug } = req.into_inner();
+        let (bare, _id) = self.ensure(&owner, &slug).await?;
+        let tags = tokio::task::spawn_blocking(move || -> Result<Vec<Tag>, String> {
+            let repo = git2::Repository::open_bare(&bare).map_err(|e| e.to_string())?;
+            let mut out: Vec<Tag> = Vec::new();
+            repo.tag_foreach(|oid, name_bytes| {
+                if let Ok(name) = std::str::from_utf8(name_bytes) {
+                    let name = name.strip_prefix("refs/tags/").unwrap_or(name).to_string();
+                    // peel до коммита (лёгкий тег указывает прямо на коммит).
+                    let sha = repo
+                        .find_object(oid, None)
+                        .and_then(|o| o.peel_to_commit())
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|_| oid.to_string());
+                    out.push(Tag { name, target_sha: sha });
+                }
+                true
+            })
+            .map_err(|e| e.to_string())?;
+            out.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(out)
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(Status::internal)?;
+        Ok(Response::new(TagsResponse { tags }))
     }
 }
 
