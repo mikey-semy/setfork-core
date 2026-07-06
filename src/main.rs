@@ -79,6 +79,15 @@ where
     res
 }
 
+/// Текущий oid main (или None, если ветки ещё нет) — для проверки «push сдвинул main».
+fn main_oid(bare: &std::path::Path) -> Option<String> {
+    git2::Repository::open_bare(bare)
+        .ok()?
+        .refname_to_id("refs/heads/main")
+        .ok()
+        .map(|o| o.to_string())
+}
+
 fn opt<'a>(s: &'a str) -> Option<&'a str> {
     if s.is_empty() {
         None
@@ -157,12 +166,24 @@ impl GitCore for GitCoreSvc {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
         let bare_recv = bare.clone();
-        let data = tokio::task::spawn_blocking(move || smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol)))
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?
-            .map_err(|e| Status::internal(e.to_string()))?;
-        // Проекция list.json запушенного tip → новая версия (0 = не спроецировано).
-        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
+        // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
+        // ветку-черновик main не двигает → иначе плодились бы дубли версий.
+        let (data, moved) = tokio::task::spawn_blocking(move || -> std::io::Result<(Vec<u8>, bool)> {
+            let before = main_oid(&bare_recv);
+            let data = smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol))?;
+            let after = main_oid(&bare_recv);
+            Ok((data, after.is_some() && after != before))
+        })
+        .await
+        .map_err(|e| Status::internal(e.to_string()))?
+        .map_err(|e| Status::internal(e.to_string()))?;
+        // Проекция list.json нового main tip → новая версия (0 = не спроецировано).
+        let new_version = if moved {
+            project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0)
+        } else {
+            0
+        };
         Ok(Response::new(ReceivePackResponse { data, new_version }))
     }
     async fn create_bundle(&self, req: Request<RepoRef>) -> Result<Response<BytesResponse>, Status> {
