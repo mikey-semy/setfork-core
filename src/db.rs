@@ -180,7 +180,10 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
 /// Всё в одной транзакции. Возвращает номер новой версии.
 pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[ProjStep]) -> Result<i32, sqlx::Error> {
     let mut tx = pool.begin().await?;
-    let current: i32 = sqlx::query_scalar("select current_version from templates where id = $1")
+    // FOR UPDATE — защита от гонки нумерации версий (как в domain_write.rs).
+    // Все текущие вызовы уже держат repo_guard, но блокировка строки делает
+    // add_version корректным и вне guarded-пути (defense-in-depth).
+    let current: i32 = sqlx::query_scalar("select current_version from templates where id = $1 for update")
         .bind(template_id)
         .fetch_one(&mut *tx)
         .await?;
