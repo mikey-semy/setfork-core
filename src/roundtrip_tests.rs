@@ -28,6 +28,8 @@ fn tmp_root() -> Tmp {
 fn step(n: i32, title: &str) -> SerStep {
     SerStep {
         n,
+        block_type: None,
+        content: serde_json::Value::Null,
         title: title.into(),
         desc: String::new(),
         command: String::new(),

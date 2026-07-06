@@ -119,7 +119,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
         let ts: i64 = vr.get("ts");
 
         let srows = sqlx::query(
-            "select n, title, \"desc\", command, level::text as level, why, section, subtasks, refs \
+            "select n, \"type\", content, title, \"desc\", command, level::text as level, why, section, subtasks, refs \
              from steps where version_id = $1 order by n asc",
         )
         .bind(vid)
@@ -149,8 +149,17 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                         .collect()
                 })
                 .unwrap_or_default();
+            // Блочная модель: type/content несём только у не-step блоков.
+            let block_type: Option<String> = sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| t != "step");
+            let content: serde_json::Value = if block_type.is_some() {
+                sr.try_get::<serde_json::Value, _>("content").unwrap_or(serde_json::Value::Null)
+            } else {
+                serde_json::Value::Null
+            };
             steps.push(SerStep {
                 n: sr.get("n"),
+                block_type,
+                content,
                 title: loc(&sr.get::<serde_json::Value, _>("title")),
                 desc: loc(&sr.get::<serde_json::Value, _>("desc")),
                 command: sr.get::<String, _>("command"),
