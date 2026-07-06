@@ -343,6 +343,16 @@ pub fn install_hook(bare: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// `git gc --auto` на bare: упаковывает loose-объекты при превышении порога
+/// gc.auto (иначе почти no-op). git2-запись версий/мержей не триггерит авто-gc
+/// (в отличие от receive-pack/worktree-commit), поэтому зовём вручную после
+/// материализации/дозаписи. Ошибки глушим — это обслуживание, не критично.
+pub fn gc_auto(bare: &Path) {
+    let _ = std::process::Command::new("git")
+        .args(["--git-dir", &bare.to_string_lossy(), "gc", "--auto", "--quiet"])
+        .status();
+}
+
 /// Бутстрап персистентного bare-репо из полной истории версий (git2) + pre-receive hook.
 /// Больше нет temp-репо и `git clone --bare` — коммиты пишутся прямо в bare через git2.
 pub fn bootstrap_bare(versions: &[VersionData], bare: &Path) -> io::Result<()> {
@@ -358,7 +368,9 @@ pub fn bootstrap_bare(versions: &[VersionData], bare: &Path) -> io::Result<()> {
         Ok(())
     })()
     .map_err(git_io)?;
-    install_hook(bare)
+    install_hook(bare)?;
+    gc_auto(bare); // упаковать объекты стартовой истории
+    Ok(())
 }
 
 /// Дописывает недостающие веб-версии поверх текущего main (git2), сохраняя запушенные коммиты.
@@ -373,7 +385,9 @@ pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<()> 
         build_history(&repo, versions, parent)?;
         Ok(())
     })()
-    .map_err(git_io)
+    .map_err(git_io)?;
+    gc_auto(bare); // loose-объекты дозаписанных версий → упаковка при пороге
+    Ok(())
 }
 
 /// Максимальный номер версии среди тегов v* (git2).
