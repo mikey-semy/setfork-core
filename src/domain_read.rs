@@ -250,7 +250,7 @@ impl ListRead for ListReadSvc {
         };
 
         let srows = sqlx::query(
-            "select id, version_id, n, title, \"desc\", command, level::text as level, \
+            "select id, version_id, n, \"type\", content, title, \"desc\", command, level::text as level, \
                     why, section, subtasks, refs, image_key \
              from steps where version_id = $1 order by n asc",
         )
@@ -278,6 +278,11 @@ impl ListRead for ListReadSvc {
                             .collect()
                     })
                     .unwrap_or_default();
+                // '' у шага (в т.ч. NULL/'step'); тип несём только у text/image.
+                let block_ty = {
+                    let t = s.get::<Option<String>, _>("type").unwrap_or_default();
+                    if t == "step" { String::new() } else { t }
+                };
                 Step {
                     id: s.get::<Uuid, _>("id").to_string(),
                     version_id: s.get::<Uuid, _>("version_id").to_string(),
@@ -291,6 +296,15 @@ impl ListRead for ListReadSvc {
                     subtasks,
                     refs,
                     image_ref: s.get::<Option<String>, _>("image_key").unwrap_or_default(),
+                    // type/content_json — только у не-step блоков ('' у шага).
+                    r#type: block_ty.clone(),
+                    content_json: if block_ty.is_empty() {
+                        String::new()
+                    } else {
+                        s.try_get::<serde_json::Value, _>("content")
+                            .map(|c| c.to_string())
+                            .unwrap_or_default()
+                    },
                 }
             })
             .collect();
