@@ -340,6 +340,8 @@ mod tests {
     fn ser(title: &str, desc: &str, command: &str) -> SerStep {
         SerStep {
             n: 1,
+            block_type: None,
+            content: serde_json::Value::Null,
             title: title.into(),
             desc: desc.into(),
             command: command.into(),
@@ -363,6 +365,8 @@ mod tests {
             ordered: true,
             steps: vec![SerStep {
                 n: s.n,
+                block_type: None,
+                content: serde_json::Value::Null,
                 title: s.title.clone(),
                 desc: s.desc.clone(),
                 command: s.command.clone(),

@@ -12,6 +12,11 @@ pub struct StepRef {
 }
 pub struct SerStep {
     pub n: i32,
+    // Блочная модель: None/Some("step") = шаг; иначе text/image. content — payload
+    // не-step блока (Null у шага). type/content сериализуем ТОЛЬКО у не-step —
+    // старые step-only списки дают байт-в-байт тот же list.json (golden с TS).
+    pub block_type: Option<String>,
+    pub content: serde_json::Value,
     pub title: String,
     pub desc: String,
     pub command: String,
@@ -20,6 +25,11 @@ pub struct SerStep {
     pub section: String,
     pub subtasks: Vec<String>,
     pub refs: Vec<StepRef>,
+}
+
+/// Шаг-блок ли (у него собственные поля; у text/image — content).
+fn is_step_block(s: &SerStep) -> bool {
+    s.block_type.as_deref().map_or(true, |t| t == "step")
 }
 pub struct VersionData {
     pub version: i32,
@@ -42,22 +52,35 @@ fn list_json(v: &VersionData) -> String {
         .steps
         .iter()
         .map(|s| {
-            serde_json::json!({
-                "n": s.n,
-                "title": s.title,
-                "desc": s.desc,
-                "command": s.command,
-                "level": s.level,
-                "why": s.why,
-                "section": s.section,
-                "subtasks": s.subtasks,
-                "refs": s.refs.iter().map(|r| {
+            let refs: Vec<serde_json::Value> = s
+                .refs
+                .iter()
+                .map(|r| {
                     let mut m = serde_json::Map::new();
                     m.insert("label".into(), serde_json::Value::String(r.label.clone()));
-                    if let Some(u) = &r.url { m.insert("url".into(), serde_json::Value::String(u.clone())); }
+                    if let Some(u) = &r.url {
+                        m.insert("url".into(), serde_json::Value::String(u.clone()));
+                    }
                     serde_json::Value::Object(m)
-                }).collect::<Vec<_>>(),
-            })
+                })
+                .collect();
+            // Порядок ключей строго как в TS (serialize.ts SerStep): для не-step
+            // блоков type/content идут сразу после n; у шага их нет вовсе.
+            let mut m = serde_json::Map::new();
+            m.insert("n".into(), serde_json::json!(s.n));
+            if !is_step_block(s) {
+                m.insert("type".into(), serde_json::Value::String(s.block_type.clone().unwrap_or_default()));
+                m.insert("content".into(), s.content.clone());
+            }
+            m.insert("title".into(), serde_json::json!(s.title));
+            m.insert("desc".into(), serde_json::json!(s.desc));
+            m.insert("command".into(), serde_json::json!(s.command));
+            m.insert("level".into(), serde_json::json!(s.level));
+            m.insert("why".into(), serde_json::json!(s.why));
+            m.insert("section".into(), serde_json::json!(s.section));
+            m.insert("subtasks".into(), serde_json::json!(s.subtasks));
+            m.insert("refs".into(), serde_json::Value::Array(refs));
+            serde_json::Value::Object(m)
         })
         .collect();
     let root = serde_json::json!({
@@ -100,18 +123,47 @@ fn readme(v: &VersionData) -> String {
         lines.push(String::new());
     }
     let kind = if v.ordered { "Ordered list" } else { "Unordered set" };
-    lines.push(format!("> {} · v{} · {} items", kind, v.version, v.steps.len()));
+    // Счётчик «items» и нумерация — только по шаг-блокам (презентационные вне счёта).
+    let step_count = v.steps.iter().filter(|s| is_step_block(s)).count();
+    lines.push(format!("> {} · v{} · {} items", kind, v.version, step_count));
     lines.push(String::new());
 
     let mut section = String::new();
-    for (i, s) in v.steps.iter().enumerate() {
+    let mut step_num = 0usize;
+    for s in v.steps.iter() {
+        if !is_step_block(s) {
+            // Презентационные блоки — inline в README.
+            match s.block_type.as_deref() {
+                Some("text") => {
+                    if let Some(md) = s.content.get("md").and_then(|v| v.as_str()) {
+                        if !md.is_empty() {
+                            lines.push(String::new());
+                            lines.push(md.to_string());
+                            lines.push(String::new());
+                        }
+                    }
+                }
+                Some("image") => {
+                    let r = s.content.get("ref").and_then(|v| v.as_str()).unwrap_or("");
+                    if !r.is_empty() {
+                        let cap = s.content.get("caption").and_then(|v| v.as_str()).unwrap_or("");
+                        lines.push(String::new());
+                        lines.push(format!("![{}]({})", cap, r));
+                        lines.push(String::new());
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
         if !s.section.is_empty() && s.section != section {
             section = s.section.clone();
             lines.push(String::new());
             lines.push(format!("## {}", section));
             lines.push(String::new());
         }
-        let marker = if v.ordered { format!("{}.", i + 1) } else { "-".to_string() };
+        step_num += 1;
+        let marker = if v.ordered { format!("{}.", step_num) } else { "-".to_string() };
         let lvl = if !s.level.is_empty() && s.level != "required" {
             format!(" _({})_", s.level)
         } else {
@@ -222,8 +274,11 @@ pub fn version_files(v: &VersionData) -> Vec<(String, String)> {
         ("README.md".to_string(), readme(v)),
         ("list.json".to_string(), list_json(v)),
     ];
+    // .md пишем ТОЛЬКО шаг-блокам; text/image живут в README + list.json.
     for s in &v.steps {
-        files.push(step_file(s, width));
+        if is_step_block(s) {
+            files.push(step_file(s, width));
+        }
     }
     files
 }
@@ -418,6 +473,8 @@ mod tests {
     fn step(n: i32, title: &str) -> SerStep {
         SerStep {
             n,
+            block_type: None,
+            content: serde_json::Value::Null,
             title: title.into(),
             desc: String::new(),
             command: String::new(),
@@ -427,6 +484,9 @@ mod tests {
             subtasks: vec![],
             refs: vec![],
         }
+    }
+    fn block(n: i32, ty: &str, content: serde_json::Value) -> SerStep {
+        SerStep { block_type: Some(ty.into()), content, ..step(n, "") }
     }
     fn ver(steps: Vec<SerStep>) -> VersionData {
         VersionData {
@@ -469,6 +529,41 @@ mod tests {
         assert_eq!(pad(7, 2), "07");
         assert_eq!(pad(1, 3), "001");
         assert_eq!(pad(100, 2), "100");
+    }
+
+    #[test]
+    fn step_only_list_json_has_no_type_or_content() {
+        // Байт-совместимость с TS: у шага type/content НЕ сериализуются.
+        let files = version_files(&ver(vec![step(1, "Install Redis")]));
+        let lj = &files.iter().find(|(p, _)| p == "list.json").unwrap().1;
+        assert!(!lj.contains("\"type\""), "no type key for step");
+        assert!(!lj.contains("\"content\""), "no content key for step");
+    }
+
+    #[test]
+    fn non_step_blocks_serialize_and_get_no_md() {
+        let v = ver(vec![
+            step(1, "First"),
+            block(2, "text", serde_json::json!({ "md": "Some **intro**" })),
+            block(3, "image", serde_json::json!({ "ref": "img/abc", "caption": "Diagram" })),
+            step(4, "Second"),
+        ]);
+        let files = version_files(&v);
+        // .md только у 2 шагов
+        let md_paths: Vec<_> = files.iter().map(|(p, _)| p.as_str()).filter(|p| p.starts_with("steps/")).collect();
+        assert_eq!(md_paths, vec!["steps/01-first.md", "steps/04-second.md"]);
+        // README: text инлайн, image как ![], счётчик и нумерация только по шагам
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("Some **intro**"));
+        assert!(readme.contains("![Diagram](img/abc)"));
+        assert!(readme.contains("· 2 items"));
+        assert!(readme.contains("1. **First**"));
+        assert!(readme.contains("2. **Second**"));
+        // list.json: type/content у не-step блоков, ключи после n
+        let lj = &files.iter().find(|(p, _)| p == "list.json").unwrap().1;
+        assert!(lj.contains("\"type\": \"text\""));
+        assert!(lj.contains("\"md\": \"Some **intro**\""));
+        assert!(lj.contains("\"type\": \"image\""));
     }
 
     #[test]
