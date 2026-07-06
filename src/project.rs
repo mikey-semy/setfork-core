@@ -11,6 +11,10 @@ pub struct ProjRef {
     pub url: Option<String>,
 }
 pub struct ProjStep {
+    // Блочная модель: '' = шаг; 'text'|'image' — презентационный блок. content —
+    // payload не-step блока (Null у шага).
+    pub block_type: String,
+    pub content: serde_json::Value,
     pub title: String,
     pub desc: String,
     pub command: String,
@@ -19,6 +23,9 @@ pub struct ProjStep {
     pub section: String,
     pub subtasks: Vec<String>,
     pub refs: Vec<ProjRef>,
+}
+fn proj_is_step(t: &str) -> bool {
+    t.is_empty() || t == "step"
 }
 
 // Мягкий парс list.json (все поля optional) — порт ParsedList из project.ts.
@@ -29,6 +36,10 @@ struct RawRef {
 }
 #[derive(Deserialize)]
 struct RawStep {
+    n: Option<i32>,
+    #[serde(rename = "type")]
+    block_type: Option<String>,
+    content: Option<serde_json::Value>,
     title: Option<String>,
     desc: Option<String>,
     command: Option<String>,
@@ -213,10 +224,22 @@ fn strip_v_prefix(s: &str) -> String {
 /// Источник контента — list.json в корне дерева. Возвращает номер версии или None.
 // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).
 fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {
-    let mut steps: Vec<ProjStep> = steps_raw
-        .iter()
-        .filter(|s| !s.title.as_deref().unwrap_or("").trim().is_empty())
-        .map(|s| ProjStep {
+    // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.
+    // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).
+    let mut kept: Vec<(i32, ProjStep)> = Vec::new();
+    for (idx, s) in steps_raw.iter().enumerate() {
+        let bt = s.block_type.clone().unwrap_or_default();
+        let is_step = proj_is_step(&bt);
+        if is_step && s.title.as_deref().unwrap_or("").trim().is_empty() {
+            continue;
+        }
+        let step = ProjStep {
+            block_type: if is_step { String::new() } else { bt },
+            content: if is_step {
+                serde_json::Value::Null
+            } else {
+                s.content.clone().unwrap_or(serde_json::Value::Null)
+            },
             title: s.title.clone().unwrap_or_default(),
             desc: s.desc.clone().unwrap_or_default(),
             command: s.command.clone().unwrap_or_default(),
@@ -230,23 +253,22 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
                 .map(|rs| {
                     rs.iter()
                         .filter(|r| !r.label.as_deref().unwrap_or("").trim().is_empty())
-                        .map(|r| ProjRef {
-                            label: r.label.clone().unwrap_or_default(),
-                            url: r.url.clone(),
-                        })
+                        .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })
                         .collect()
                 })
                 .unwrap_or_default(),
-        })
-        .collect();
+        };
+        kept.push((s.n.unwrap_or((idx as i32) + 1), step));
+    }
 
-    // list.json — источник истины для НАБОРА/порядка шагов; steps/NN-*.md — опциональные
-    // per-step оверрайды контента. Для шага с 1-based индексом NN (совпадает с именем файла)
-    // берём title/desc/command из .md там, где они ОТЛИЧАЮТСЯ от list.json.
-    // Отсутствующий/непарсибельный .md → значения list.json (без ошибки).
-    for (i, step) in steps.iter_mut().enumerate() {
-        let nn = (i as i32) + 1;
-        let Some(content) = step_md.get(&nn) else { continue };
+    // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные
+    // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.
+    // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.
+    for (orig_n, step) in kept.iter_mut() {
+        if !proj_is_step(&step.block_type) {
+            continue;
+        }
+        let Some(content) = step_md.get(orig_n) else { continue };
         let md = parse_step_md(content);
         if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {
             step.title = t;
@@ -259,7 +281,7 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
         }
     }
 
-    steps
+    kept.into_iter().map(|(_, s)| s).collect()
 }
 
 /// Снапшот произвольного ref (ветки): мета list.json + шаги. Для read-only рендера.

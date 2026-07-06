@@ -229,12 +229,17 @@ pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[
                 })
                 .collect(),
         );
+        // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
+        let block_type = if s.block_type.is_empty() { "step" } else { s.block_type.as_str() };
+        let content = if s.block_type.is_empty() { serde_json::json!({}) } else { s.content.clone() };
         sqlx::query(
-            "insert into steps (version_id, n, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
-             values ($1, $2, $3::jsonb, $4::jsonb, $5, false, null, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb)",
+            "insert into steps (version_id, n, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
+             values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, false, null, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)",
         )
         .bind(ver_id)
         .bind(n)
+        .bind(block_type)
+        .bind(content.to_string())
         .bind(loc_str(&s.title))
         .bind(loc_str(&s.desc))
         .bind(s.command.trim())

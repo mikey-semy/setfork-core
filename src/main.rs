@@ -119,6 +119,8 @@ fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
                 section: st.section.clone(),
                 subtasks: st.subtasks.clone(),
                 refs: st.refs.iter().map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() }).collect(),
+                r#type: st.block_type.clone(),
+                content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
             })
             .collect(),
     }
