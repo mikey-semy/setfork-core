@@ -52,13 +52,23 @@ async fn insert_steps(
             let image_ref = if s.image_ref.is_empty() { None } else { Some(s.image_ref.clone()) };
             let subtasks =
                 serde_json::Value::Array(s.subtasks.iter().map(|t| loc_json(&Some(t.clone()))).collect());
+            // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
+            let is_step = s.r#type.is_empty() || s.r#type == "step";
+            let block_type = if is_step { "step" } else { s.r#type.as_str() };
+            let content: serde_json::Value = if is_step || s.content_json.is_empty() {
+                serde_json::json!({})
+            } else {
+                serde_json::from_str(&s.content_json).unwrap_or_else(|_| serde_json::json!({}))
+            };
             sqlx::query(
-                "insert into steps (version_id, n, title, \"desc\", command, has_image, image_key, \
+                "insert into steps (version_id, n, type, content, title, \"desc\", command, has_image, image_key, \
                                     level, why, section, subtasks, refs) \
-                 values ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7, $8::step_level, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)",
+                 values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10::step_level, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb)",
             )
             .bind(ver_id)
             .bind((i as i32) + 1)
+            .bind(block_type)
+            .bind(content)
             .bind(loc_json(&s.title))
             .bind(loc_json(&s.desc))
             .bind(&s.command)
@@ -231,6 +241,16 @@ fn proposed_json(s: &NewStep) -> serde_json::Value {
         serde_json::Value::Array(s.subtasks.iter().map(|t| loc_json(&Some(t.clone()))).collect()),
     );
     m.insert("refs".into(), refs_json(&s.refs));
+    // Блочная модель: type/content — только у не-step блоков (как toProposedItems в TS).
+    if !(s.r#type.is_empty() || s.r#type == "step") {
+        m.insert("type".into(), serde_json::Value::String(s.r#type.clone()));
+        let content = if s.content_json.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&s.content_json).unwrap_or_else(|_| serde_json::json!({}))
+        };
+        m.insert("content".into(), content);
+    }
     serde_json::Value::Object(m)
 }
 
@@ -264,6 +284,16 @@ fn json_to_step(v: &serde_json::Value) -> NewStep {
         subtasks,
         refs,
         image_ref: v.get("imageKey").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        // type/content_json — только у не-step блоков.
+        r#type: v.get("type").and_then(|x| x.as_str()).filter(|t| *t != "step").unwrap_or("").to_string(),
+        content_json: {
+            let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+            if ty.is_empty() || ty == "step" {
+                String::new()
+            } else {
+                v.get("content").map(|c| c.to_string()).unwrap_or_default()
+            }
+        },
     }
 }
 
