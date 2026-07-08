@@ -21,6 +21,29 @@ services:
       - setfork_git:/data/git
     networks: [dokploy-network]
 
+  # Бэкап git-объектов → S3 (offsite). git = источник правды по контенту списков,
+  # единственный хост → том обязан бэкапиться вне его. Ежедневный tar тома в объектный
+  # S3, ротация BACKUP_KEEP_DAYS. Пусто BACKUP_S3_* → бэкапа НЕ будет (см. .env.example).
+  # ⚠️ После деплоя проверь лог git-backup, объект в бакете и тестовый restore.
+  #    Runbook: setfork-docs/internal/runbooks/backups.md
+  git-backup:
+    image: offen/docker-volume-backup:v2
+    restart: always
+    environment:
+      BACKUP_CRON_EXPRESSION: ${BACKUP_GIT_CRON:-30 3 * * *}
+      BACKUP_FILENAME: setfork-git-%Y%m%dT%H%M%S.tar.gz
+      BACKUP_PRUNING_PREFIX: setfork-git-
+      BACKUP_RETENTION_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      AWS_ENDPOINT: ${BACKUP_S3_ENDPOINT_HOST:-} # FQDN БЕЗ схемы (s3.ru-3.storage.selcloud.ru)
+      AWS_ENDPOINT_PROTO: ${BACKUP_S3_ENDPOINT_PROTO:-https}
+      AWS_S3_BUCKET_NAME: ${BACKUP_S3_BUCKET:-}
+      AWS_S3_PATH: ${BACKUP_S3_GIT_PREFIX:-setfork/git}
+      AWS_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_KEY:-}
+    volumes:
+      - setfork_git:/backup/setfork-git:ro
+    networks: [dokploy-network]
+
 volumes:
   setfork_git:
 
