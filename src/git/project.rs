@@ -1,3 +1,8 @@
+//! Обратная проекция git → БД: чтение состояния списка из дерева коммита
+//! (list.json + steps/*.md, порт project.ts) и запись новой версии после
+//! push/merge, когда сдвинулся main.
+use super::MAIN_REF;
+use crate::blocks::is_step_type;
 use crate::db;
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -23,9 +28,6 @@ pub struct ProjStep {
     pub section: String,
     pub subtasks: Vec<String>,
     pub refs: Vec<ProjRef>,
-}
-fn proj_is_step(t: &str) -> bool {
-    t.is_empty() || t == "step"
 }
 
 // Мягкий парс list.json (все поля optional) — порт ParsedList из project.ts.
@@ -58,22 +60,23 @@ struct RawList {
     steps: Option<Vec<RawStep>>,
 }
 
-// Читает tip main через git2: (hex tip, содержимое list.json, subject коммита, файлы steps/*.md).
-// Все git2-объекты — не Send, поэтому извлекаем owned-данные ДО любого await.
-// steps: map "NN" (базовое имя без slug/расширения → 1-based индекс) → содержимое .md.
-fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
-    read_ref_tip(bare, "refs/heads/main")
+/// Owned-снимок tip'а: (hex sha, содержимое list.json, subject коммита,
+/// steps/NN-*.md по 1-based номеру NN). git2-объекты не Send — извлекаем всё до await.
+type TipData = (String, Vec<u8>, String, HashMap<i32, String>);
+
+fn read_tip(bare: &Path) -> Option<TipData> {
+    read_ref_tip(bare, MAIN_REF)
 }
 
-// То же для произвольного ref (ветки) — база просмотра списка «на ветке».
-pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
+/// То же для произвольного ref (ветки) — база просмотра списка «на ветке».
+pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {
     let repo = git2::Repository::open_bare(bare).ok()?;
     let tip = repo.refname_to_id(refname).ok()?;
     read_commit_data(&repo, tip)
 }
 
 // Общее чтение материализации из конкретного коммита (ref-tip или merge-base).
-fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
+fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> {
     let commit = repo.find_commit(oid).ok()?;
     let tree = commit.tree().ok()?;
     let entry = tree.get_path(Path::new("list.json")).ok()?;
@@ -220,8 +223,6 @@ fn strip_v_prefix(s: &str) -> String {
     s.to_string()
 }
 
-/// Проецирует запушенный tip main → новая версия списка (порт project.ts projectPushedCommit).
-/// Источник контента — list.json в корне дерева. Возвращает номер версии или None.
 // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).
 fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {
     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.
@@ -229,7 +230,7 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
     let mut kept: Vec<(i32, ProjStep)> = Vec::new();
     for (idx, s) in steps_raw.iter().enumerate() {
         let bt = s.block_type.clone().unwrap_or_default();
-        let is_step = proj_is_step(&bt);
+        let is_step = is_step_type(&bt);
         if is_step && s.title.as_deref().unwrap_or("").trim().is_empty() {
             continue;
         }
@@ -265,7 +266,7 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.
     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.
     for (orig_n, step) in kept.iter_mut() {
-        if !proj_is_step(&step.block_type) {
+        if !is_step_type(&step.block_type) {
             continue;
         }
         let Some(content) = step_md.get(orig_n) else { continue };
@@ -294,6 +295,7 @@ pub struct BranchSnapshotData {
     pub steps: Vec<ProjStep>,
 }
 
+/// Снапшот ветки по refname: мета list.json + шаги с tip'а. Для read-only рендера.
 pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {
     let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;
     snapshot_from_data(tip, &raw, &step_md)
@@ -320,6 +322,8 @@ fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -
     })
 }
 
+/// Проецирует запушенный tip main → новая версия списка (порт project.ts projectPushedCommit).
+/// Источник контента — list.json в корне дерева. Возвращает номер версии или None.
 pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Option<i32> {
     // git2-объекты не Send → читаем всё owned до await.
     let (tip, raw, subject, step_md) = read_tip(bare)?;
@@ -347,7 +351,7 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
 #[cfg(test)]
 mod tests {
     use super::{parse_step_md, strip_v_prefix, ParsedStepMd};
-    use crate::bundle::{SerStep, StepRef};
+    use crate::git::bundle::{SerStep, StepRef};
 
     #[test]
     fn strips_vn_prefix() {

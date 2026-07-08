@@ -1,5 +1,9 @@
-use crate::bundle::{SerStep, StepRef, VersionData};
-use crate::project::ProjStep;
+//! Postgres-слой (та же БД, что у Next): пул, чтение истории версий для
+//! материализации, единый движок записи версий (StepRow/add_version_rows),
+//! обновление метаданных списка из git-проекции.
+use crate::blocks::is_step_type;
+use crate::git::bundle::{SerStep, StepRef, VersionData};
+use crate::git::project::ProjStep;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
 use uuid::Uuid;
@@ -13,7 +17,8 @@ pub enum Level {
     Optional,
 }
 impl Level {
-    fn parse(s: &str) -> Level {
+    /// Мягкий парс уровня: неизвестное/пустое → Required (как TS-дефолт).
+    pub fn parse(s: &str) -> Level {
         match s.trim() {
             "recommended" => Level::Recommended,
             "optional" => Level::Optional,
@@ -22,13 +27,13 @@ impl Level {
     }
 }
 
-// LocaleText jsonb-строка: {"en": s} для непустого, иначе {} (порт project.ts L()).
-fn loc_str(s: &str) -> String {
+// LocaleText jsonb: {"en": s} для непустого, иначе {} (порт project.ts L()).
+fn loc_val(s: &str) -> serde_json::Value {
     let t = s.trim();
     if t.is_empty() {
-        "{}".to_string()
+        serde_json::json!({})
     } else {
-        serde_json::json!({ "en": t }).to_string()
+        serde_json::json!({ "en": t })
     }
 }
 
@@ -111,22 +116,19 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
     .fetch_all(pool)
     .await?;
 
-    let mut out = Vec::with_capacity(vrows.len());
-    for vr in vrows {
-        let vid: Uuid = vr.get("id");
-        let version: i32 = vr.get("version");
-        let note: String = vr.get("note");
-        let ts: i64 = vr.get("ts");
-
-        let srows = sqlx::query(
-            "select n, \"type\", content, title, \"desc\", command, level::text as level, why, section, subtasks, refs \
-             from steps where version_id = $1 order by n asc",
-        )
-        .bind(vid)
-        .fetch_all(pool)
-        .await?;
-
-        let mut steps = Vec::with_capacity(srows.len());
+    // Шаги ВСЕХ версий одним запросом (вместо запроса на версию — история
+    // длинного списка давала N+1 round-trip'ов), группировка по version_id.
+    let srows = sqlx::query(
+        "select s.version_id, s.n, s.\"type\", s.content, s.title, s.\"desc\", s.command, \
+                s.level::text as level, s.why, s.section, s.subtasks, s.refs \
+         from steps s join template_versions tv on tv.id = s.version_id \
+         where tv.template_id = $1 order by s.version_id, s.n asc",
+    )
+    .bind(list_id)
+    .fetch_all(pool)
+    .await?;
+    let mut steps_by_ver: std::collections::HashMap<Uuid, Vec<SerStep>> = std::collections::HashMap::new();
+    {
         for sr in srows {
             let subtasks_json: serde_json::Value = sr.get("subtasks");
             let subtasks = subtasks_json
@@ -150,13 +152,14 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 })
                 .unwrap_or_default();
             // Блочная модель: type/content несём только у не-step блоков.
-            let block_type: Option<String> = sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| t != "step");
+            let block_type: Option<String> = sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| !is_step_type(t));
             let content: serde_json::Value = if block_type.is_some() {
                 sr.try_get::<serde_json::Value, _>("content").unwrap_or(serde_json::Value::Null)
             } else {
                 serde_json::Value::Null
             };
-            steps.push(SerStep {
+            let vid: Uuid = sr.get("version_id");
+            steps_by_ver.entry(vid).or_default().push(SerStep {
                 n: sr.get("n"),
                 block_type,
                 content,
@@ -170,35 +173,96 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 refs,
             });
         }
+    }
+
+    let mut out = Vec::with_capacity(vrows.len());
+    for vr in vrows {
+        let vid: Uuid = vr.get("id");
         out.push(VersionData {
-            version,
-            note,
-            ts,
+            version: vr.get("version"),
+            note: vr.get("note"),
+            ts: vr.get("ts"),
             title: title.clone(),
             desc: desc.clone(),
             tags: tags.clone(),
             ordered,
-            steps,
+            steps: steps_by_ver.remove(&vid).unwrap_or_default(),
         });
     }
     Ok(out)
 }
 
-/// Новая версия списка из проекции push (порт list-store.adapter addVersion).
-/// current_version+1 → insert template_versions → insert steps → update current_version.
-/// Всё в одной транзакции. Возвращает номер новой версии.
-pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[ProjStep]) -> Result<i32, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    // FOR UPDATE — защита от гонки нумерации версий (как в domain_write.rs).
-    // Все текущие вызовы уже держат repo_guard, но блокировка строки делает
-    // add_version корректным и вне guarded-пути (defense-in-depth).
-    let current: i32 = sqlx::query_scalar("select current_version from templates where id = $1 for update")
-        .bind(template_id)
-        .fetch_one(&mut *tx)
+/// Каноническая строка steps под вставку. Оба пути записи версий — git-проекция
+/// (ProjStep, санитизация git-входа) и доменный ListWrite (NewStep, семантика TS
+/// как есть) — маппятся сюда; транзакция и INSERT одни на всех.
+pub struct StepRow {
+    pub block_type: String,          // 'step' | 'text' | 'image' | …
+    pub content: serde_json::Value,  // {} у шага
+    pub title: serde_json::Value,    // LocaleText jsonb
+    pub desc: serde_json::Value,
+    pub command: String,
+    pub image_key: Option<String>,   // None → has_image = false
+    pub level: Level,
+    pub why: serde_json::Value,
+    pub section: serde_json::Value,
+    pub subtasks: serde_json::Value, // jsonb-массив LocaleText
+    pub refs: serde_json::Value,     // jsonb-массив {label, url?}
+}
+
+/// Вставка шагов версии — единственный INSERT в steps.
+pub async fn insert_step_rows(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ver_id: Uuid,
+    rows: &[StepRow],
+) -> Result<(), sqlx::Error> {
+    for (i, r) in rows.iter().enumerate() {
+        sqlx::query(
+            "insert into steps (version_id, n, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
+             values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb)",
+        )
+        .bind(ver_id)
+        .bind((i as i32) + 1)
+        .bind(&r.block_type)
+        .bind(&r.content)
+        .bind(&r.title)
+        .bind(&r.desc)
+        .bind(&r.command)
+        .bind(r.image_key.is_some())
+        .bind(&r.image_key)
+        .bind(&r.level)
+        .bind(&r.why)
+        .bind(&r.section)
+        .bind(&r.subtasks)
+        .bind(&r.refs)
+        .execute(&mut **tx)
         .await?;
+    }
+    Ok(())
+}
+
+/// Единственный путь «новая версия»: FOR UPDATE current_version → insert
+/// template_versions → шаги → bump current_version + updated_at, всё в одной
+/// транзакции (FOR UPDATE — защита от гонки нумерации и вне guarded-пути).
+/// None = списка нет. Возвращает (ver_id, version, created_at_ms).
+pub async fn add_version_rows(
+    pool: &PgPool,
+    template_id: Uuid,
+    note: &str,
+    rows: &[StepRow],
+) -> Result<Option<(Uuid, i32, i64)>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let current: Option<i32> =
+        sqlx::query_scalar("select current_version from templates where id = $1 for update")
+            .bind(template_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some(current) = current else {
+        return Ok(None);
+    };
     let new_version = current + 1;
-    let ver_id: Uuid = sqlx::query_scalar(
-        "insert into template_versions (template_id, version, note) values ($1, $2, $3) returning id",
+    let (ver_id, created_ms): (Uuid, i64) = sqlx::query_as(
+        "insert into template_versions (template_id, version, note) values ($1, $2, $3) \
+         returning id, floor(extract(epoch from created_at) * 1000)::bigint",
     )
     .bind(template_id)
     .bind(new_version)
@@ -206,51 +270,7 @@ pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[
     .fetch_one(&mut *tx)
     .await?;
 
-    for (i, s) in steps.iter().enumerate() {
-        let n = (i as i32) + 1;
-        let subtasks = serde_json::Value::Array(
-            s.subtasks
-                .iter()
-                .filter(|x| !x.trim().is_empty())
-                .map(|x| serde_json::json!({ "en": x.trim() }))
-                .collect(),
-        );
-        let refs = serde_json::Value::Array(
-            s.refs
-                .iter()
-                .filter(|r| !r.label.trim().is_empty())
-                .map(|r| {
-                    let mut m = serde_json::Map::new();
-                    m.insert("label".into(), serde_json::json!({ "en": r.label.trim() }));
-                    if let Some(u) = r.url.as_ref().map(|u| u.trim()).filter(|u| !u.is_empty()) {
-                        m.insert("url".into(), serde_json::Value::String(u.to_string()));
-                    }
-                    serde_json::Value::Object(m)
-                })
-                .collect(),
-        );
-        // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
-        let block_type = if s.block_type.is_empty() { "step" } else { s.block_type.as_str() };
-        let content = if s.block_type.is_empty() { serde_json::json!({}) } else { s.content.clone() };
-        sqlx::query(
-            "insert into steps (version_id, n, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
-             values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, false, null, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)",
-        )
-        .bind(ver_id)
-        .bind(n)
-        .bind(block_type)
-        .bind(content.to_string())
-        .bind(loc_str(&s.title))
-        .bind(loc_str(&s.desc))
-        .bind(s.command.trim())
-        .bind(Level::parse(&s.level))
-        .bind(loc_str(&s.why))
-        .bind(loc_str(&s.section))
-        .bind(subtasks.to_string())
-        .bind(refs.to_string())
-        .execute(&mut *tx)
-        .await?;
-    }
+    insert_step_rows(&mut tx, ver_id, rows).await?;
 
     sqlx::query("update templates set current_version = $1, updated_at = now() where id = $2")
         .bind(new_version)
@@ -258,7 +278,58 @@ pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    Ok(new_version)
+    Ok(Some((ver_id, new_version, created_ms)))
+}
+
+// ProjStep → StepRow: санитизация git-входа (порт project.ts): trim, пустые
+// subtasks/refs выбрасываются, LocaleText жмётся в {"en": …}, image не несём.
+fn proj_step_row(s: &ProjStep) -> StepRow {
+    let subtasks = serde_json::Value::Array(
+        s.subtasks
+            .iter()
+            .filter(|x| !x.trim().is_empty())
+            .map(|x| serde_json::json!({ "en": x.trim() }))
+            .collect(),
+    );
+    let refs = serde_json::Value::Array(
+        s.refs
+            .iter()
+            .filter(|r| !r.label.trim().is_empty())
+            .map(|r| {
+                let mut m = serde_json::Map::new();
+                m.insert("label".into(), serde_json::json!({ "en": r.label.trim() }));
+                if let Some(u) = r.url.as_ref().map(|u| u.trim()).filter(|u| !u.is_empty()) {
+                    m.insert("url".into(), serde_json::Value::String(u.to_string()));
+                }
+                serde_json::Value::Object(m)
+            })
+            .collect(),
+    );
+    // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
+    let is_step = is_step_type(&s.block_type);
+    StepRow {
+        block_type: if is_step { "step".into() } else { s.block_type.clone() },
+        content: if is_step { serde_json::json!({}) } else { s.content.clone() },
+        title: loc_val(&s.title),
+        desc: loc_val(&s.desc),
+        command: s.command.trim().to_string(),
+        image_key: None,
+        level: Level::parse(&s.level),
+        why: loc_val(&s.why),
+        section: loc_val(&s.section),
+        subtasks,
+        refs,
+    }
+}
+
+/// Новая версия списка из проекции push. Возвращает номер новой версии;
+/// RowNotFound, если списка нет (как прежний fetch_one).
+pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[ProjStep]) -> Result<i32, sqlx::Error> {
+    let rows: Vec<StepRow> = steps.iter().map(proj_step_row).collect();
+    match add_version_rows(pool, template_id, note, &rows).await? {
+        Some((_ver_id, version, _ms)) => Ok(version),
+        None => Err(sqlx::Error::RowNotFound),
+    }
 }
 
 /// Метаданные списка из list.json (title/desc/tags/ordered) — порт project.ts patch.
@@ -274,16 +345,15 @@ pub async fn update_meta(
     if let Some(t) = title {
         if !t.trim().is_empty() {
             sqlx::query("update templates set title = $1::jsonb where id = $2")
-                .bind(serde_json::json!({ "en": t.trim() }).to_string())
+                .bind(loc_val(&t))
                 .bind(template_id)
                 .execute(pool)
                 .await?;
         }
     }
     if let Some(d) = desc {
-        let j = loc_str(&d);
         sqlx::query("update templates set \"desc\" = $1::jsonb where id = $2")
-            .bind(j)
+            .bind(loc_val(&d))
             .bind(template_id)
             .execute(pool)
             .await?;

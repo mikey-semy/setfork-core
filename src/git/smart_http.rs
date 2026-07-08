@@ -1,9 +1,9 @@
+//! Минимальная реализация git smart-HTTP поверх bare-репо: advertise/RPC для
+//! upload-pack (clone/pull) и receive-pack (push) через шелл `git` —
+//! точный порт sethub-app/src/features/git/smart-http.ts.
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
-
-// Минимальная реализация git smart-HTTP поверх материализованного репо
-// (точный порт sethub-app/src/features/git/smart-http.ts).
 
 /// pkt-line: 4-символьный hex-префикс длины (len включает сами 4 байта) + payload.
 fn pkt_line(s: &str) -> Vec<u8> {
@@ -37,10 +37,11 @@ fn run_git_io(args: &[&str], input: Option<&[u8]>, git_protocol: Option<&str>) -
     }
     let out = child.wait_with_output()?;
     if !out.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr)),
-        ));
+        return Err(io::Error::other(format!(
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        )));
     }
     Ok(out.stdout)
 }

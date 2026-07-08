@@ -6,8 +6,8 @@
 //! проверяя, что git2-материализация байт-совместима с git и что запушенная
 //! пользователем история сохраняется при досыпке версий.
 
-use crate::bundle::{self, SerStep, VersionData};
-use crate::smart_http;
+use crate::git::bundle::{self, SerStep, VersionData};
+use crate::git::smart_http;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -1,0 +1,485 @@
+//! GitCore — gRPC-сервис поверх git-подсистемы: smart-HTTP (clone/push),
+//! ветки/теги/merge, bundle. Обслуживает proto/git.proto (setfork.git.v1).
+use sqlx::postgres::PgPool;
+use std::path::PathBuf;
+use tonic::{Request, Response, Status};
+use uuid::Uuid;
+
+use super::util::internal;
+use crate::git::bundle::VersionData;
+use crate::git::{bundle, project, repo, smart_http, MAIN_REF};
+use crate::pb::git_core_server::GitCore;
+use crate::pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse};
+use crate::db;
+
+// Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
+fn valid_branch(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && !name.contains("..")
+}
+
+/// GitCore: git-операции (smart-HTTP, ветки/теги/merge, bundle) поверх общего пула.
+pub struct GitCoreSvc {
+    pub pool: PgPool,
+}
+
+impl GitCoreSvc {
+    // Резолв списка + загрузка всей истории версий (общее для всех RPC).
+    pub(crate) async fn load(&self, owner: &str, slug: &str) -> Result<Vec<VersionData>, Status> {
+        let (id, _v) = db::resolve_list(&self.pool, owner, slug)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| Status::not_found("list not found"))?;
+        db::load_bundle_data(&self.pool, id)
+            .await
+            .map_err(internal)
+    }
+
+    // Общая реализация bundle: загрузка версий → материализация → git bundle.
+    pub(crate) async fn build(&self, owner: &str, slug: &str) -> Result<Vec<u8>, Status> {
+        let versions = self.load(owner, slug).await?;
+        tokio::task::spawn_blocking(move || bundle::build_bundle(&versions))
+            .await
+            .map_err(internal)?
+            .map_err(internal)
+    }
+
+    // Персистентный bare-репо (bootstrap/append под локом) — общий вход read/write RPC.
+    async fn ensure(&self, owner: &str, slug: &str) -> Result<(PathBuf, Uuid), Status> {
+        repo::ensure_repo(&self.pool, owner, slug)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| Status::not_found("list not found"))
+    }
+}
+
+// Открывает bare-репо в spawn_blocking (git2-объекты не Send) и выполняет `f`;
+// JoinError и ошибка открытия схлопываются в один internal-Status.
+async fn with_repo<T, F>(bare: PathBuf, f: F) -> Result<T, Status>
+where
+    T: Send + 'static,
+    F: FnOnce(&git2::Repository) -> Result<T, Status> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let repo = git2::Repository::open_bare(&bare).map_err(internal)?;
+        f(&repo)
+    })
+    .await
+    .map_err(internal)?
+}
+
+// Подпись merge-коммитов — та же идентичность, что у детерминированных коммитов bundle.
+fn merge_sig() -> Result<git2::Signature<'static>, Status> {
+    git2::Signature::now(bundle::AUTHOR_NAME, bundle::AUTHOR_EMAIL).map_err(internal)
+}
+
+/// Текущий oid main (или None, если ветки ещё нет) — для проверки «push сдвинул main».
+fn main_oid(bare: &std::path::Path) -> Option<String> {
+    git2::Repository::open_bare(bare)
+        .ok()?
+        .refname_to_id(MAIN_REF)
+        .ok()
+        .map(|o| o.to_string())
+}
+
+// Пустая proto-строка → None (proto3 не отличает '' от отсутствия поля).
+fn opt(s: &str) -> Option<&str> {
+    (!s.is_empty()).then_some(s)
+}
+
+// BranchSnapshotData -> pb-снапшот (переиспользуется snapshot-RPC и merge-state).
+fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
+    BranchSnapshotResponse {
+        found: true,
+        tip_sha: sn.tip,
+        title: sn.title,
+        desc: sn.desc,
+        tags: sn.tags,
+        ordered: sn.ordered,
+        steps: sn
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(i, st)| SnapshotStep {
+                n: (i as i32) + 1,
+                title: st.title.clone(),
+                desc: st.desc.clone(),
+                command: st.command.clone(),
+                level: st.level.clone(),
+                why: st.why.clone(),
+                section: st.section.clone(),
+                subtasks: st.subtasks.clone(),
+                refs: st.refs.iter().map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() }).collect(),
+                r#type: st.block_type.clone(),
+                content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
+            })
+            .collect(),
+    }
+}
+
+#[tonic::async_trait]
+impl GitCore for GitCoreSvc {
+    async fn info_refs_upload_pack(&self, req: Request<InfoRefsRequest>) -> Result<Response<BytesResponse>, Status> {
+        let InfoRefsRequest { repo, git_protocol } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let data = tokio::task::spawn_blocking(move || smart_http::upload_pack_advertise(&bare, opt(&git_protocol)))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+        Ok(Response::new(BytesResponse { data }))
+    }
+    async fn info_refs_receive_pack(&self, req: Request<InfoRefsRequest>) -> Result<Response<BytesResponse>, Status> {
+        let InfoRefsRequest { repo, git_protocol } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let data = tokio::task::spawn_blocking(move || smart_http::receive_pack_advertise(&bare, opt(&git_protocol)))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+        Ok(Response::new(BytesResponse { data }))
+    }
+    async fn upload_pack(&self, req: Request<PostRequest>) -> Result<Response<BytesResponse>, Status> {
+        let PostRequest { repo, body, git_protocol } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let data = tokio::task::spawn_blocking(move || smart_http::upload_pack_rpc(&bare, &body, opt(&git_protocol)))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
+        Ok(Response::new(BytesResponse { data }))
+    }
+    async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
+        let PostRequest { repo, body, git_protocol } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Критическая секция: receive-pack + проекция под одним локом репо
+        // (ленивый append не вклинивается между приёмом и проекцией).
+        let _guard = repo::repo_guard(&self.pool, id)
+            .await
+            .map_err(internal)?;
+        let bare_recv = bare.clone();
+        // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
+        // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
+        // ветку-черновик main не двигает → иначе плодились бы дубли версий.
+        let (data, moved) = tokio::task::spawn_blocking(move || -> std::io::Result<(Vec<u8>, bool)> {
+            let before = main_oid(&bare_recv);
+            let data = smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol))?;
+            let after = main_oid(&bare_recv);
+            Ok((data, after.is_some() && after != before))
+        })
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
+        // Проекция list.json нового main tip → новая версия (0 = не спроецировано).
+        let new_version = if moved {
+            project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0)
+        } else {
+            0
+        };
+        Ok(Response::new(ReceivePackResponse { data, new_version }))
+    }
+    async fn create_bundle(&self, req: Request<RepoRef>) -> Result<Response<BytesResponse>, Status> {
+        let RepoRef { owner, slug } = req.into_inner();
+        // Персистентный репо (как TS bundleRepo) — bundle включает запушенные коммиты.
+        let data = repo::bundle_repo(&self.pool, &owner, &slug)
+            .await
+            .map_err(internal)?
+            .ok_or_else(|| Status::not_found("list not found"))?;
+        Ok(Response::new(BytesResponse { data }))
+    }
+
+    async fn list_branches(&self, req: Request<RepoRef>) -> Result<Response<BranchesResponse>, Status> {
+        let RepoRef { owner, slug } = req.into_inner();
+        let (bare, _id) = self.ensure(&owner, &slug).await?;
+        // git2-объекты не Send → всё в with_repo (spawn_blocking), наружу только owned-данные.
+        let branches = with_repo(bare, |repo| {
+            let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
+            let mut out: Vec<Branch> = Vec::new();
+            for b in repo.branches(Some(git2::BranchType::Local)).map_err(internal)? {
+                let (branch, _) = b.map_err(internal)?;
+                let name = branch.name().ok().flatten().unwrap_or("").to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let tip = match branch.get().target() {
+                    Some(t) => t,
+                    None => continue,
+                };
+                let (ahead, behind) = if name == "main" {
+                    (0, 0)
+                } else {
+                    repo.graph_ahead_behind(tip, main_tip).unwrap_or((0, 0))
+                };
+                out.push(Branch {
+                    name: name.clone(),
+                    tip_sha: tip.to_string(),
+                    is_default: name == "main",
+                    ahead: ahead as i32,
+                    behind: behind as i32,
+                });
+            }
+            // main первым, остальные по имени.
+            out.sort_by(|a, b| b.is_default.cmp(&a.is_default).then(a.name.cmp(&b.name)));
+            Ok(out)
+        })
+        .await?;
+        Ok(Response::new(BranchesResponse { branches }))
+    }
+
+    async fn get_branch_snapshot(
+        &self,
+        req: Request<BranchSnapshotRequest>,
+    ) -> Result<Response<BranchSnapshotResponse>, Status> {
+        let BranchSnapshotRequest { repo, branch } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&branch) {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let refname = format!("refs/heads/{branch}");
+        let snap = tokio::task::spawn_blocking(move || project::branch_snapshot(&bare, &refname))
+            .await
+            .map_err(internal)?;
+        let Some(sn) = snap else {
+            return Ok(Response::new(BranchSnapshotResponse { found: false, ..Default::default() }));
+        };
+        Ok(Response::new(to_snapshot_pb(sn)))
+    }
+
+    async fn create_branch(&self, req: Request<CreateBranchRequest>) -> Result<Response<BranchOpResponse>, Status> {
+        let CreateBranchRequest { repo, name, from } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        let from = if from.is_empty() { "main".to_string() } else { from };
+        if !valid_branch(&name) || !valid_branch(&from) {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let tip = with_repo(bare, move |repo| {
+            let base = repo
+                .refname_to_id(&format!("refs/heads/{from}"))
+                .map_err(|_| Status::not_found("base branch not found"))?;
+            let commit = repo.find_commit(base).map_err(internal)?;
+            // force=false: существующая ветка → ошибка (already_exists наружу).
+            // .map(|_| ()) сразу дропает Branch<'_> (заимствует repo).
+            match repo.branch(&name, &commit, false).map(|_| ()) {
+                Ok(()) => Ok(base.to_string()),
+                Err(e) if e.code() == git2::ErrorCode::Exists => Err(Status::already_exists("branch exists")),
+                Err(e) => Err(internal(e)),
+            }
+        })
+        .await?;
+        Ok(Response::new(BranchOpResponse { tip_sha: tip }))
+    }
+
+    async fn delete_branch(&self, req: Request<DeleteBranchRequest>) -> Result<Response<BranchOpResponse>, Status> {
+        let DeleteBranchRequest { repo, name } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&name) {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        if name == "main" {
+            return Err(Status::failed_precondition("main is protected"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        with_repo(bare, move |repo| {
+            let mut branch = repo
+                .find_branch(&name, git2::BranchType::Local)
+                .map_err(|_| Status::not_found("branch not found"))?;
+            branch.delete().map_err(internal)
+        })
+        .await?;
+        Ok(Response::new(BranchOpResponse { tip_sha: String::new() }))
+    }
+
+    async fn merge_branch(&self, req: Request<MergeBranchRequest>) -> Result<Response<MergeBranchResponse>, Status> {
+        let MergeBranchRequest { repo, name } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&name) || name == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Merge двигает main → критическая секция с проекцией (как receive_pack).
+        let _guard = repo::repo_guard(&self.pool, id)
+            .await
+            .map_err(internal)?;
+        let (tip, ff) = with_repo(bare.clone(), move |repo| {
+            let branch_tip = repo
+                .refname_to_id(&format!("refs/heads/{name}"))
+                .map_err(|_| Status::not_found("branch not found"))?;
+            let main_tip = repo
+                .refname_to_id(MAIN_REF)
+                .map_err(internal)?;
+            let (ahead, _behind) = repo
+                .graph_ahead_behind(branch_tip, main_tip)
+                .map_err(internal)?;
+            if ahead == 0 {
+                return Err(Status::failed_precondition("nothing-to-merge"));
+            }
+            // main — предок ветки → fast-forward: просто двигаем ref.
+            if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) {
+                repo.reference(MAIN_REF, branch_tip, true, &format!("merge {name}: fast-forward"))
+                    .map_err(internal)?;
+                return Ok((branch_tip.to_string(), true));
+            }
+            // Расхождение → merge-commit; конфликт индекса = failed_precondition.
+            let ours = repo.find_commit(main_tip).map_err(internal)?;
+            let theirs = repo.find_commit(branch_tip).map_err(internal)?;
+            let mut idx = repo
+                .merge_commits(&ours, &theirs, None)
+                .map_err(internal)?;
+            if idx.has_conflicts() {
+                return Err(Status::failed_precondition("conflict"));
+            }
+            let tree_id = idx.write_tree_to(repo).map_err(internal)?;
+            let tree = repo.find_tree(tree_id).map_err(internal)?;
+            let sig = merge_sig()?;
+            let msg = format!("Merge branch '{name}'");
+            let merged = repo
+                .commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs])
+                .map_err(internal)?;
+            Ok((merged.to_string(), false))
+        })
+        .await?;
+        // main сдвинулся → проекция новой версии (0 = list.json не изменился).
+        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: ff }))
+    }
+
+    async fn get_merge_state(&self, req: Request<MergeStateRequest>) -> Result<Response<MergeStateResponse>, Status> {
+        let MergeStateRequest { repo, branch } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&branch) || branch == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let state = tokio::task::spawn_blocking(move || -> Result<Option<(String, project::BranchSnapshotData, project::BranchSnapshotData, project::BranchSnapshotData)>, String> {
+            let repo = git2::Repository::open_bare(&bare).map_err(|e| e.to_string())?;
+            let Ok(branch_tip) = repo.refname_to_id(&format!("refs/heads/{branch}")) else {
+                return Ok(None);
+            };
+            let main_tip = repo.refname_to_id(MAIN_REF).map_err(|e| e.to_string())?;
+            let Ok(base_oid) = repo.merge_base(main_tip, branch_tip) else {
+                return Ok(None);
+            };
+            drop(repo); // commit_snapshot открывает репо сам
+            let base = project::commit_snapshot(&bare, &base_oid.to_string());
+            let ours = project::branch_snapshot(&bare, MAIN_REF);
+            let theirs = project::branch_snapshot(&bare, &format!("refs/heads/{branch}"));
+            match (base, ours, theirs) {
+                (Some(b), Some(o), Some(t)) => Ok(Some((base_oid.to_string(), b, o, t))),
+                _ => Ok(None),
+            }
+        })
+        .await
+        .map_err(internal)?
+        .map_err(Status::internal)?;
+        let Some((base_sha, b, o, t)) = state else {
+            return Ok(Response::new(MergeStateResponse { found: false, ..Default::default() }));
+        };
+        Ok(Response::new(MergeStateResponse {
+            found: true,
+            merge_base_sha: base_sha,
+            base: Some(to_snapshot_pb(b)),
+            ours: Some(to_snapshot_pb(o)),
+            theirs: Some(to_snapshot_pb(t)),
+        }))
+    }
+
+    async fn merge_resolved(&self, req: Request<MergeResolvedRequest>) -> Result<Response<MergeBranchResponse>, Status> {
+        let MergeResolvedRequest { repo, branch, list_json } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&branch) || branch == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        // Контент обязан быть валидным JSON-объектом (list.json — канон).
+        if serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&list_json).is_err() {
+            return Err(Status::invalid_argument("list_json is not a JSON object"));
+        }
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let _guard = repo::repo_guard(&self.pool, id)
+            .await
+            .map_err(internal)?;
+        let tip = with_repo(bare.clone(), move |repo| {
+            let branch_tip = repo
+                .refname_to_id(&format!("refs/heads/{branch}"))
+                .map_err(|_| Status::not_found("branch not found"))?;
+            let main_tip = repo
+                .refname_to_id(MAIN_REF)
+                .map_err(internal)?;
+            if main_tip == branch_tip {
+                return Err(Status::failed_precondition("nothing-to-merge"));
+            }
+            // Дерево = дерево main c заменённым list.json и БЕЗ steps/ (см. proto).
+            let ours = repo.find_commit(main_tip).map_err(internal)?;
+            let theirs = repo.find_commit(branch_tip).map_err(internal)?;
+            let blob = repo.blob(&list_json).map_err(internal)?;
+            let mut tb = repo
+                .treebuilder(Some(&ours.tree().map_err(internal)?))
+                .map_err(internal)?;
+            tb.insert("list.json", blob, 0o100644).map_err(internal)?;
+            if tb.get("steps").map_err(internal)?.is_some() {
+                tb.remove("steps").map_err(internal)?;
+            }
+            let tree_id = tb.write().map_err(internal)?;
+            let tree = repo.find_tree(tree_id).map_err(internal)?;
+            let sig = merge_sig()?;
+            let msg = format!("Merge branch '{branch}' (resolved)");
+            let merged = repo
+                .commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs])
+                .map_err(internal)?;
+            Ok(merged.to_string())
+        })
+        .await?;
+        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: false }))
+    }
+
+    async fn create_tag(&self, req: Request<CreateTagRequest>) -> Result<Response<BranchOpResponse>, Status> {
+        let CreateTagRequest { repo, name, version } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&name) {
+            return Err(Status::invalid_argument("bad tag name"));
+        }
+        let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
+        let sha = with_repo(bare, move |repo| {
+            // Коммит версии: у каждой версии уже есть лёгкий тег vN.
+            let target = repo
+                .refname_to_id(&format!("refs/tags/v{version}"))
+                .map_err(|_| Status::not_found("version not found"))?;
+            let obj = repo.find_object(target, None).map_err(internal)?;
+            // force=true: повторный релиз с тем же именем перевесит тег.
+            repo.tag_lightweight(&name, &obj, true).map_err(internal)?;
+            Ok(target.to_string())
+        })
+        .await?;
+        Ok(Response::new(BranchOpResponse { tip_sha: sha }))
+    }
+
+    async fn list_tags(&self, req: Request<RepoRef>) -> Result<Response<TagsResponse>, Status> {
+        let RepoRef { owner, slug } = req.into_inner();
+        let (bare, _id) = self.ensure(&owner, &slug).await?;
+        let tags = with_repo(bare, |repo| {
+            let mut out: Vec<Tag> = Vec::new();
+            repo.tag_foreach(|oid, name_bytes| {
+                if let Ok(name) = std::str::from_utf8(name_bytes) {
+                    let name = name.strip_prefix("refs/tags/").unwrap_or(name).to_string();
+                    // peel до коммита (лёгкий тег указывает прямо на коммит).
+                    let sha = repo
+                        .find_object(oid, None)
+                        .and_then(|o| o.peel_to_commit())
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|_| oid.to_string());
+                    out.push(Tag { name, target_sha: sha });
+                }
+                true
+            })
+            .map_err(internal)?;
+            out.sort_by(|a, b| a.name.cmp(&b.name));
+            Ok(out)
+        })
+        .await?;
+        Ok(Response::new(TagsResponse { tags }))
+    }
+}
