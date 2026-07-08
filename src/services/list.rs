@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 use super::util::{internal, loc_json, loc_map, parse_id, refs_json};
 use crate::blocks::is_step_type;
+use crate::db;
 use crate::pb_domain::list_read_server::ListRead;
 use crate::pb_domain::list_write_server::ListWrite;
 use crate::pb_domain::{
@@ -364,87 +365,42 @@ pub struct ListWriteSvc {
     pub pool: PgPool,
 }
 
-async fn insert_steps(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ver_id: Uuid,
-    steps: &[NewStep],
-) -> Result<(), Status> {
-        for (i, s) in steps.iter().enumerate() {
-            let image_ref = if s.image_ref.is_empty() { None } else { Some(s.image_ref.clone()) };
-            let subtasks =
-                serde_json::Value::Array(s.subtasks.iter().map(|t| loc_json(&Some(t.clone()))).collect());
-            // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
-            let is_step = is_step_type(&s.r#type);
-            let block_type = if is_step { "step" } else { s.r#type.as_str() };
-            let content: serde_json::Value = if is_step || s.content_json.is_empty() {
-                serde_json::json!({})
-            } else {
-                serde_json::from_str(&s.content_json).unwrap_or_else(|_| serde_json::json!({}))
-            };
-            sqlx::query(
-                "insert into steps (version_id, n, type, content, title, \"desc\", command, has_image, image_key, \
-                                    level, why, section, subtasks, refs) \
-                 values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10::step_level, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb)",
-            )
-            .bind(ver_id)
-            .bind((i as i32) + 1)
-            .bind(block_type)
-            .bind(content)
-            .bind(loc_json(&s.title))
-            .bind(loc_json(&s.desc))
-            .bind(&s.command)
-            .bind(image_ref.is_some())
-            .bind(image_ref)
-            .bind(if s.level.is_empty() { "required" } else { &s.level })
-            .bind(loc_json(&s.why))
-            .bind(loc_json(&s.section))
-            .bind(subtasks)
-            .bind(refs_json(&s.refs))
-            .execute(&mut **tx)
-            .await
-            .map_err(internal)?;
-        }
-    Ok(())
+// NewStep → db::StepRow: семантика TS-адаптера как есть — LocaleText без trim
+// и фильтрации, imageRef → image_key, пустой level = required.
+fn step_row(s: &NewStep) -> db::StepRow {
+    // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
+    let is_step = is_step_type(&s.r#type);
+    db::StepRow {
+        block_type: if is_step { "step".into() } else { s.r#type.clone() },
+        content: if is_step || s.content_json.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&s.content_json).unwrap_or_else(|_| serde_json::json!({}))
+        },
+        title: loc_json(&s.title),
+        desc: loc_json(&s.desc),
+        command: s.command.clone(),
+        image_key: if s.image_ref.is_empty() { None } else { Some(s.image_ref.clone()) },
+        level: db::Level::parse(&s.level),
+        why: loc_json(&s.why),
+        section: loc_json(&s.section),
+        subtasks: serde_json::Value::Array(s.subtasks.iter().map(|t| loc_json(&Some(t.clone()))).collect()),
+        refs: refs_json(&s.refs),
+    }
 }
 
 #[tonic::async_trait]
 impl ListWrite for ListWriteSvc {
     async fn add_version(&self, req: Request<AddVersionRequest>) -> Result<Response<Version>, Status> {
         let AddVersionRequest { list_id, note, steps } = req.into_inner();
-        let tid = Uuid::parse_str(&list_id).map_err(|_| Status::invalid_argument("bad uuid"))?;
-
-        let mut tx = self.pool.begin().await.map_err(internal)?;
-        let current: Option<i32> = sqlx::query_scalar("select current_version from templates where id = $1 for update")
-            .bind(tid)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(internal)?;
-        let Some(current) = current else {
+        let tid = parse_id(&list_id)?;
+        let rows: Vec<db::StepRow> = steps.iter().map(step_row).collect();
+        // Транзакция «новая версия» общая с git-проекцией — db::add_version_rows.
+        let Some((ver_id, new_version, created_ms)) =
+            db::add_version_rows(&self.pool, tid, &note, &rows).await.map_err(internal)?
+        else {
             return Err(Status::not_found("list not found"));
         };
-        let new_version = current + 1;
-
-        let row: (Uuid, i64) = sqlx::query_as(
-            "insert into template_versions (template_id, version, note) values ($1, $2, $3) \
-             returning id, floor(extract(epoch from created_at) * 1000)::bigint",
-        )
-        .bind(tid)
-        .bind(new_version)
-        .bind(&note)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(internal)?;
-        let (ver_id, created_ms) = row;
-
-        insert_steps(&mut tx, ver_id, &steps).await?;
-
-        sqlx::query("update templates set current_version = $2, updated_at = now() where id = $1")
-            .bind(tid)
-            .bind(new_version)
-            .execute(&mut *tx)
-            .await
-            .map_err(internal)?;
-        tx.commit().await.map_err(internal)?;
 
         Ok(Response::new(Version {
             id: ver_id.to_string(),
@@ -491,9 +447,8 @@ impl ListWrite for ListWriteSvc {
         .fetch_one(&mut *tx)
         .await
         .map_err(internal)?;
-        let _ = ver_id;
-
-        insert_steps(&mut tx, ver_id, &r.steps).await?;
+        let rows: Vec<db::StepRow> = r.steps.iter().map(step_row).collect();
+        db::insert_step_rows(&mut tx, ver_id, &rows).await.map_err(internal)?;
         tx.commit().await.map_err(internal)?;
 
         Ok(Response::new(List {
