@@ -11,8 +11,9 @@ services:
     environment:
       SETFORK_CORE_ADDR: 0.0.0.0:50051
       GIT_DATA_DIR: /data/git
-      # Auth канала Next↔ядро: тот же токен задать фронту. Пусто = канал открыт.
-      SETFORK_CORE_TOKEN: ${SETFORK_CORE_TOKEN:-}
+      # Auth канала Next↔ядро: тот же токен задать фронту. ОБЯЗАТЕЛЕН — без него ядро
+      # не стартует (fail-closed). `:?` роняет compose, если токен не задан в окружении.
+      SETFORK_CORE_TOKEN: ${SETFORK_CORE_TOKEN:?SETFORK_CORE_TOKEN обязателен (тот же токен — фронту; openssl rand -hex 32)}
       # Rate-limit RPC: обычные/тяжёлые методы, запросов в минуту (0 = выкл).
       SETFORK_RPC_RPM: ${SETFORK_RPC_RPM:-600}
       SETFORK_RPC_RPM_HEAVY: ${SETFORK_RPC_RPM_HEAVY:-60}
