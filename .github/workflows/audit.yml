@@ -1,0 +1,21 @@
+name: Audit
+
+# Аудит зависимостей (RustSec advisory DB): на PR/пуш в master + еженедельно —
+# новые CVE в crates всплывают и без изменений кода. rustsec/audit-check падает
+# на найденных advisory и аннотирует их в PR.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '23 6 * * 1' # понедельник, еженедельно
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
