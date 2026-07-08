@@ -1,3 +1,4 @@
+use crate::blocks::is_step_type;
 use crate::git::bundle::{SerStep, StepRef, VersionData};
 use crate::git::project::ProjStep;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -150,7 +151,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 })
                 .unwrap_or_default();
             // Блочная модель: type/content несём только у не-step блоков.
-            let block_type: Option<String> = sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| t != "step");
+            let block_type: Option<String> = sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| !is_step_type(t));
             let content: serde_json::Value = if block_type.is_some() {
                 sr.try_get::<serde_json::Value, _>("content").unwrap_or(serde_json::Value::Null)
             } else {
@@ -230,8 +231,9 @@ pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[
                 .collect(),
         );
         // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
-        let block_type = if s.block_type.is_empty() { "step" } else { s.block_type.as_str() };
-        let content = if s.block_type.is_empty() { serde_json::json!({}) } else { s.content.clone() };
+        let is_step = is_step_type(&s.block_type);
+        let block_type = if is_step { "step" } else { s.block_type.as_str() };
+        let content = if is_step { serde_json::json!({}) } else { s.content.clone() };
         sqlx::query(
             "insert into steps (version_id, n, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
              values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, false, null, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb)",

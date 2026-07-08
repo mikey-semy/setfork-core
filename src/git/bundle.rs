@@ -5,6 +5,9 @@ use std::process::Command;
 
 use git2::{ObjectType, Oid, Repository, Signature, Time};
 
+use super::MAIN_REF;
+use crate::blocks::is_step_type;
+
 // Доменные структуры для сериализации версии в git-дерево (порт serialize.ts/bundle.ts).
 pub struct StepRef {
     pub label: String,
@@ -29,7 +32,7 @@ pub struct SerStep {
 
 /// Шаг-блок ли (у него собственные поля; у text/image — content).
 fn is_step_block(s: &SerStep) -> bool {
-    s.block_type.as_deref().map_or(true, |t| t == "step")
+    s.block_type.as_deref().map_or(true, is_step_type)
 }
 pub struct VersionData {
     pub version: i32,
@@ -43,8 +46,9 @@ pub struct VersionData {
 }
 
 // Идентичность коммитов — ОДИНАКОВО с TS (store.ts/bundle.ts) для детерминированных SHA.
-const AUTHOR_NAME: &str = "SetFork";
-const AUTHOR_EMAIL: &str = "git@setfork.com";
+// Переиспользуются merge-коммитами в services::git_core.
+pub const AUTHOR_NAME: &str = "SetFork";
+pub const AUTHOR_EMAIL: &str = "git@setfork.com";
 
 /// list.json — машиночитаемый снимок версии (то, что парсит проекция при push).
 fn list_json(v: &VersionData) -> String {
@@ -353,8 +357,8 @@ fn build_history(repo: &Repository, versions: &[VersionData], mut parent: Option
         parent = Some(oid);
     }
     if let Some(tip) = parent {
-        repo.reference("refs/heads/main", tip, true, "setfork")?;
-        let _ = repo.set_head("refs/heads/main");
+        repo.reference(MAIN_REF, tip, true, "setfork")?;
+        let _ = repo.set_head(MAIN_REF);
     }
     Ok(parent)
 }
@@ -436,7 +440,7 @@ pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<()> 
     }
     (|| -> Result<(), git2::Error> {
         let repo = Repository::open_bare(bare)?;
-        let parent = repo.refname_to_id("refs/heads/main").ok();
+        let parent = repo.refname_to_id(MAIN_REF).ok();
         build_history(&repo, versions, parent)?;
         Ok(())
     })()

@@ -2,6 +2,7 @@
 // Вся логика — в services/ (транспорт по доменам), git/ (git-подсистема), db.
 use tonic::{transport::Server, Request, Status};
 
+mod blocks;
 mod db;
 mod git;
 pub mod pb;

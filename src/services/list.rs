@@ -18,7 +18,8 @@ use sqlx::Row;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use super::util::{internal, loc_json, parse_id, refs_json};
+use super::util::{internal, loc_json, loc_map, parse_id, refs_json};
+use crate::blocks::is_step_type;
 use crate::pb_domain::list_read_server::ListRead;
 use crate::pb_domain::list_write_server::ListWrite;
 use crate::pb_domain::{
@@ -29,18 +30,6 @@ use crate::pb_domain::{
 
 pub struct ListReadSvc {
     pub pool: PgPool,
-}
-
-fn loc_map(v: &serde_json::Value) -> LocaleText {
-    let mut m = std::collections::HashMap::new();
-    if let Some(obj) = v.as_object() {
-        for (k, val) in obj {
-            if let Some(s) = val.as_str() {
-                m.insert(k.clone(), s.to_string());
-            }
-        }
-    }
-    LocaleText { v: m }
 }
 
 // ── Golden-сверка с TS ────────────────────────────────────────────────
@@ -283,7 +272,7 @@ impl ListRead for ListReadSvc {
                 // '' у шага (в т.ч. NULL/'step'); тип несём только у text/image.
                 let block_ty = {
                     let t = s.get::<Option<String>, _>("type").unwrap_or_default();
-                    if t == "step" { String::new() } else { t }
+                    if is_step_type(&t) { String::new() } else { t }
                 };
                 Step {
                     id: s.get::<Uuid, _>("id").to_string(),
@@ -385,7 +374,7 @@ async fn insert_steps(
             let subtasks =
                 serde_json::Value::Array(s.subtasks.iter().map(|t| loc_json(&Some(t.clone()))).collect());
             // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
-            let is_step = s.r#type.is_empty() || s.r#type == "step";
+            let is_step = is_step_type(&s.r#type);
             let block_type = if is_step { "step" } else { s.r#type.as_str() };
             let content: serde_json::Value = if is_step || s.content_json.is_empty() {
                 serde_json::json!({})

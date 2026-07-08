@@ -1,3 +1,5 @@
+use super::MAIN_REF;
+use crate::blocks::is_step_type;
 use crate::db;
 use serde::Deserialize;
 use sqlx::PgPool;
@@ -23,9 +25,6 @@ pub struct ProjStep {
     pub section: String,
     pub subtasks: Vec<String>,
     pub refs: Vec<ProjRef>,
-}
-fn proj_is_step(t: &str) -> bool {
-    t.is_empty() || t == "step"
 }
 
 // Мягкий парс list.json (все поля optional) — порт ParsedList из project.ts.
@@ -62,7 +61,7 @@ struct RawList {
 // Все git2-объекты — не Send, поэтому извлекаем owned-данные ДО любого await.
 // steps: map "NN" (базовое имя без slug/расширения → 1-based индекс) → содержимое .md.
 fn read_tip(bare: &Path) -> Option<(String, Vec<u8>, String, HashMap<i32, String>)> {
-    read_ref_tip(bare, "refs/heads/main")
+    read_ref_tip(bare, MAIN_REF)
 }
 
 // То же для произвольного ref (ветки) — база просмотра списка «на ветке».
@@ -229,7 +228,7 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
     let mut kept: Vec<(i32, ProjStep)> = Vec::new();
     for (idx, s) in steps_raw.iter().enumerate() {
         let bt = s.block_type.clone().unwrap_or_default();
-        let is_step = proj_is_step(&bt);
+        let is_step = is_step_type(&bt);
         if is_step && s.title.as_deref().unwrap_or("").trim().is_empty() {
             continue;
         }
@@ -265,7 +264,7 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.
     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.
     for (orig_n, step) in kept.iter_mut() {
-        if !proj_is_step(&step.block_type) {
+        if !is_step_type(&step.block_type) {
             continue;
         }
         let Some(content) = step_md.get(orig_n) else { continue };

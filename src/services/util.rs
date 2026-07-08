@@ -12,6 +12,18 @@ pub fn parse_id(s: &str) -> Result<Uuid, Status> {
     Uuid::parse_str(s).map_err(|_| Status::invalid_argument("bad uuid"))
 }
 
+pub fn loc_map(v: &serde_json::Value) -> LocaleText {
+    let mut m = std::collections::HashMap::new();
+    if let Some(obj) = v.as_object() {
+        for (k, val) in obj {
+            if let Some(s) = val.as_str() {
+                m.insert(k.clone(), s.to_string());
+            }
+        }
+    }
+    LocaleText { v: m }
+}
+
 pub fn loc_json(l: &Option<LocaleText>) -> serde_json::Value {
     let mut m = serde_json::Map::new();
     if let Some(lt) = l {

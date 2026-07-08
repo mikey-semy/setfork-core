@@ -4,18 +4,17 @@ use sqlx::postgres::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use super::util::{internal, loc_json, parse_id, refs_json};
+use super::util::{internal, loc_json, loc_map, parse_id, refs_json};
+use crate::blocks::is_step_type;
 use crate::pb_domain::collab_write_server::CollabWrite;
 use crate::pb_domain::{
     AddIssueCommentRequest, AddSuggestionCommentRequest, BoolResponse, CreateSuggestionRequest, Issue, IssueComment,
     LocaleText, NewStep, OpenIssueRequest, SetIssueStatusRequest, StepRef, Suggestion, SuggestionComment,
 };
 
-// LocaleText-обёртка из jsonb-объекта {lang: str}.
+// LocaleText-обёртка из jsonb-объекта {lang: str}; не-объект → None.
 fn loc_from_obj(v: Option<&serde_json::Value>) -> Option<LocaleText> {
-    v.and_then(|x| x.as_object()).map(|o| LocaleText {
-        v: o.iter().filter_map(|(k, val)| val.as_str().map(|s| (k.clone(), s.to_string()))).collect(),
-    })
+    v.filter(|x| x.is_object()).map(loc_map)
 }
 
 // ProposedItem-jsonb (как domainStepToProposed в adapter.ts): image_key опускаем,
@@ -39,7 +38,7 @@ fn proposed_json(s: &NewStep) -> serde_json::Value {
     );
     m.insert("refs".into(), refs_json(&s.refs));
     // Блочная модель: type/content — только у не-step блоков (как toProposedItems в TS).
-    if !(s.r#type.is_empty() || s.r#type == "step") {
+    if !is_step_type(&s.r#type) {
         m.insert("type".into(), serde_json::Value::String(s.r#type.clone()));
         let content = if s.content_json.is_empty() {
             serde_json::json!({})
@@ -53,6 +52,7 @@ fn proposed_json(s: &NewStep) -> serde_json::Value {
 
 // ProposedItem-jsonb → NewStep (обратно, для возврата Suggestion.steps).
 fn json_to_step(v: &serde_json::Value) -> NewStep {
+    let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
     let subtasks = v
         .get("subtasks")
         .and_then(|x| x.as_array())
@@ -82,14 +82,11 @@ fn json_to_step(v: &serde_json::Value) -> NewStep {
         refs,
         image_ref: v.get("imageKey").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         // type/content_json — только у не-step блоков.
-        r#type: v.get("type").and_then(|x| x.as_str()).filter(|t| *t != "step").unwrap_or("").to_string(),
-        content_json: {
-            let ty = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
-            if ty.is_empty() || ty == "step" {
-                String::new()
-            } else {
-                v.get("content").map(|c| c.to_string()).unwrap_or_default()
-            }
+        r#type: if is_step_type(ty) { String::new() } else { ty.to_string() },
+        content_json: if is_step_type(ty) {
+            String::new()
+        } else {
+            v.get("content").map(|c| c.to_string()).unwrap_or_default()
         },
     }
 }

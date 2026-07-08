@@ -3,6 +3,9 @@
 // project    — обратное чтение состояния списка из git-дерева (проекция в БД);
 // repo       — персистентные bare-репо (GIT_DATA_DIR), пер-репо локи;
 // smart_http — git smart-HTTP поверх материализованного репо (порт smart-http.ts).
+/// Единственная ветка-канон: все проекции/merge/защита хука ходят по ней.
+pub const MAIN_REF: &str = "refs/heads/main";
+
 pub mod bundle;
 pub mod project;
 pub mod repo;
