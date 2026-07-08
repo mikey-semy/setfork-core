@@ -1,5 +1,5 @@
-// CollabWrite — issues/suggestions/comments (write).
-// Зеркалит src/features/collab-store/adapter.ts. Даты — unix-ms (0 = null).
+//! CollabWrite — issues/suggestions/comments (write).
+//! Зеркалит src/features/collab-store/adapter.ts. Даты — unix-ms (0 = null).
 use sqlx::postgres::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -91,6 +91,7 @@ fn json_to_step(v: &serde_json::Value) -> NewStep {
     }
 }
 
+/// CollabWrite: issues, предложения и комментарии.
 pub struct CollabWriteSvc {
     pub pool: PgPool,
 }

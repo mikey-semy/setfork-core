@@ -1,3 +1,6 @@
+//! Postgres-слой (та же БД, что у Next): пул, чтение истории версий для
+//! материализации, единый движок записи версий (StepRow/add_version_rows),
+//! обновление метаданных списка из git-проекции.
 use crate::blocks::is_step_type;
 use crate::git::bundle::{SerStep, StepRef, VersionData};
 use crate::git::project::ProjStep;
@@ -113,22 +116,19 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
     .fetch_all(pool)
     .await?;
 
-    let mut out = Vec::with_capacity(vrows.len());
-    for vr in vrows {
-        let vid: Uuid = vr.get("id");
-        let version: i32 = vr.get("version");
-        let note: String = vr.get("note");
-        let ts: i64 = vr.get("ts");
-
-        let srows = sqlx::query(
-            "select n, \"type\", content, title, \"desc\", command, level::text as level, why, section, subtasks, refs \
-             from steps where version_id = $1 order by n asc",
-        )
-        .bind(vid)
-        .fetch_all(pool)
-        .await?;
-
-        let mut steps = Vec::with_capacity(srows.len());
+    // Шаги ВСЕХ версий одним запросом (вместо запроса на версию — история
+    // длинного списка давала N+1 round-trip'ов), группировка по version_id.
+    let srows = sqlx::query(
+        "select s.version_id, s.n, s.\"type\", s.content, s.title, s.\"desc\", s.command, \
+                s.level::text as level, s.why, s.section, s.subtasks, s.refs \
+         from steps s join template_versions tv on tv.id = s.version_id \
+         where tv.template_id = $1 order by s.version_id, s.n asc",
+    )
+    .bind(list_id)
+    .fetch_all(pool)
+    .await?;
+    let mut steps_by_ver: std::collections::HashMap<Uuid, Vec<SerStep>> = std::collections::HashMap::new();
+    {
         for sr in srows {
             let subtasks_json: serde_json::Value = sr.get("subtasks");
             let subtasks = subtasks_json
@@ -158,7 +158,8 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
             } else {
                 serde_json::Value::Null
             };
-            steps.push(SerStep {
+            let vid: Uuid = sr.get("version_id");
+            steps_by_ver.entry(vid).or_default().push(SerStep {
                 n: sr.get("n"),
                 block_type,
                 content,
@@ -172,15 +173,20 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 refs,
             });
         }
+    }
+
+    let mut out = Vec::with_capacity(vrows.len());
+    for vr in vrows {
+        let vid: Uuid = vr.get("id");
         out.push(VersionData {
-            version,
-            note,
-            ts,
+            version: vr.get("version"),
+            note: vr.get("note"),
+            ts: vr.get("ts"),
             title: title.clone(),
             desc: desc.clone(),
             tags: tags.clone(),
             ordered,
-            steps,
+            steps: steps_by_ver.remove(&vid).unwrap_or_default(),
         });
     }
     Ok(out)

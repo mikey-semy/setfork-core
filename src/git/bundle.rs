@@ -1,3 +1,6 @@
+//! Сериализация версий списка в git-дерево и материализация репо — байт-в-байт
+//! зеркало TS (serialize.ts/store.ts/bundle.ts): фиксированные автор/даты дают
+//! детерминированные SHA, golden-сверка сравнивает их с inproc-реализацией фронта.
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -32,7 +35,7 @@ pub struct SerStep {
 
 /// Шаг-блок ли (у него собственные поля; у text/image — content).
 fn is_step_block(s: &SerStep) -> bool {
-    s.block_type.as_deref().map_or(true, is_step_type)
+    s.block_type.as_deref().is_none_or(is_step_type)
 }
 pub struct VersionData {
     pub version: i32,
@@ -272,6 +275,8 @@ fn step_file(s: &SerStep, width: usize) -> (String, String) {
     (path, content)
 }
 
+/// Полный набор файлов версии: list.json, README.md и steps/NN-slug.md
+/// (то, что кладётся в дерево коммита vN).
 pub fn version_files(v: &VersionData) -> Vec<(String, String)> {
     let width = std::cmp::max(2, v.steps.len().to_string().len());
     let mut files = vec![
@@ -290,16 +295,17 @@ pub fn version_files(v: &VersionData) -> Vec<(String, String)> {
 fn run_git(args: &[&str]) -> io::Result<()> {
     let out = Command::new("git").args(args).output()?;
     if !out.status.success() {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!("git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr)),
-        ));
+        return Err(io::Error::other(format!(
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        )));
     }
     Ok(())
 }
 
 fn git_io(e: git2::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, format!("git2: {e}"))
+    io::Error::other(format!("git2: {e}"))
 }
 
 // Сообщение коммита: `git commit -m` добавляет завершающий \n — воспроизводим для SHA-идентичности.
@@ -389,6 +395,7 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
 // пушнутый коммит обязан нести list.json в корне.
 const PRE_RECEIVE: &str = "#!/bin/sh\nzero=0000000000000000000000000000000000000000\nwhile read old new ref; do\n  if [ \"$ref\" = \"refs/heads/main\" ]; then\n    if [ \"$new\" = \"$zero\" ]; then\n      echo \"SetFork: ветка main защищена от удаления\" >&2\n      exit 1\n    fi\n    if [ \"$old\" != \"$zero\" ] && ! git merge-base --is-ancestor \"$old\" \"$new\"; then\n      echo \"SetFork: non-fast-forward push в main запрещён (перезапись истории)\" >&2\n      exit 1\n    fi\n  fi\n  case \"$new\" in *$zero) continue ;; esac\n  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then\n    echo \"SetFork: list.json is required at the repo root\" >&2\n    exit 1\n  fi\ndone\nexit 0\n";
 
+/// Ставит pre-receive hook (защита main + обязательный list.json); идемпотентно.
 pub fn install_hook(bare: &Path) -> io::Result<()> {
     let hooks = bare.join("hooks");
     fs::create_dir_all(&hooks)?;

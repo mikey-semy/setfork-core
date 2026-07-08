@@ -1,3 +1,6 @@
+//! Персистентные bare-репо (GIT_DATA_DIR, общий с фронтом том): bootstrap из
+//! истории версий, ленивая досыпка веб-версий поверх запушенных коммитов,
+//! пер-репо локи (in-process mutex + PG advisory) — порт store.ts.
 use crate::db;
 use crate::git::bundle;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -148,8 +151,7 @@ fn bundle_all(bare: &Path) -> std::io::Result<Vec<u8>> {
         .args(["-C", &bare_s, "bundle", "create", &out_s, "--all"])
         .output()?;
     if !status.status.success() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             String::from_utf8_lossy(&status.stderr).to_string(),
         ));
     }

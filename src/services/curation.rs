@@ -1,7 +1,7 @@
-// Curation — порт CurationStore (звёзды/watch), read + write.
-// READ: простые exists/count. WRITE зеркалит src/features/curation/adapter.ts:
-// toggle возвращает НОВОЕ состояние; звезда двигает templates.stars_count под
-// одной транзакцией.
+//! Curation — порт CurationStore (звёзды/watch), read + write.
+//! READ: простые exists/count. WRITE зеркалит src/features/curation/adapter.ts:
+//! toggle возвращает НОВОЕ состояние; звезда двигает templates.stars_count под
+//! одной транзакцией.
 use sqlx::postgres::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
@@ -11,6 +11,7 @@ use crate::pb_domain::curation_read_server::CurationRead;
 use crate::pb_domain::curation_write_server::CurationWrite;
 use crate::pb_domain::{BoolResponse, CountResponse, IdsResponse, ListId, UserList};
 
+/// CurationRead: exists/count по звёздам и watch.
 pub struct CurationReadSvc {
     pub pool: PgPool,
 }
@@ -65,6 +66,7 @@ impl CurationRead for CurationReadSvc {
     }
 }
 
+/// CurationWrite: toggle звёзд/watch (звезда двигает stars_count транзакционно).
 pub struct CurationWriteSvc {
     pub pool: PgPool,
 }

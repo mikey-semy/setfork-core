@@ -1,4 +1,4 @@
-// Общие хелперы доменных сервисов: маппинг ошибок, uuid, LocaleText/refs → jsonb.
+//! Общие хелперы доменных сервисов: маппинг ошибок, uuid, LocaleText/refs → jsonb.
 use tonic::Status;
 use uuid::Uuid;
 

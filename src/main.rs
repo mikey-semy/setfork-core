@@ -1,5 +1,5 @@
-// Точка входа: конфиг/env, CLI-режимы golden-сверки, wiring gRPC-сервисов.
-// Вся логика — в services/ (транспорт по доменам), git/ (git-подсистема), db.
+//! Точка входа: конфиг/env, CLI-режимы golden-сверки, wiring gRPC-сервисов.
+//! Вся логика — в services/ (транспорт по доменам), git/ (git-подсистема), db.
 use tonic::{transport::Server, Request, Status};
 
 mod blocks;
@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
     let token: Option<&'static str> =
-        raw_token.map(|t| &*Box::leak(format!("Bearer {t}").into_boxed_str()));
+        raw_token.map(|t| &*format!("Bearer {t}").leak());
     match token {
         Some(_) => println!("setfork-core: канал защищён Bearer-токеном"),
         None => println!("setfork-core: ВНИМАНИЕ — SETFORK_ALLOW_INSECURE=1, канал БЕЗ авторизации (только локальный dev)"),

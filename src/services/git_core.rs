@@ -1,5 +1,5 @@
-// GitCore — gRPC-сервис поверх git-подсистемы: smart-HTTP (clone/push),
-// ветки/теги/merge, bundle. Обслуживает proto/git.proto (setfork.git.v1).
+//! GitCore — gRPC-сервис поверх git-подсистемы: smart-HTTP (clone/push),
+//! ветки/теги/merge, bundle. Обслуживает proto/git.proto (setfork.git.v1).
 use sqlx::postgres::PgPool;
 use std::path::PathBuf;
 use tonic::{Request, Response, Status};
@@ -19,6 +19,7 @@ fn valid_branch(name: &str) -> bool {
         && !name.contains("..")
 }
 
+/// GitCore: git-операции (smart-HTTP, ветки/теги/merge, bundle) поверх общего пула.
 pub struct GitCoreSvc {
     pub pool: PgPool,
 }
@@ -82,12 +83,9 @@ fn main_oid(bare: &std::path::Path) -> Option<String> {
         .map(|o| o.to_string())
 }
 
-fn opt<'a>(s: &'a str) -> Option<&'a str> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+// Пустая proto-строка → None (proto3 не отличает '' от отсутствия поля).
+fn opt(s: &str) -> Option<&str> {
+    (!s.is_empty()).then_some(s)
 }
 
 // BranchSnapshotData -> pb-снапшот (переиспользуется snapshot-RPC и merge-state).

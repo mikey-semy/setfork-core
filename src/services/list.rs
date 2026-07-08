@@ -1,18 +1,18 @@
-// List — доменный порт ListStore на Rust, read + write (см. proto/domain_read.proto).
-//
-// ListRead зеркалит TS-адаптер features/library/list-store.adapter.ts
-// запрос-в-запрос, чтобы golden-сверка JSON совпадала. Особенности TS,
-// сохранённые намеренно:
-// - repository_id = id списка (synthetic solo-repo, как в toList);
-// - Version.commit_sha всегда '' (TS отдаёт null);
-// - Contributor: владелец первым (accepted у него 0), остальные по accepted desc;
-//   avatar_ref = СЫРОЙ users.avatar_url (TS подписывает imgproxy-URL — это
-//   презентация; в golden-сверке поле нормализуется).
-//
-// ListWrite — полная семантика addVersion/create из list-store.adapter.ts
-// (в отличие от db::add_version, который упрощён под git-проекцию): LocaleText
-// сохраняется как есть, imageRef → has_image/image_key, bump current_version +
-// updated_at — всё в ОДНОЙ транзакции.
+//! List — доменный порт ListStore на Rust, read + write (см. proto/domain_read.proto).
+//!
+//! ListRead зеркалит TS-адаптер features/library/list-store.adapter.ts
+//! запрос-в-запрос, чтобы golden-сверка JSON совпадала. Особенности TS,
+//! сохранённые намеренно:
+//! - repository_id = id списка (synthetic solo-repo, как в toList);
+//! - Version.commit_sha всегда '' (TS отдаёт null);
+//! - Contributor: владелец первым (accepted у него 0), остальные по accepted desc;
+//!   avatar_ref = СЫРОЙ users.avatar_url (TS подписывает imgproxy-URL — это
+//!   презентация; в golden-сверке поле нормализуется).
+//!
+//! ListWrite — полная семантика addVersion/create из list-store.adapter.ts
+//! (в отличие от db::add_version, который упрощён под git-проекцию): LocaleText
+//! сохраняется как есть, imageRef → has_image/image_key, bump current_version +
+//! updated_at — всё в ОДНОЙ транзакции.
 use sqlx::postgres::PgPool;
 use sqlx::Row;
 use tonic::{Request, Response, Status};
@@ -29,6 +29,7 @@ use crate::pb_domain::{
     StepRef, Version, VersionsResponse,
 };
 
+/// ListRead: чтение списков/версий/шагов (зеркало list-store.adapter.ts).
 pub struct ListReadSvc {
     pub pool: PgPool,
 }
@@ -361,6 +362,7 @@ impl ListRead for ListReadSvc {
 
 // ── ListWrite: addVersion / create ───────────────────────────────────────
 
+/// ListWrite: создание списка и версий через общий движок db::add_version_rows.
 pub struct ListWriteSvc {
     pub pool: PgPool,
 }
