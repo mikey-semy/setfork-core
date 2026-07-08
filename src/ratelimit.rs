@@ -18,7 +18,9 @@ use tower::{Layer, Service};
 
 const WINDOW: Duration = Duration::from_secs(60);
 
-// Тяжёлые методы: git-мутации, merge, bundle (материализация репо).
+// Тяжёлые методы: git-мутации, merge, bundle (материализация репо), а также доменные
+// write, наполняющие БД (список/версия + шаги в транзакции) — чтобы Create/AddVersion
+// не были вектором массового наполнения на обычном бюджете 600/мин.
 const HEAVY: &[&str] = &[
     "ReceivePack",
     "CreateBundle",
@@ -26,6 +28,8 @@ const HEAVY: &[&str] = &[
     "MergeResolved",
     "CreateBranch",
     "DeleteBranch",
+    "Create",     // ListWrite.Create — вставка списка+версии+шагов
+    "AddVersion", // ListWrite.AddVersion — новая версия + шаги
 ];
 
 fn env_limit(name: &str, default: u32) -> u32 {

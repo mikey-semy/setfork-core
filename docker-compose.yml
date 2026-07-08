@@ -25,7 +25,11 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-sethub}:${POSTGRES_PASSWORD:-sethub}@db:5432/${POSTGRES_DB:-sethub}
       SETFORK_CORE_ADDR: 0.0.0.0:50051
       GIT_DATA_DIR: /data/git
+      # Локальный стек: токен можно не задавать, но тогда нужен явный опт-аут —
+      # ядро без токена стартует ТОЛЬКО с SETFORK_ALLOW_INSECURE=1 (канал без авторизации,
+      # только localhost). Для прод-подобного локального прогона задайте SETFORK_CORE_TOKEN.
       SETFORK_CORE_TOKEN: ${SETFORK_CORE_TOKEN:-}
+      SETFORK_ALLOW_INSECURE: ${SETFORK_ALLOW_INSECURE:-1}
       # Rate-limit RPC: обычные/тяжёлые методы, запросов в минуту (0 = выкл).
       SETFORK_RPC_RPM: ${SETFORK_RPC_RPM:-600}
       SETFORK_RPC_RPM_HEAVY: ${SETFORK_RPC_RPM_HEAVY:-60}

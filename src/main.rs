@@ -596,17 +596,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("setfork-core git-core listening on {addr}");
-    // Auth канала Next↔ядро: общий Bearer-токен (SETFORK_CORE_TOKEN).
-    // Токен не задан → канал открыт (локальный dev). Health остаётся без
-    // авторизации — docker/k8s-пробам токен не раздаём.
-    let token: Option<&'static str> = std::env::var("SETFORK_CORE_TOKEN")
-        .ok()
-        .filter(|t| !t.is_empty())
-        .map(|t| &*Box::leak(format!("Bearer {t}").into_boxed_str()));
-    if token.is_some() {
-        println!("setfork-core: канал защищён Bearer-токеном");
-    } else {
-        println!("setfork-core: SETFORK_CORE_TOKEN не задан — канал без авторизации (dev)");
+    // Auth канала Next↔ядро: общий Bearer-токен (SETFORK_CORE_TOKEN). Ядро НЕ делает
+    // пользовательской авторизации (BFF-модель: весь гейт владения/модерации — на фронте),
+    // поэтому токен канала — ЕДИНСТВЕННАЯ граница доступа ко всей записи/чтению контента.
+    // Fail-closed: без токена сервер не стартует — иначе любой, кто дотянулся до порта,
+    // получает суперправа над всем контентом всех пользователей. Явный локальный dev без
+    // токена — только с SETFORK_ALLOW_INSECURE=1. Health без авторизации (docker/k8s-пробы).
+    let raw_token = std::env::var("SETFORK_CORE_TOKEN").ok().filter(|t| !t.is_empty());
+    let allow_insecure = std::env::var("SETFORK_ALLOW_INSECURE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if raw_token.is_none() && !allow_insecure {
+        eprintln!(
+            "setfork-core: ОСТАНОВКА — SETFORK_CORE_TOKEN не задан. Без него канал открыт кому \
+             угодно в сети (полный обход владения и модерации). Задайте токен (тот же — фронту), \
+             либо для локального dev явно выставьте SETFORK_ALLOW_INSECURE=1."
+        );
+        std::process::exit(1);
+    }
+    let token: Option<&'static str> =
+        raw_token.map(|t| &*Box::leak(format!("Bearer {t}").into_boxed_str()));
+    match token {
+        Some(_) => println!("setfork-core: канал защищён Bearer-токеном"),
+        None => println!("setfork-core: ВНИМАНИЕ — SETFORK_ALLOW_INSECURE=1, канал БЕЗ авторизации (только локальный dev)"),
     }
     let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
         let Some(expected) = token else { return Ok(req) };
