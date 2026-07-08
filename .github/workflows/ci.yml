@@ -13,6 +13,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # protoc не нужен (build.rs берёт его из protoc-bin-vendored); libgit2 собирается через cc.
+      # protoc не нужен (protobuf компилирует protox в build.rs); libgit2 собирается через cc.
       - run: cargo build --verbose
       - run: cargo test --verbose

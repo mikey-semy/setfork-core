@@ -33,7 +33,7 @@ src/
 
 ```sh
 cp .env.example .env   # или задать DATABASE_URL (та же Postgres, что у sethub-app)
-cargo build            # protoc — из крейта protoc-bin-vendored, системный не нужен
+cargo build            # protobuf компилирует protox (чистый Rust) — protoc не нужен вовсе
 cargo test             # юнит + roundtrip с настоящим git
 cargo run              # gRPC-сервер на 127.0.0.1:50051 (SETFORK_CORE_ADDR — override)
 ```

@@ -13,7 +13,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use http::{Request, Response};
-use tonic::body::BoxBody;
+use tonic::body::Body;
 use tower::{Layer, Service};
 
 const WINDOW: Duration = Duration::from_secs(60);
@@ -89,11 +89,10 @@ impl<S> RateLimited<S> {
         // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже
         // всё равно вернёт unauthenticated. Так лимит защищает только реальный
         // (авторизованный) трафик, а не служит вектором DoS.
-        if let Some(expected) = &self.state.expected_auth {
-            if auth != Some(expected.as_str()) {
+        if let Some(expected) = &self.state.expected_auth
+            && auth != Some(expected.as_str()) {
                 return true;
             }
-        }
         let method = path.rsplit('/').next().unwrap_or(path);
         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };
         if limit == 0 {
@@ -115,7 +114,7 @@ impl<S> RateLimited<S> {
 
 impl<S, ReqBody> Service<Request<ReqBody>> for RateLimited<S>
 where
-    S: Service<Request<ReqBody>, Response = Response<BoxBody>> + Send,
+    S: Service<Request<ReqBody>, Response = Response<Body>> + Send,
     S::Future: Send + 'static,
 {
     type Response = S::Response;
@@ -140,7 +139,7 @@ where
                 .header("content-type", "application/grpc")
                 .header("grpc-status", "8") // RESOURCE_EXHAUSTED
                 .header("grpc-message", "rate limited")
-                .body(tonic::body::empty_body())
+                .body(Body::empty())
                 .expect("static response");
             futures_util::future::Either::Right(futures_util::future::ready(Ok(resp)))
         }
