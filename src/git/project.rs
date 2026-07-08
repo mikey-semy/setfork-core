@@ -347,7 +347,7 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
 #[cfg(test)]
 mod tests {
     use super::{parse_step_md, strip_v_prefix, ParsedStepMd};
-    use crate::bundle::{SerStep, StepRef};
+    use crate::git::bundle::{SerStep, StepRef};
 
     #[test]
     fn strips_vn_prefix() {

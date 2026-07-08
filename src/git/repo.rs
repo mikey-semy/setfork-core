@@ -1,4 +1,5 @@
-use crate::{bundle, db};
+use crate::db;
+use crate::git::bundle;
 use sqlx::{PgPool, Postgres, Transaction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

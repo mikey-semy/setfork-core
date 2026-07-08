@@ -1,36 +1,57 @@
 # setfork-core
 
-Rust git-ядро SetFork (Gitaly-стиль): реализует `proto/git.proto` (`service GitCore`)
-и обслуживает тяжёлые git-операции для Next-BFF. Часть Фазы 2 плана
-`sethub-app/docs/rust-core-plan.md` + `sethub-app/docs/phase1-wire-contract.md`.
+Rust git-ядро SetFork (Gitaly-стиль): обслуживает тяжёлые git-операции и доменные
+read/write-порты для Next-BFF по gRPC. Контракты — `proto/git.proto` (GitCore) и
+`proto/domain_read.proto` (ListRead/ListWrite/CurationRead/CurationWrite/CollabWrite);
+это копии из sethub-app, держать синхронными.
 
-## Статус: собирается, запускается, читает Postgres ✅
+## Структура
 
-- ✅ Cargo-проект: `tonic` (gRPC) + `prost` + `tokio` + `sqlx` (Postgres); `build.rs` кодогенит из
-  `proto/git.proto` (protoc — из крейта `protoc-bin-vendored`, системный не нужен).
-- ✅ `src/main.rs`: tonic-сервер + трейт `GitCore` (5 RPC пока `unimplemented`).
-- ✅ `src/db.rs`: sqlx-подключение (`DATABASE_URL` из `.env`, та же БД что у Next), резолв
-  owner/slug→list, self-check при старте. **Проверено:** `cargo build` ок; запуск подключается к
-  Postgres, считает списки и резолвит `demo/redis-…` → uuid+версия.
+```
+src/
+├─ main.rs             точка входа: env/CLI golden-режимы, auth-интерсептор, wiring сервисов
+├─ pb.rs, pb_domain.rs сгенерённые tonic-модули (setfork.git.v1 / setfork.domain.v1)
+├─ services/           gRPC-сервисы по доменам (транспортный слой)
+│  ├─ git_core.rs      GitCore: smart-HTTP, ветки/теги/merge/bundle
+│  ├─ list.rs          ListRead + ListWrite (зеркало list-store.adapter.ts, golden-сверка)
+│  ├─ curation.rs      CurationRead + CurationWrite (звёзды/watch)
+│  ├─ collab.rs        CollabWrite (issues/suggestions/комментарии)
+│  └─ util.rs          общие хелперы (ошибки, uuid, LocaleText/refs ↔ jsonb)
+├─ git/                git-подсистема (git2, ниже уровня gRPC)
+│  ├─ bundle.rs        сериализация версий в git-дерево (зеркало serialize.ts), материализация
+│  ├─ project.rs       обратное чтение состояния списка из git-дерева (проекция в БД)
+│  ├─ repo.rs          персистентные bare-репо (GIT_DATA_DIR), пер-репо локи
+│  └─ smart_http.rs    git smart-HTTP (порт smart-http.ts)
+├─ db.rs               sqlx/Postgres: пул, запросы под git-проекцию
+├─ ratelimit.rs        tower-layer: скользящее окно per-метод (heavy/обычный бюджеты)
+└─ roundtrip_tests.rs  интеграционный тест: bootstrap → clone → push → append → pull
+```
+
+Правило слоёв: `services → { git, db }`; `git` и `db` про gRPC не знают.
 
 ## Сборка / запуск
 
 ```sh
 cp .env.example .env   # или задать DATABASE_URL (та же Postgres, что у sethub-app)
-cargo build            # скачает tonic/tokio/prost/sqlx, сгенерит стабы из proto
-cargo run              # self-check БД + gRPC-сервер на 127.0.0.1:50051 (SETFORK_CORE_ADDR — override)
+cargo build            # protoc — из крейта protoc-bin-vendored, системный не нужен
+cargo test             # юнит + roundtrip с настоящим git
+cargo run              # gRPC-сервер на 127.0.0.1:50051 (SETFORK_CORE_ADDR — override)
 ```
 
-## Что дальше (Фаза 2, послойно)
+Обязательное окружение сервера: `DATABASE_URL`, `GIT_DATA_DIR` (общий с фронтом том
+bare-репо), `SETFORK_CORE_TOKEN` (Bearer-токен канала; без него старт только с
+`SETFORK_ALLOW_INSECURE=1` — локальный dev). Rate-limit: `SETFORK_RPC_RPM`,
+`SETFORK_RPC_RPM_HEAVY` (0 = выключить).
 
-1. **sqlx** (та же Postgres, `DATABASE_URL`) — резолв owner/slug→list, загрузка истории версий.
-2. **Материализация репо** — на старте можно **шеллить `git`** (как TS `store.ts`), детерминированные
-   SHA (фикс. автор/даты) должны совпасть с TS → golden-сверка.
-3. Реализовать RPC по одному: `CreateBundle` → `InfoRefsUploadPack` → `UploadPack` (clone/pull) →
-   `ReceivePack` (push + проекция `list.json`→версия). Позже: **gix** (read) / **git2** (write) вместо шелла.
-4. На TS-стороне: `buf` + Connect-ES кодоген из `sethub-app/proto/git.proto` → реализовать
-   `gitCoreRemote` в `sethub-app/src/features/git/core.ts`, включить `SETFORK_CORE_URL`,
-   **golden-сверить** байты/SHA с inproc.
+## Golden-сверка с TS
 
-Контракт — единственный источник правды: `proto/git.proto` (копия `sethub-app/proto/git.proto`,
-держать синхронными; позже — общий proto-пакет/submodule).
+CLI-режимы гоняют тот же код-пас, что и RPC, без транспорта — байты/JSON сверяются
+со скриптами sethub-app:
+
+```sh
+cargo run -- bundle            <owner> <slug> <out>
+cargo run -- advertise-upload  <owner> <slug> <out>
+cargo run -- advertise-receive <owner> <slug> <out>
+cargo run -- upload-pack       <owner> <slug> <body> <out>
+cargo run -- domain-read       <owner> <slug> <out.json>
+```
