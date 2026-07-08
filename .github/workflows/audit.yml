@@ -19,3 +19,14 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Скан секретов в истории коммитов (git-режим; не --no-git — тот цепляет токен
+  # checkout'а из .git/ в CI). История ядра чиста (проверено локально). Барьер.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (secret scan)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect --source=/repo --redact --exit-code 1
