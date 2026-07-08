@@ -22,11 +22,10 @@ fn run_git_io(args: &[&str], input: Option<&[u8]>, git_protocol: Option<&str>) -
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(p) = git_protocol {
-        if !p.is_empty() {
+    if let Some(p) = git_protocol
+        && !p.is_empty() {
             cmd.env("GIT_PROTOCOL", p);
         }
-    }
     let mut child = cmd.spawn()?;
     {
         // take() + drop в конце блока закрывает stdin (EOF), даже если input=None.

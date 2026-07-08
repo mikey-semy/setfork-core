@@ -1,7 +1,7 @@
 [package]
 name = "setfork-core"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "SetFork git-core service (Gitaly-style): serves proto/git.proto over gRPC/Connect."
 
 [[bin]]
@@ -9,21 +9,23 @@ name = "setfork-core"
 path = "src/main.rs"
 
 [dependencies]
-tonic = "0.12"
-tonic-health = "0.12"
-tower = "0.4"
+tonic = "0.14"
+tonic-health = "0.14"
+tonic-prost = "0.14"
+tower = "0.5"
 futures-util = "0.3"
 http = "1"
-prost = "0.13"
+prost = "0.14"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "json"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "postgres", "uuid", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }
 # libgit2 без сетевых фич (нам нужны только локальные объекты/деревья/коммиты/рефы).
-git2 = { version = "0.19", default-features = false }
+git2 = { version = "0.21", default-features = false }
 
 [build-dependencies]
-tonic-build = "0.12"
-protoc-bin-vendored = "3"
+tonic-prost-build = "0.14"
+# Чистый Rust protobuf-компилятор — protoc-бинарь не нужен ни в системе, ни vendored.
+protox = "0.9"

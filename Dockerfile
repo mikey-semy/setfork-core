@@ -1,5 +1,5 @@
 # setfork-core (Rust git-ядро). Multi-stage: cargo build --release → тонкий runtime.
-# protoc не нужен в системе — build.rs берёт его из крейта protoc-bin-vendored.
+# protoc не нужен вовсе — protobuf компилирует protox (чистый Rust) в build.rs.
 
 FROM rust:1-bookworm AS builder
 WORKDIR /app

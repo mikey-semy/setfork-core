@@ -342,15 +342,14 @@ pub async fn update_meta(
     tags: Option<Vec<String>>,
     ordered: Option<bool>,
 ) -> Result<(), sqlx::Error> {
-    if let Some(t) = title {
-        if !t.trim().is_empty() {
+    if let Some(t) = title
+        && !t.trim().is_empty() {
             sqlx::query("update templates set title = $1::jsonb where id = $2")
                 .bind(loc_val(&t))
                 .bind(template_id)
                 .execute(pool)
                 .await?;
         }
-    }
     if let Some(d) = desc {
         sqlx::query("update templates set \"desc\" = $1::jsonb where id = $2")
             .bind(loc_val(&d))

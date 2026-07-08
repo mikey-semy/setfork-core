@@ -142,13 +142,12 @@ fn readme(v: &VersionData) -> String {
             // Презентационные блоки — inline в README.
             match s.block_type.as_deref() {
                 Some("text") => {
-                    if let Some(md) = s.content.get("md").and_then(|v| v.as_str()) {
-                        if !md.is_empty() {
+                    if let Some(md) = s.content.get("md").and_then(|v| v.as_str())
+                        && !md.is_empty() {
                             lines.push(String::new());
                             lines.push(md.to_string());
                             lines.push(String::new());
                         }
-                    }
                 }
                 Some("image") => {
                     let r = s.content.get("ref").and_then(|v| v.as_str()).unwrap_or("");
@@ -467,12 +466,12 @@ pub fn max_tag_version(bare: &Path) -> i32 {
         Err(_) => return 0,
     };
     let mut max = 0i32;
-    for name in names.iter().flatten() {
-        if let Some(num) = name.strip_prefix('v') {
-            if let Ok(n) = num.parse::<i32>() {
+    // git2 0.21: iter() отдаёт Result (не-UTF8 имена больше не глотаются молча).
+    for name in names.iter().flatten().flatten() {
+        if let Some(num) = name.strip_prefix('v')
+            && let Ok(n) = num.parse::<i32>() {
                 max = max.max(n);
             }
-        }
     }
     max
 }

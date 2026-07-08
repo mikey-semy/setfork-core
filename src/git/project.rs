@@ -82,7 +82,7 @@ fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> 
     let entry = tree.get_path(Path::new("list.json")).ok()?;
     let blob = entry.to_object(repo).ok()?;
     let raw = blob.as_blob()?.content().to_vec();
-    let subject = commit.summary().unwrap_or("").to_string();
+    let subject = commit.summary().ok().flatten().unwrap_or("").to_string();
     let steps = read_step_files(repo, &tree);
     Some((oid.to_string(), raw, subject, steps))
 }
@@ -99,9 +99,10 @@ fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, S
         None => return out,
     };
     for e in steps_tree.iter() {
+        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).
         let name = match e.name() {
-            Some(n) => n,
-            None => continue,
+            Ok(n) => n,
+            Err(_) => continue,
         };
         if !name.ends_with(".md") {
             continue;
@@ -112,11 +113,10 @@ fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, S
             Ok(n) => n,
             Err(_) => continue,
         };
-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok()) {
-            if let Ok(s) = String::from_utf8(blob.content().to_vec()) {
+        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())
+            && let Ok(s) = String::from_utf8(blob.content().to_vec()) {
                 out.insert(n, s);
             }
-        }
     }
     out
 }

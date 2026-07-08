@@ -99,7 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse()?;
 
     // gRPC health-check (grpc.health.v1) — для проб оркестратора/LB.
-    let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter.set_serving::<GitCoreServer<GitCoreSvc>>().await;
 
     // Graceful shutdown: по SIGTERM/SIGINT сперва снимаем SERVING (оркестратор
@@ -107,7 +107,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // текущие RPC (напр. идущий receive-pack не обрывается на середине).
     let shutdown = async move {
         wait_for_signal().await;
-        let mut health_reporter = health_reporter;
         health_reporter.set_not_serving::<GitCoreServer<GitCoreSvc>>().await;
         println!("setfork-core: получен сигнал остановки — дренаж активных RPC…");
     };
