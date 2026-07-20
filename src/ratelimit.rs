@@ -59,7 +59,7 @@ impl RateLimitLayer {
             .ok()
             .filter(|t| !t.is_empty())
             .map(|t| format!("Bearer {t}"));
-        println!("setfork-core: rate-limit {rpm}/мин (тяжёлые {rpm_heavy}/мин; 0 = выкл)");
+        tracing::info!(rpm, rpm_heavy, "rate-limit per-метод (0 = выкл)");
         Self {
             inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }),
         }
@@ -82,8 +82,8 @@ pub struct RateLimited<S> {
 impl<S> RateLimited<S> {
     /// true = запрос пропускаем. Путь вида /setfork.git.v1.GitCore/ReceivePack.
     fn allow(&self, path: &str, auth: Option<&str>) -> bool {
-        // health и рефлексия — без лимита (docker/k8s-пробы).
-        if path.starts_with("/grpc.health") {
+        // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).
+        if path.starts_with("/grpc.health") || path.starts_with("/grpc.reflection") {
             return true;
         }
         // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже
@@ -107,6 +107,7 @@ impl<S> RateLimited<S> {
             q.pop_front();
         }
         if q.len() as u32 >= limit {
+            metrics::counter!("rpc_rate_limited_total", "method" => method.to_string()).increment(1);
             return false;
         }
         q.push_back(now);

@@ -65,7 +65,7 @@ pub async fn connect() -> Result<PgPool, sqlx::Error> {
             Ok(v) if v > 0 => v,
             // Опечатка в конфиге не должна МОЛЧА откатывать пул на дефолт.
             _ => {
-                eprintln!("setfork-core: ВНИМАНИЕ — PGPOOL_MAX='{s}' не число > 0, использую 10");
+                tracing::warn!(value = %s, "PGPOOL_MAX не число > 0 — использую 10");
                 10
             }
         },

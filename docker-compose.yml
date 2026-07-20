@@ -35,6 +35,7 @@ services:
       SETFORK_RPC_RPM_HEAVY: ${SETFORK_RPC_RPM_HEAVY:-60}
     ports:
       - '${CORE_PORT:-50051}:50051'
+      - '${METRICS_PORT:-9464}:9464' # Prometheus /metrics
     volumes:
       - gitdata:/data/git # персистентные bare-репо (git = источник правды)
     depends_on:

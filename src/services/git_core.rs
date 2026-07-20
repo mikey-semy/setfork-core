@@ -179,9 +179,10 @@ impl GitCore for GitCoreSvc {
             match project::project_pushed_commit(&self.pool, id, &bare).await {
                 Ok(v) => v.unwrap_or(0),
                 Err(e) => {
-                    eprintln!(
-                        "setfork-core: ОШИБКА проекции push {}/{} ({id}): {e} — git принят, версия НЕ создана; восстановление: reproject",
-                        repo.owner, repo.slug
+                    metrics::counter!("projection_failures_total", "op" => "push").increment(1);
+                    tracing::error!(
+                        owner = %repo.owner, slug = %repo.slug, %id, error = %e,
+                        "ОШИБКА проекции push — git принят, версия НЕ создана; восстановление: reproject"
                     );
                     0
                 }
@@ -358,9 +359,10 @@ impl GitCore for GitCoreSvc {
         let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
             Ok(v) => v.unwrap_or(0),
             Err(e) => {
-                eprintln!(
-                    "setfork-core: ОШИБКА проекции merge {}/{} ({id}): {e} — merge выполнен, версия НЕ создана; восстановление: reproject",
-                    repo.owner, repo.slug
+                metrics::counter!("projection_failures_total", "op" => "merge").increment(1);
+                tracing::error!(
+                    owner = %repo.owner, slug = %repo.slug, %id, error = %e,
+                    "ОШИБКА проекции merge — merge выполнен, версия НЕ создана; восстановление: reproject"
                 );
                 0
             }
@@ -456,9 +458,10 @@ impl GitCore for GitCoreSvc {
         let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
             Ok(v) => v.unwrap_or(0),
             Err(e) => {
-                eprintln!(
-                    "setfork-core: ОШИБКА проекции merge-resolved {}/{} ({id}): {e} — merge выполнен, версия НЕ создана; восстановление: reproject",
-                    repo.owner, repo.slug
+                metrics::counter!("projection_failures_total", "op" => "merge_resolved").increment(1);
+                tracing::error!(
+                    owner = %repo.owner, slug = %repo.slug, %id, error = %e,
+                    "ОШИБКА проекции merge-resolved — merge выполнен, версия НЕ создана; восстановление: reproject"
                 );
                 0
             }
