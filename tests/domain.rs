@@ -11,9 +11,8 @@ use setfork_core::pb_domain::curation_write_server::CurationWrite;
 use setfork_core::pb_domain::list_read_server::ListRead;
 use setfork_core::pb_domain::list_write_server::ListWrite;
 use setfork_core::pb_domain::{
-    AddIssueCommentRequest, AddVersionRequest, CreateListRequest, CreateSuggestionRequest,
-    GetVersionRequest, ListId, ListRef, LocaleText, NewStep, OpenIssueRequest,
-    SetIssueStatusRequest, UserList,
+    AddIssueCommentRequest, AddVersionRequest, CreateListRequest, CreateSuggestionRequest, GetVersionRequest,
+    ListId, ListRef, LocaleText, NewStep, OpenIssueRequest, SetIssueStatusRequest, UserList,
 };
 use setfork_core::services::collab::CollabWriteSvc;
 use setfork_core::services::curation::{CurationReadSvc, CurationWriteSvc};
@@ -21,9 +20,7 @@ use setfork_core::services::list::{ListReadSvc, ListWriteSvc};
 use tonic::Request;
 
 fn lt(pairs: &[(&str, &str)]) -> Option<LocaleText> {
-    Some(LocaleText {
-        v: pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
-    })
+    Some(LocaleText { v: pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() })
 }
 
 fn step(title_en: &str) -> NewStep {
@@ -43,11 +40,7 @@ fn step(title_en: &str) -> NewStep {
 }
 
 fn text_block(md: &str) -> NewStep {
-    NewStep {
-        r#type: "text".into(),
-        content_json: format!(r#"{{"md":"{md}"}}"#),
-        ..step("")
-    }
+    NewStep { r#type: "text".into(), content_json: format!(r#"{{"md":"{md}"}}"#), ..step("") }
 }
 
 fn create_req(owner_id: &str, slug: &str) -> CreateListRequest {
@@ -131,11 +124,8 @@ async fn add_version_bumps_current_and_orders_desc() {
     let write = ListWriteSvc { pool: pool.clone() };
     let read = ListReadSvc { pool: pool.clone() };
 
-    let created = write
-        .create(Request::new(create_req(&owner.to_string(), "l")))
-        .await
-        .expect("create")
-        .into_inner();
+    let created =
+        write.create(Request::new(create_req(&owner.to_string(), "l"))).await.expect("create").into_inner();
 
     let v2 = write
         .add_version(Request::new(AddVersionRequest {
@@ -162,11 +152,7 @@ async fn add_version_bumps_current_and_orders_desc() {
         .expect("list_versions")
         .into_inner()
         .versions;
-    assert_eq!(
-        versions.iter().map(|v| v.version).collect::<Vec<_>>(),
-        vec![2, 1],
-        "по убыванию version"
-    );
+    assert_eq!(versions.iter().map(|v| v.version).collect::<Vec<_>>(), vec![2, 1], "по убыванию version");
 }
 
 #[tokio::test]
@@ -191,10 +177,7 @@ async fn create_duplicate_slug_errors() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "carol").await;
     let write = ListWriteSvc { pool: pool.clone() };
-    write
-        .create(Request::new(create_req(&owner.to_string(), "dup")))
-        .await
-        .expect("первый create");
+    write.create(Request::new(create_req(&owner.to_string(), "dup"))).await.expect("первый create");
     let err = write
         .create(Request::new(create_req(&owner.to_string(), "dup")))
         .await

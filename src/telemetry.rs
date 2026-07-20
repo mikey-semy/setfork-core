@@ -70,11 +70,8 @@ where
                         tracing::debug!(method, ms = format!("{ms:.1}"), "rpc ok");
                     } else {
                         // grpc-message percent-encoded — для лога сойдёт как есть.
-                        let msg = resp
-                            .headers()
-                            .get("grpc-message")
-                            .and_then(|v| v.to_str().ok())
-                            .unwrap_or("");
+                        let msg =
+                            resp.headers().get("grpc-message").and_then(|v| v.to_str().ok()).unwrap_or("");
                         tracing::warn!(method, code, ms = format!("{ms:.1}"), msg, "rpc error");
                     }
                 }

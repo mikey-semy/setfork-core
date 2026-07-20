@@ -4,8 +4,8 @@
 use crate::blocks::is_step_type;
 use crate::git::bundle::{SerStep, StepRef, VersionData};
 use crate::git::project::ProjStep;
-use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
+use sqlx::postgres::{PgPool, PgPoolOptions};
 use uuid::Uuid;
 
 // step_level enum БД — прямой bind (без text→enum каста).
@@ -30,11 +30,7 @@ impl Level {
 // LocaleText jsonb: {"en": s} для непустого, иначе {} (порт project.ts L()).
 fn loc_val(s: &str) -> serde_json::Value {
     let t = s.trim();
-    if t.is_empty() {
-        serde_json::json!({})
-    } else {
-        serde_json::json!({ "en": t })
-    }
+    if t.is_empty() { serde_json::json!({}) } else { serde_json::json!({ "en": t }) }
 }
 
 /// LocaleText (jsonb) → строка: берём 'en', иначе первое значение.
@@ -80,7 +76,11 @@ pub async fn connect() -> Result<PgPool, sqlx::Error> {
 }
 
 /// Резолв списка по owner handle + slug → (template_id, current_version).
-pub async fn resolve_list(pool: &PgPool, owner: &str, slug: &str) -> Result<Option<(Uuid, i32)>, sqlx::Error> {
+pub async fn resolve_list(
+    pool: &PgPool,
+    owner: &str,
+    slug: &str,
+) -> Result<Option<(Uuid, i32)>, sqlx::Error> {
     let row: Option<(Uuid, i32)> = sqlx::query_as(
         "select t.id, t.current_version \
          from templates t join users u on u.id = t.owner_id \
@@ -160,7 +160,8 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 })
                 .unwrap_or_default();
             // Блочная модель: type/content несём только у не-step блоков.
-            let block_type: Option<String> = sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| !is_step_type(t));
+            let block_type: Option<String> =
+                sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| !is_step_type(t));
             let content: serde_json::Value = if block_type.is_some() {
                 sr.try_get::<serde_json::Value, _>("content").unwrap_or(serde_json::Value::Null)
             } else {
@@ -204,12 +205,12 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
 /// (ProjStep, санитизация git-входа) и доменный ListWrite (NewStep, семантика TS
 /// как есть) — маппятся сюда; транзакция и INSERT одни на всех.
 pub struct StepRow {
-    pub block_type: String,          // 'step' | 'text' | 'image' | …
-    pub content: serde_json::Value,  // {} у шага
-    pub title: serde_json::Value,    // LocaleText jsonb
+    pub block_type: String,         // 'step' | 'text' | 'image' | …
+    pub content: serde_json::Value, // {} у шага
+    pub title: serde_json::Value,   // LocaleText jsonb
     pub desc: serde_json::Value,
     pub command: String,
-    pub image_key: Option<String>,   // None → has_image = false
+    pub image_key: Option<String>, // None → has_image = false
     pub level: Level,
     pub why: serde_json::Value,
     pub section: serde_json::Value,
@@ -332,7 +333,12 @@ fn proj_step_row(s: &ProjStep) -> StepRow {
 
 /// Новая версия списка из проекции push. Возвращает номер новой версии;
 /// RowNotFound, если списка нет (как прежний fetch_one).
-pub async fn add_version(pool: &PgPool, template_id: Uuid, note: &str, steps: &[ProjStep]) -> Result<i32, sqlx::Error> {
+pub async fn add_version(
+    pool: &PgPool,
+    template_id: Uuid,
+    note: &str,
+    steps: &[ProjStep],
+) -> Result<i32, sqlx::Error> {
     let rows: Vec<StepRow> = steps.iter().map(proj_step_row).collect();
     match add_version_rows(pool, template_id, note, &rows).await? {
         Some((_ver_id, version, _ms)) => Ok(version),
@@ -351,13 +357,14 @@ pub async fn update_meta(
     ordered: Option<bool>,
 ) -> Result<(), sqlx::Error> {
     if let Some(t) = title
-        && !t.trim().is_empty() {
-            sqlx::query("update templates set title = $1::jsonb where id = $2")
-                .bind(loc_val(&t))
-                .bind(template_id)
-                .execute(pool)
-                .await?;
-        }
+        && !t.trim().is_empty()
+    {
+        sqlx::query("update templates set title = $1::jsonb where id = $2")
+            .bind(loc_val(&t))
+            .bind(template_id)
+            .execute(pool)
+            .await?;
+    }
     if let Some(d) = desc {
         sqlx::query("update templates set \"desc\" = $1::jsonb where id = $2")
             .bind(loc_val(&d))

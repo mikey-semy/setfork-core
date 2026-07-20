@@ -55,19 +55,15 @@ impl RateLimitLayer {
     pub fn from_env() -> Self {
         let rpm = env_limit("SETFORK_RPC_RPM", 600);
         let rpm_heavy = env_limit("SETFORK_RPC_RPM_HEAVY", 60);
-        let expected_auth = std::env::var("SETFORK_CORE_TOKEN")
-            .ok()
-            .filter(|t| !t.is_empty())
-            .map(|t| format!("Bearer {t}"));
+        let expected_auth =
+            std::env::var("SETFORK_CORE_TOKEN").ok().filter(|t| !t.is_empty()).map(|t| format!("Bearer {t}"));
         tracing::info!(rpm, rpm_heavy, "rate-limit per-метод (0 = выкл)");
         Self::with(rpm, rpm_heavy, expected_auth)
     }
 
     // Явные параметры — общий конструктор from_env и юнит-тестов.
     fn with(rpm: u32, rpm_heavy: u32, expected_auth: Option<String>) -> Self {
-        Self {
-            inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }),
-        }
+        Self { inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }) }
     }
 }
 
@@ -95,9 +91,10 @@ impl<S> RateLimited<S> {
         // всё равно вернёт unauthenticated. Так лимит защищает только реальный
         // (авторизованный) трафик, а не служит вектором DoS.
         if let Some(expected) = &self.state.expected_auth
-            && auth != Some(expected.as_str()) {
-                return true;
-            }
+            && auth != Some(expected.as_str())
+        {
+            return true;
+        }
         let method = path.rsplit('/').next().unwrap_or(path);
         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };
         if limit == 0 {
