@@ -2,19 +2,10 @@
 //! Вся логика — в services/ (транспорт по доменам), git/ (git-подсистема), db.
 use tonic::{transport::Server, Request, Status};
 
-mod blocks;
-mod db;
-mod git;
-pub mod pb;
-pub mod pb_domain;
-mod ratelimit;
-mod services;
-mod telemetry;
-#[cfg(test)]
-mod roundtrip_tests;
+use setfork_core::{db, git, pb_domain, ratelimit, services, telemetry};
 
 use git::{bundle, bundle::VersionData, smart_http};
-use pb::git_core_server::GitCoreServer;
+use setfork_core::pb::git_core_server::GitCoreServer;
 use services::git_core::GitCoreSvc;
 
 /// Сериализованные proto-дескрипторы (build.rs) — для gRPC server reflection.
@@ -231,12 +222,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => tracing::warn!("SETFORK_ALLOW_INSECURE=1 — канал БЕЗ авторизации (только локальный dev)"),
     }
     let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
-        let Some(expected) = token else { return Ok(req) };
-        match req.metadata().get("authorization").and_then(|v| v.to_str().ok()) {
-            // constant-time не нужен: токен длинный и случайный, тайминг не течёт полезно,
-            // но сравнение всё равно полное (eq по всей строке).
-            Some(got) if got == expected => Ok(req),
-            _ => Err(Status::unauthenticated("invalid core token")),
+        let got = req.metadata().get("authorization").and_then(|v| v.to_str().ok());
+        if auth_ok(token, got) {
+            Ok(req)
+        } else {
+            Err(Status::unauthenticated("invalid core token"))
         }
     };
 
@@ -287,6 +277,17 @@ fn init_tracing() {
     }
 }
 
+/// Сверка канала: заголовок authorization против ожидаемого `Bearer <token>`.
+/// None = канал открыт явным опт-аутом (SETFORK_ALLOW_INSECURE=1, локальный dev).
+/// constant-time не нужен: токен длинный и случайный, тайминг не течёт полезно,
+/// но сравнение всё равно полное (eq по всей строке).
+fn auth_ok(expected: Option<&str>, got: Option<&str>) -> bool {
+    match expected {
+        None => true,
+        Some(exp) => got == Some(exp),
+    }
+}
+
 /// Fail-fast проверка GIT_DATA_DIR: задан и доступен на запись (создаём при отсутствии).
 /// Нужен серверу и reproject; golden-CLI-режимы работают без него.
 fn require_git_data_dir() -> Result<(), Box<dyn std::error::Error>> {
@@ -316,5 +317,28 @@ async fn wait_for_signal() {
     tokio::select! {
         _ = ctrl_c => {}
         _ = terminate => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::auth_ok;
+
+    #[test]
+    fn auth_open_channel_allows_everyone() {
+        // Явный опт-аут (SETFORK_ALLOW_INSECURE=1): проверка отключена.
+        assert!(auth_ok(None, None));
+        assert!(auth_ok(None, Some("Bearer anything")));
+    }
+
+    #[test]
+    fn auth_closed_channel_requires_exact_token() {
+        let exp = Some("Bearer secret-token");
+        assert!(auth_ok(exp, Some("Bearer secret-token")));
+        assert!(!auth_ok(exp, None), "без заголовка — отказ");
+        assert!(!auth_ok(exp, Some("Bearer wrong")), "чужой токен — отказ");
+        assert!(!auth_ok(exp, Some("secret-token")), "без префикса Bearer — отказ");
+        assert!(!auth_ok(exp, Some("Bearer secret-token ")), "хвостовой пробел — отказ");
+        assert!(!auth_ok(exp, Some("bearer secret-token")), "регистр схемы — отказ (сверка строгая)");
     }
 }

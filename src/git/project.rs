@@ -414,7 +414,7 @@ mod tests {
 
     // Генерирует контент .md ровно так, как это делает version_files (bundle::step_file).
     fn gen_md(s: &SerStep) -> String {
-        crate::bundle::version_files(&crate::bundle::VersionData {
+        crate::git::bundle::version_files(&crate::git::bundle::VersionData {
             version: 1,
             note: String::new(),
             ts: 0,
