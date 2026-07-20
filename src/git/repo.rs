@@ -29,7 +29,9 @@ fn locks() -> &'static StdMutex<HashMap<Uuid, Arc<AsyncMutex<()>>>> {
 }
 async fn repo_lock(id: Uuid) -> tokio::sync::OwnedMutexGuard<()> {
     let m = {
-        let mut g = locks().lock().unwrap();
+        // Паника под локом не должна отравлять реестр навсегда (иначе один сбой
+        // роняет ВСЕ последующие git-запросы) — данные внутри валидны, забираем как есть.
+        let mut g = locks().lock().unwrap_or_else(|p| p.into_inner());
         g.entry(id).or_insert_with(|| Arc::new(AsyncMutex::new(()))).clone()
     };
     m.lock_owned().await
@@ -61,7 +63,7 @@ pub async fn repo_guard(pool: &PgPool, id: Uuid) -> Result<RepoGuard, sqlx::Erro
     Ok(RepoGuard { _proc: proc, _tx: tx })
 }
 
-fn join_err<E: std::fmt::Display>(e: E) -> sqlx::Error {
+pub(crate) fn join_err<E: std::fmt::Display>(e: E) -> sqlx::Error {
     sqlx::Error::Protocol(e.to_string())
 }
 
@@ -129,20 +131,6 @@ pub async fn bundle_repo(pool: &PgPool, owner: &str, slug: &str) -> Result<Optio
     Ok(Some(data))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::advisory_key;
-    use uuid::Uuid;
-
-    #[test]
-    fn advisory_key_stable_and_distinct() {
-        let a = Uuid::from_u128(0x1234_5678_9abc_def0_1122_3344_5566_7788);
-        let b = Uuid::from_u128(0x0fed_cba9_8765_4321_8877_6655_4433_2211);
-        assert_eq!(advisory_key(a), advisory_key(a), "same UUID → same key");
-        assert_ne!(advisory_key(a), advisory_key(b), "different UUIDs → different keys");
-    }
-}
-
 fn bundle_all(bare: &Path) -> std::io::Result<Vec<u8>> {
     let bare_s = bare.to_string_lossy().to_string();
     let out = std::env::temp_dir().join(format!("setfork-{}.bundle", Uuid::new_v4()));
@@ -158,4 +146,18 @@ fn bundle_all(bare: &Path) -> std::io::Result<Vec<u8>> {
     let data = std::fs::read(&out);
     let _ = std::fs::remove_file(&out);
     data
+}
+
+#[cfg(test)]
+mod tests {
+    use super::advisory_key;
+    use uuid::Uuid;
+
+    #[test]
+    fn advisory_key_stable_and_distinct() {
+        let a = Uuid::from_u128(0x1234_5678_9abc_def0_1122_3344_5566_7788);
+        let b = Uuid::from_u128(0x0fed_cba9_8765_4321_8877_6655_4433_2211);
+        assert_eq!(advisory_key(a), advisory_key(a), "same UUID → same key");
+        assert_ne!(advisory_key(a), advisory_key(b), "different UUIDs → different keys");
+    }
 }

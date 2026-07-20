@@ -55,14 +55,22 @@ fn loc(v: &serde_json::Value) -> String {
 // Подключение к той же Postgres, что у Next (DATABASE_URL). Runtime-запросы
 // (без compile-time проверки), чтобы сборка не требовала живой БД.
 pub async fn connect() -> Result<PgPool, sqlx::Error> {
-    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL не задан (см. .env)");
+    let url = std::env::var("DATABASE_URL")
+        .map_err(|_| sqlx::Error::Configuration("DATABASE_URL не задан (см. .env)".into()))?;
     // Размер пула — под нагрузку/лимиты Postgres (PGPOOL_MAX, по умолч. 10).
     // acquire_timeout — быстрый отказ вместо зависания, если пул исчерпан;
     // test_before_acquire — не отдаём мёртвое соединение после рестарта БД.
-    let max = std::env::var("PGPOOL_MAX")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(10);
+    let max = match std::env::var("PGPOOL_MAX") {
+        Ok(s) => match s.trim().parse::<u32>() {
+            Ok(v) if v > 0 => v,
+            // Опечатка в конфиге не должна МОЛЧА откатывать пул на дефолт.
+            _ => {
+                eprintln!("setfork-core: ВНИМАНИЕ — PGPOOL_MAX='{s}' не число > 0, использую 10");
+                10
+            }
+        },
+        Err(_) => 10,
+    };
     PgPoolOptions::new()
         .max_connections(max)
         .acquire_timeout(std::time::Duration::from_secs(10))

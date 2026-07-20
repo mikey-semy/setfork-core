@@ -99,7 +99,9 @@ impl<S> RateLimited<S> {
             return true;
         }
         let now = Instant::now();
-        let mut windows = self.state.windows.lock().unwrap();
+        // Отравление мьютекса (паника держателя) не должно ронять весь трафик:
+        // окна внутри валидны как данные — забираем их как есть.
+        let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());
         let q = windows.entry(method.to_string()).or_default();
         while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {
             q.pop_front();
