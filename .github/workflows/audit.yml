@@ -3,6 +3,8 @@ name: Audit
 # Аудит зависимостей (RustSec advisory DB): на PR/пуш в master + еженедельно —
 # новые CVE в crates всплывают и без изменений кода. rustsec/audit-check падает
 # на найденных advisory и аннотирует их в PR.
+# Раннер — свой (setfork-ci-runner): cargo-джобы в container rust:1-trixie,
+# gitleaks — на самом раннере (нужен docker.sock).
 on:
   push:
     branches: [master]
@@ -13,7 +15,8 @@ on:
 
 jobs:
   cargo-audit:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, setfork-core]
+    container: rust:1-trixie
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2
@@ -23,7 +26,8 @@ jobs:
   # Лицензии/дубли/источники графа зависимостей (deny.toml). Advisories не
   # дублируем — их закрывает job cargo-audit выше.
   cargo-deny:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, setfork-core]
+    container: rust:1-trixie
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -33,7 +37,7 @@ jobs:
   # Скан секретов в истории коммитов (git-режим; не --no-git — тот цепляет токен
   # checkout'а из .git/ в CI). История ядра чиста (проверено локально). Барьер.
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, setfork-core]
     steps:
       - uses: actions/checkout@v4
         with:

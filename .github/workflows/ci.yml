@@ -1,8 +1,11 @@
 name: CI
 
-# ВАЖНО: основной гейт перед мержем — ЛОКАЛЬНЫЙ scripts/ci-local.sh (решение
-# владельца 2026-07-14: Actions-минуты). Эти workflow — дублирующий барьер,
-# когда GitHub-hosted раннеры доступны.
+# CI на СВОЁМ раннере (setfork-ci-runner, runs-on: [self-hosted, setfork-core]) —
+# GitHub-минуты не тратятся (решение владельца 2026-07-14/20). Основной гейт перед
+# мержем всё равно ЛОКАЛЬНЫЙ scripts/ci-local.sh; это дублирующий барьер в UI.
+# Специфика контейнерного раннера (myoung34/github-runner + docker.sock):
+# rust-джобы идут в container: rust:1-trixie (не ставим toolchain на раннер),
+# services доступны по ИМЕНИ сервиса (не localhost — job сам в контейнере).
 on:
   push:
     branches: [master]
@@ -11,13 +14,12 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, setfork-core]
+    container: rust:1-trixie
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      # rust-образ — minimal-профиль: rustfmt/clippy докачиваем компонентами.
+      - run: rustup component add rustfmt clippy
       # protoc не нужен (protobuf компилирует protox в build.rs); libgit2 собирается через cc.
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
@@ -26,7 +28,8 @@ jobs:
   # Интеграционные + golden против настоящего Postgres — те же тесты,
   # что гоняет scripts/ci-local.sh на эфемерном контейнере.
   integration:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, setfork-core]
+    container: rust:1-trixie
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -34,7 +37,6 @@ jobs:
           POSTGRES_USER: t
           POSTGRES_PASSWORD: t
           POSTGRES_DB: t
-        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U t -d t"
           --health-interval 5s
@@ -42,33 +44,27 @@ jobs:
           --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - run: cargo test -- --include-ignored
         env:
-          TEST_DATABASE_URL: postgresql://t:t@localhost:5432/t
+          # hostname = имя сервиса: job-контейнер в одной docker-сети с сервисом.
+          TEST_DATABASE_URL: postgresql://t:t@postgres:5432/t
 
   # Публикация образа в GHCR (только push в master): ghcr.io/<repo>:latest + :sha.
-  # Деплой в Dokploy пока собирает образ сам из репо; переключение на pull из
-  # GHCR — открытый вопрос трека (tracks/core.md), образ публикуем заранее.
+  # Без buildx-экшена — на self-hosted хватает плоского docker build/push через сок.
+  # Деплой в Dokploy пока собирает образ сам; переключение на pull из GHCR —
+  # открытый вопрос трека (tracks/core.md).
   image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, setfork-core]
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: runtime
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+      - name: docker build + push в GHCR
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker build --target runtime -t "$IMAGE:latest" -t "$IMAGE:${{ github.sha }}" .
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:${{ github.sha }}"
