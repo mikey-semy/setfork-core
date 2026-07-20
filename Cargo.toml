@@ -24,8 +24,14 @@ dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }
 # libgit2 без сетевых фич (нам нужны только локальные объекты/деревья/коммиты/рефы).
 git2 = { version = "0.21", default-features = false }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+metrics = "0.24.6"
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false, features = ["http-listener"] }
+tonic-reflection = "0.14.6"
 
 [build-dependencies]
 tonic-prost-build = "0.14"
 # Чистый Rust protobuf-компилятор — protoc-бинарь не нужен ни в системе, ни vendored.
 protox = "0.9"
+prost = "0.14"

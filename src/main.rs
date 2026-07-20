@@ -9,12 +9,16 @@ pub mod pb;
 pub mod pb_domain;
 mod ratelimit;
 mod services;
+mod telemetry;
 #[cfg(test)]
 mod roundtrip_tests;
 
 use git::{bundle, bundle::VersionData, smart_http};
 use pb::git_core_server::GitCoreServer;
 use services::git_core::GitCoreSvc;
+
+/// Сериализованные proto-дескрипторы (build.rs) — для gRPC server reflection.
+const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/descriptor.bin"));
 
 // Материализует репо во временный каталог, выполняет `op` над ним и гарантированно
 // удаляет каталог. `op` синхронна (шелл git) — весь блок идёт в spawn_blocking.
@@ -31,6 +35,7 @@ where
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+    init_tracing();
     let pool = db::connect().await?;
 
     // CLI-режимы для golden-проверки (тот же код-пас, что и RPC, без gRPC-транспорта):
@@ -113,27 +118,94 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     require_git_data_dir()?;
 
     let n = db::published_count(&pool).await?;
-    println!("setfork-core: connected to Postgres — {n} published public lists");
+    tracing::info!(published_lists = n, "подключились к Postgres");
 
     let addr_raw = std::env::var("SETFORK_CORE_ADDR").unwrap_or_else(|_| "127.0.0.1:50051".to_string());
     let addr = addr_raw
         .parse()
         .map_err(|e| format!("SETFORK_CORE_ADDR '{addr_raw}' некорректен ({e}) — ожидается host:port"))?;
 
+    // Метрики Prometheus на отдельном HTTP-порту (/metrics). '0'/'off' — выключить.
+    let maddr = std::env::var("SETFORK_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9464".to_string());
+    if maddr != "0" && !maddr.eq_ignore_ascii_case("off") {
+        let sock: std::net::SocketAddr = maddr
+            .parse()
+            .map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr}' некорректен ({e})"))?;
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(sock)
+            .set_buckets(&[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0])?
+            .install()?;
+        tracing::info!("метрики Prometheus: http://{maddr}/metrics");
+    }
+
     // gRPC health-check (grpc.health.v1) — для проб оркестратора/LB.
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter.set_serving::<GitCoreServer<GitCoreSvc>>().await;
 
+    // Health ← реальное состояние БД: фоновая проба SELECT 1 раз в 5с.
+    // БД недоступна → NOT_SERVING (оркестратор уводит трафик), восстановилась →
+    // SERVING обратно. Заодно публикуем гейджи пула. Флаг shutting_down не даёт
+    // пробе вернуть SERVING во время дренажа.
+    let shutting_down = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let hr = health_reporter.clone();
+        let pool_h = pool.clone();
+        let shutting = shutting_down.clone();
+        tokio::spawn(async move {
+            let mut healthy = true;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if shutting.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                let ok = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    sqlx::query("select 1").execute(&pool_h),
+                )
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+                metrics::gauge!("db_healthy").set(if ok { 1.0 } else { 0.0 });
+                metrics::gauge!("db_pool_size").set(pool_h.size() as f64);
+                metrics::gauge!("db_pool_idle").set(pool_h.num_idle() as f64);
+                if ok != healthy {
+                    healthy = ok;
+                    if ok {
+                        tracing::info!("БД снова доступна — health SERVING");
+                        hr.set_serving::<GitCoreServer<GitCoreSvc>>().await;
+                    } else {
+                        tracing::error!("БД недоступна — health NOT_SERVING");
+                        hr.set_not_serving::<GitCoreServer<GitCoreSvc>>().await;
+                    }
+                }
+            }
+        });
+    }
+
+    // gRPC server reflection (v1 + v1alpha для старых grpcurl). Без auth: схема
+    // не секрет (proto лежат в репо), канал и так внутренний.
+    let reflection_v1 = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
+        .build_v1()?;
+    let reflection_v1a = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
+        .build_v1alpha()?;
+
     // Graceful shutdown: по SIGTERM/SIGINT сперва снимаем SERVING (оркестратор
     // уводит трафик), затем serve_with_shutdown перестаёт принимать и до-обслуживает
     // текущие RPC (напр. идущий receive-pack не обрывается на середине).
-    let shutdown = async move {
-        wait_for_signal().await;
-        health_reporter.set_not_serving::<GitCoreServer<GitCoreSvc>>().await;
-        println!("setfork-core: получен сигнал остановки — дренаж активных RPC…");
+    let shutdown = {
+        let shutting = shutting_down.clone();
+        let health_reporter = health_reporter.clone();
+        async move {
+            wait_for_signal().await;
+            shutting.store(true, std::sync::atomic::Ordering::Relaxed);
+            health_reporter.set_not_serving::<GitCoreServer<GitCoreSvc>>().await;
+            tracing::info!("получен сигнал остановки — дренаж активных RPC…");
+        }
     };
 
-    println!("setfork-core git-core listening on {addr}");
+    tracing::info!(%addr, "setfork-core git-core слушает");
     // Auth канала Next↔ядро: общий Bearer-токен (SETFORK_CORE_TOKEN). Ядро НЕ делает
     // пользовательской авторизации (BFF-модель: весь гейт владения/модерации — на фронте),
     // поэтому токен канала — ЕДИНСТВЕННАЯ граница доступа ко всей записи/чтению контента.
@@ -155,8 +227,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token: Option<&'static str> =
         raw_token.map(|t| &*format!("Bearer {t}").leak());
     match token {
-        Some(_) => println!("setfork-core: канал защищён Bearer-токеном"),
-        None => println!("setfork-core: ВНИМАНИЕ — SETFORK_ALLOW_INSECURE=1, канал БЕЗ авторизации (только локальный dev)"),
+        Some(_) => tracing::info!("канал защищён Bearer-токеном"),
+        None => tracing::warn!("SETFORK_ALLOW_INSECURE=1 — канал БЕЗ авторизации (только локальный dev)"),
     }
     let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
         let Some(expected) = token else { return Ok(req) };
@@ -169,8 +241,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     Server::builder()
+        // telemetry — СНАРУЖИ rate-limit: отказы 8/16 тоже попадают в метрики.
+        .layer(telemetry::TelemetryLayer)
         .layer(ratelimit::RateLimitLayer::from_env())
         .add_service(health_service)
+        .add_service(reflection_v1)
+        .add_service(reflection_v1a)
         .add_service(GitCoreServer::with_interceptor(GitCoreSvc { pool: pool.clone() }, check_auth))
         .add_service(pb_domain::list_read_server::ListReadServer::with_interceptor(
             services::list::ListReadSvc { pool: pool.clone() },
@@ -194,8 +270,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .serve_with_shutdown(addr, shutdown)
         .await?;
-    println!("setfork-core: остановлен чисто");
+    tracing::info!("остановлен чисто");
     Ok(())
+}
+
+/// Логи: уровень из RUST_LOG (дефолт info), SETFORK_LOG_JSON=1 — JSON-строки
+/// (структурные логи для сборщиков; по умолчанию человекочитаемый формат).
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let json = std::env::var("SETFORK_LOG_JSON").map(|v| v == "1").unwrap_or(false);
+    if json {
+        tracing_subscriber::fmt().with_env_filter(filter).json().init();
+    } else {
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+    }
 }
 
 /// Fail-fast проверка GIT_DATA_DIR: задан и доступен на запись (создаём при отсутствии).

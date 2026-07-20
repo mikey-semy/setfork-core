@@ -346,7 +346,7 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
         Ok(p) => p,
         Err(e) => {
             // Пользовательский вход: битый list.json — не сбой сервиса, но след оставляем.
-            eprintln!("setfork-core: проекция {template_id}: list.json не парсится ({e}) — версия не создана");
+            tracing::warn!(%template_id, error = %e, "проекция: list.json не парсится — версия не создана");
             return Ok(None);
         }
     };
@@ -368,15 +368,15 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
     let ver = db::add_version(pool, template_id, &note, &steps).await?;
     // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.
     if let Err(e) = db::update_meta(pool, template_id, parsed.title.clone(), parsed.desc.clone(), parsed.tags.clone(), parsed.ordered).await {
-        eprintln!("setfork-core: проекция {template_id}: v{ver} создана, но мета не обновлена: {e}");
+        tracing::error!(%template_id, ver, error = %e, "проекция: версия создана, но мета не обновлена");
     }
     // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo
     // может повторно досыпать версию поверх (шум истории, не потеря данных).
     let bare_tag = bare.to_path_buf();
     match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {
         Ok(Ok(())) => {}
-        Ok(Err(e)) => eprintln!("setfork-core: проекция {template_id}: тег v{ver} не поставлен: {e}"),
-        Err(e) => eprintln!("setfork-core: проекция {template_id}: тег v{ver} не поставлен (задача прервана): {e}"),
+        Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, "проекция: тег не поставлен"),
+        Err(e) => tracing::error!(%template_id, ver, error = %e, "проекция: тег не поставлен (задача прервана)"),
     }
     Ok(Some(ver))
 }
