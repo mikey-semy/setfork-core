@@ -18,14 +18,12 @@ fn pkt_line(s: &str) -> Vec<u8> {
 /// до чтения stdout (для больших тел позже перейдём на gix без шелла).
 fn run_git_io(args: &[&str], input: Option<&[u8]>, git_protocol: Option<&str>) -> io::Result<Vec<u8>> {
     let mut cmd = Command::new("git");
-    cmd.args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(p) = git_protocol
-        && !p.is_empty() {
-            cmd.env("GIT_PROTOCOL", p);
-        }
+        && !p.is_empty()
+    {
+        cmd.env("GIT_PROTOCOL", p);
+    }
     let mut child = cmd.spawn()?;
     {
         // take() + drop в конце блока закрывает stdin (EOF), даже если input=None.
@@ -48,11 +46,7 @@ fn run_git_io(args: &[&str], input: Option<&[u8]>, git_protocol: Option<&str>) -
 /// GET /info/refs?service=git-upload-pack — реклама ссылок (smart-HTTP).
 pub fn upload_pack_advertise(repo_dir: &Path, git_protocol: Option<&str>) -> io::Result<Vec<u8>> {
     let dir = repo_dir.to_string_lossy().to_string();
-    let refs = run_git_io(
-        &["upload-pack", "--stateless-rpc", "--advertise-refs", &dir],
-        None,
-        git_protocol,
-    )?;
+    let refs = run_git_io(&["upload-pack", "--stateless-rpc", "--advertise-refs", &dir], None, git_protocol)?;
     let mut out = pkt_line("# service=git-upload-pack\n");
     out.extend_from_slice(b"0000");
     out.extend_from_slice(&refs);
@@ -68,11 +62,8 @@ pub fn upload_pack_rpc(repo_dir: &Path, body: &[u8], git_protocol: Option<&str>)
 /// GET /info/refs?service=git-receive-pack — реклама для push.
 pub fn receive_pack_advertise(repo_dir: &Path, git_protocol: Option<&str>) -> io::Result<Vec<u8>> {
     let dir = repo_dir.to_string_lossy().to_string();
-    let refs = run_git_io(
-        &["receive-pack", "--stateless-rpc", "--advertise-refs", &dir],
-        None,
-        git_protocol,
-    )?;
+    let refs =
+        run_git_io(&["receive-pack", "--stateless-rpc", "--advertise-refs", &dir], None, git_protocol)?;
     let mut out = pkt_line("# service=git-receive-pack\n");
     out.extend_from_slice(b"0000");
     out.extend_from_slice(&refs);

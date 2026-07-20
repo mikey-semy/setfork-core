@@ -1,8 +1,8 @@
 //! Обратная проекция git → БД: чтение состояния списка из дерева коммита
 //! (list.json + steps/*.md, порт project.ts) и запись новой версии после
 //! push/merge, когда сдвинулся main.
-use super::repo::join_err;
 use super::MAIN_REF;
+use super::repo::join_err;
 use crate::blocks::is_step_type;
 use crate::db;
 use serde::Deserialize;
@@ -115,9 +115,10 @@ fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, S
             Err(_) => continue,
         };
         if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())
-            && let Ok(s) = String::from_utf8(blob.content().to_vec()) {
-                out.insert(n, s);
-            }
+            && let Ok(s) = String::from_utf8(blob.content().to_vec())
+        {
+            out.insert(n, s);
+        }
     }
     out
 }
@@ -187,11 +188,7 @@ pub fn parse_step_md(content: &str) -> ParsedStepMd {
     while desc_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
         desc_lines.pop();
     }
-    let desc = if desc_lines.is_empty() {
-        None
-    } else {
-        Some(desc_lines.join("\n"))
-    };
+    let desc = if desc_lines.is_empty() { None } else { Some(desc_lines.join("\n")) };
 
     ParsedStepMd { title, desc, command }
 }
@@ -332,13 +329,16 @@ fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -
 /// - `Err(_)` — реальный сбой записи в БД: git-данные целы, версия НЕ создана.
 ///   Вызывающий обязан громко залогировать; восстановление — `reproject <owner> <slug>`
 ///   (CLI-режим в main.rs).
-pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Result<Option<i32>, sqlx::Error> {
+pub async fn project_pushed_commit(
+    pool: &PgPool,
+    template_id: Uuid,
+    bare: &Path,
+) -> Result<Option<i32>, sqlx::Error> {
     // git2-объекты не Send и блокируют поток → всё git-чтение в spawn_blocking,
     // наружу только owned-данные.
     let bare_read = bare.to_path_buf();
-    let Some((tip, raw, subject, step_md)) = tokio::task::spawn_blocking(move || read_tip(&bare_read))
-        .await
-        .map_err(join_err)?
+    let Some((tip, raw, subject, step_md)) =
+        tokio::task::spawn_blocking(move || read_tip(&bare_read)).await.map_err(join_err)?
     else {
         return Ok(None);
     };
@@ -356,18 +356,23 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
 
     let note: String = {
         let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();
-        if stripped.trim().is_empty() {
-            "pushed via git".to_string()
-        } else {
-            stripped
-        }
+        if stripped.trim().is_empty() { "pushed via git".to_string() } else { stripped }
     };
 
     let steps = parse_steps(steps_raw, &step_md);
 
     let ver = db::add_version(pool, template_id, &note, &steps).await?;
     // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.
-    if let Err(e) = db::update_meta(pool, template_id, parsed.title.clone(), parsed.desc.clone(), parsed.tags.clone(), parsed.ordered).await {
+    if let Err(e) = db::update_meta(
+        pool,
+        template_id,
+        parsed.title.clone(),
+        parsed.desc.clone(),
+        parsed.tags.clone(),
+        parsed.ordered,
+    )
+    .await
+    {
         tracing::error!(%template_id, ver, error = %e, "проекция: версия создана, но мета не обновлена");
     }
     // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo
@@ -376,14 +381,16 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
     match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, "проекция: тег не поставлен"),
-        Err(e) => tracing::error!(%template_id, ver, error = %e, "проекция: тег не поставлен (задача прервана)"),
+        Err(e) => {
+            tracing::error!(%template_id, ver, error = %e, "проекция: тег не поставлен (задача прервана)")
+        }
     }
     Ok(Some(ver))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_step_md, strip_v_prefix, ParsedStepMd};
+    use super::{ParsedStepMd, parse_step_md, strip_v_prefix};
     use crate::git::bundle::{SerStep, StepRef};
 
     #[test]

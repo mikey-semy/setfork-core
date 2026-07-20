@@ -10,8 +10,8 @@
 //!   cargo test --test golden -- --include-ignored
 mod support;
 
-use sqlx::PgPool;
 use setfork_core::{db, git::bundle, services};
+use sqlx::PgPool;
 
 const OWNER_ID: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const LIST_ID: &str = "11111111-2222-3333-4444-555555555555";
@@ -57,13 +57,11 @@ fn compare_or_update(rel: &str, actual: &str) {
         return;
     }
     let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-        panic!("нет фикстуры {rel} — сгенерируй: UPDATE_GOLDEN=1 cargo test --test golden -- --include-ignored")
+        panic!(
+            "нет фикстуры {rel} — сгенерируй: UPDATE_GOLDEN=1 cargo test --test golden -- --include-ignored"
+        )
     });
-    assert_eq!(
-        expected.replace("\r\n", "\n"),
-        actual.replace("\r\n", "\n"),
-        "разъезд golden-фикстуры {rel}"
-    );
+    assert_eq!(expected.replace("\r\n", "\n"), actual.replace("\r\n", "\n"), "разъезд golden-фикстуры {rel}");
 }
 
 #[tokio::test]
@@ -73,19 +71,15 @@ async fn golden_domain_read_and_materialization() {
     seed_fixed(&pool).await;
 
     // 1. Канонический domain-read JSON (тот же код-пас, что CLI `domain-read`).
-    let json = services::list::golden_json(&pool, "golden", "golden-list")
-        .await
-        .expect("golden_json");
+    let json = services::list::golden_json(&pool, "golden", "golden-list").await.expect("golden_json");
     compare_or_update(
         "tests/fixtures/golden-domain-read.json",
         &format!("{}\n", serde_json::to_string_pretty(&json).unwrap()),
     );
 
     // 2. Материализация версий: list.json и README последней версии.
-    let (id, cur) = db::resolve_list(&pool, "golden", "golden-list")
-        .await
-        .expect("resolve")
-        .expect("список есть");
+    let (id, cur) =
+        db::resolve_list(&pool, "golden", "golden-list").await.expect("resolve").expect("список есть");
     assert_eq!(cur, 2);
     let versions = db::load_bundle_data(&pool, id).await.expect("load_bundle_data");
     assert_eq!(versions.len(), 2);

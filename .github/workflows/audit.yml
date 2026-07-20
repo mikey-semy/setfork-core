@@ -20,6 +20,16 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  # Лицензии/дубли/источники графа зависимостей (deny.toml). Advisories не
+  # дублируем — их закрывает job cargo-audit выше.
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources
+
   # Скан секретов в истории коммитов (git-режим; не --no-git — тот цепляет токен
   # checkout'а из .git/ в CI). История ядра чиста (проверено локально). Барьер.
   secrets:

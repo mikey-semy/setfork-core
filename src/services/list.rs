@@ -13,8 +13,8 @@
 //! (в отличие от db::add_version, который упрощён под git-проекцию): LocaleText
 //! сохраняется как есть, imageRef → has_image/image_key, bump current_version +
 //! updated_at — всё в ОДНОЙ транзакции.
-use sqlx::postgres::PgPool;
 use sqlx::Row;
+use sqlx::postgres::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
@@ -25,8 +25,8 @@ use crate::pb_domain::list_read_server::ListRead;
 use crate::pb_domain::list_write_server::ListWrite;
 use crate::pb_domain::{
     AddVersionRequest, Contributor, ContributorsResponse, CreateListRequest, GetListResponse,
-    GetVersionRequest, GetVersionResponse, List, ListId, ListRef, LocaleText, NewStep, Step,
-    StepRef, Version, VersionsResponse,
+    GetVersionRequest, GetVersionResponse, List, ListId, ListRef, LocaleText, NewStep, Step, StepRef,
+    Version, VersionsResponse,
 };
 
 /// ListRead: чтение списков/версий/шагов (зеркало list-store.adapter.ts).
@@ -52,11 +52,7 @@ fn jloc(l: &Option<LocaleText>) -> serde_json::Value {
 }
 
 fn jnull(s: &str) -> serde_json::Value {
-    if s.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::Value::String(s.to_string())
-    }
+    if s.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(s.to_string()) }
 }
 
 fn jver(v: &Version) -> serde_json::Value {
@@ -72,28 +68,19 @@ pub async fn golden_json(
     slug: &str,
 ) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let svc = ListReadSvc { pool: pool.clone() };
-    let gl = svc
-        .get_list(Request::new(ListRef { owner: owner.into(), slug: slug.into() }))
-        .await?
-        .into_inner();
+    let gl =
+        svc.get_list(Request::new(ListRef { owner: owner.into(), slug: slug.into() })).await?.into_inner();
     if !gl.found {
         return Ok(serde_json::json!({ "found": false }));
     }
     let l = gl.list.unwrap();
-    let versions = svc
-        .list_versions(Request::new(ListId { id: l.id.clone() }))
-        .await?
-        .into_inner()
-        .versions;
+    let versions = svc.list_versions(Request::new(ListId { id: l.id.clone() })).await?.into_inner().versions;
     let cur = svc
         .get_version(Request::new(GetVersionRequest { list_id: l.id.clone(), version: l.current_version }))
         .await?
         .into_inner();
-    let contributors = svc
-        .get_contributors(Request::new(ListId { id: l.id.clone() }))
-        .await?
-        .into_inner()
-        .contributors;
+    let contributors =
+        svc.get_contributors(Request::new(ListId { id: l.id.clone() })).await?.into_inner().contributors;
 
     let steps: Vec<serde_json::Value> = cur
         .steps
@@ -304,10 +291,7 @@ impl ListRead for ListReadSvc {
         Ok(Response::new(GetVersionResponse { found: true, version: Some(ver), steps }))
     }
 
-    async fn get_contributors(
-        &self,
-        req: Request<ListId>,
-    ) -> Result<Response<ContributorsResponse>, Status> {
+    async fn get_contributors(&self, req: Request<ListId>) -> Result<Response<ContributorsResponse>, Status> {
         let id = parse_id(&req.into_inner().id)?;
         let tpl = sqlx::query("select owner_id from templates where id = $1 limit 1")
             .bind(id)

@@ -145,11 +145,8 @@ pub async fn pool_with_schema() -> PgPool {
     );
     let schema = format!("t_{}", Uuid::new_v4().simple());
 
-    let admin = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&url)
-        .await
-        .expect("подключение к TEST_DATABASE_URL");
+    let admin =
+        PgPoolOptions::new().max_connections(1).connect(&url).await.expect("подключение к TEST_DATABASE_URL");
     // AssertSqlSafe: имя схемы — наш uuid, не пользовательский ввод.
     sqlx::query(sqlx::AssertSqlSafe(format!("create schema \"{schema}\"")))
         .execute(&admin)
@@ -159,11 +156,8 @@ pub async fn pool_with_schema() -> PgPool {
     // search_path пула — наша схема: и таблицы, и enum-касты резолвятся в неё.
     let sep = if url.contains('?') { '&' } else { '?' };
     let url_sp = format!("{url}{sep}options=-csearch_path%3D{schema}");
-    let pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&url_sp)
-        .await
-        .expect("подключение тестового пула");
+    let pool =
+        PgPoolOptions::new().max_connections(5).connect(&url_sp).await.expect("подключение тестового пула");
     sqlx::raw_sql(DDL).execute(&pool).await.expect("применение DDL-снимка");
     pool
 }
