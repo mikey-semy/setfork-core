@@ -3,9 +3,13 @@ name: CI
 # CI на СВОЁМ раннере (setfork-ci-runner, runs-on: [self-hosted, setfork-core]) —
 # GitHub-минуты не тратятся (решение владельца 2026-07-14/20). Основной гейт перед
 # мержем всё равно ЛОКАЛЬНЫЙ scripts/ci-local.sh; это дублирующий барьер в UI.
-# Специфика контейнерного раннера (myoung34/github-runner + docker.sock):
-# rust-джобы идут в container: rust:1-trixie (не ставим toolchain на раннер),
-# services доступны по ИМЕНИ сервиса (не localhost — job сам в контейнере).
+#
+# Специфика раннера-в-докере (myoung34/github-runner + docker.sock):
+# `container:`/`services:`/docker-экшены НЕ работают — job-контейнеры монтируют
+# пути раннера (externals /__e, workspace), которых нет у host-демона (sibling,
+# не DinD). Поэтому все джобы «raw»: toolchain ставится rustup'ом на раннер,
+# Postgres — sibling-контейнер, чья сеть подключается к контейнеру раннера
+# (docker network connect $(hostname)), gitleaks — нативный бинарь.
 on:
   push:
     branches: [master]
@@ -15,11 +19,14 @@ on:
 jobs:
   check:
     runs-on: [self-hosted, setfork-core]
-    container: rust:1-trixie
     steps:
       - uses: actions/checkout@v4
-      # rust-образ — minimal-профиль: rustfmt/clippy докачиваем компонентами.
-      - run: rustup component add rustfmt clippy
+      - name: toolchain (rustup + cc для libgit2)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --component rustfmt,clippy
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       # protoc не нужен (protobuf компилирует protox в build.rs); libgit2 собирается через cc.
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
@@ -29,30 +36,38 @@ jobs:
   # что гоняет scripts/ci-local.sh на эфемерном контейнере.
   integration:
     runs-on: [self-hosted, setfork-core]
-    container: rust:1-trixie
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: t
-          POSTGRES_PASSWORD: t
-          POSTGRES_DB: t
-        options: >-
-          --health-cmd "pg_isready -U t -d t"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     steps:
       - uses: actions/checkout@v4
+      - name: toolchain (rustup + cc для libgit2)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      - name: Postgres (sibling-контейнер, сеть подключается к раннеру)
+        run: |
+          docker network create "ci-pg-${GITHUB_RUN_ID}" || true
+          docker run -d --name "pg-${GITHUB_RUN_ID}" --network "ci-pg-${GITHUB_RUN_ID}" \
+            -e POSTGRES_USER=t -e POSTGRES_PASSWORD=t -e POSTGRES_DB=t \
+            pgvector/pgvector:pg16
+          docker network connect "ci-pg-${GITHUB_RUN_ID}" "$(hostname)"
+          for i in $(seq 1 60); do
+            docker exec "pg-${GITHUB_RUN_ID}" pg_isready -U t -d t >/dev/null 2>&1 && break
+            sleep 1
+          done
       - run: cargo test -- --include-ignored
         env:
-          # hostname = имя сервиса: job-контейнер в одной docker-сети с сервисом.
-          TEST_DATABASE_URL: postgresql://t:t@postgres:5432/t
+          TEST_DATABASE_URL: postgresql://t:t@pg-${{ github.run_id }}:5432/t
+      - name: cleanup Postgres
+        if: always()
+        run: |
+          docker network disconnect "ci-pg-${GITHUB_RUN_ID}" "$(hostname)" || true
+          docker rm -f "pg-${GITHUB_RUN_ID}" || true
+          docker network rm "ci-pg-${GITHUB_RUN_ID}" || true
 
   # Публикация образа в GHCR (только push в master): ghcr.io/<repo>:latest + :sha.
-  # Без buildx-экшена — на self-hosted хватает плоского docker build/push через сок.
-  # Деплой в Dokploy пока собирает образ сам; переключение на pull из GHCR —
-  # открытый вопрос трека (tracks/core.md).
+  # Плоский docker build/push через сок (buildx-экшен не нужен). Деплой в Dokploy
+  # пока собирает образ сам; переключение на pull из GHCR — вопрос трека.
   image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: [self-hosted, setfork-core]
