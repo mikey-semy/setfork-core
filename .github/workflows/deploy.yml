@@ -1,0 +1,55 @@
+# Автодеплой на прод setfork (31.177.83.219, без Dokploy) после зелёного CI на master.
+#
+# Образ ядра собирается ЗДЕСЬ, на локальном self-hosted раннере, и уезжает на
+# сервер потоком `docker save | ssh docker load` — БЕЗ реестра. Причина: RF-сервер
+# не может качать с objects.githubusercontent.com (шейпинг провайдера), поэтому
+# сборка Dockerfile на сервере падает (grpc_health_probe); GHCR-pull потребовал бы
+# PAT read:packages на сервере — save|load обходится без кредов вовсе.
+#
+# Ключ деплоя приходит ro-mount'ом из setfork-ci-runner/docker-compose.yml
+# (/ssh/setfork) — в GitHub Secrets ничего не хранится.
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+
+concurrency:
+  group: deploy-prod-core
+  cancel-in-progress: false
+
+env:
+  DEPLOY: root@31.177.83.219
+  APP_DIR: /opt/setfork/src/setfork-core
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, setfork-core]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Ключ деплоя (ro-mount раннера)
+        run: |
+          test -f /ssh/setfork || { echo "::error::нет /ssh/setfork — подними раннер из setfork-ci-runner/docker-compose.yml (там ro-mount ключа)"; exit 1; }
+          command -v ssh >/dev/null || (apt-get update -qq && apt-get install -y -qq openssh-client)
+          install -m 600 /ssh/setfork /tmp/deploy_key
+
+      - name: Сборка → доставка образа → up
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
+          docker build -t setfork-core:prod --target runtime .
+          docker save setfork-core:prod | $SSH docker load
+          tar --exclude=.git -czf - . | $SSH "mkdir -p $APP_DIR && tar -xzf - -C $APP_DIR"
+          $SSH "printf 'services:\n  core:\n    image: setfork-core:prod\n' > $APP_DIR/docker-compose.image.yml"
+          $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build --remove-orphans"
+
+      - name: Health-check
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
+          sleep 5
+          $SSH "docker ps --filter name=setfork-core --format '{{.Names}} {{.Status}}' | grep -q 'Up' " || { echo "::error::контейнер ядра не поднялся"; $SSH "docker logs --tail 50 setfork-core"; exit 1; }
