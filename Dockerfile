@@ -29,10 +29,10 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /app/target/release/setfork-core /usr/local/bin/setfork-core
 COPY --from=builder /grpc_health_probe /usr/local/bin/grpc_health_probe
-# слушать снаружи контейнера; том git-объектов по умолчанию
-ENV SETFORK_CORE_ADDR=0.0.0.0:50051 GIT_DATA_DIR=/data/git
+# слушать снаружи контейнера; том git-объектов по умолчанию; метрики Prometheus
+ENV SETFORK_CORE_ADDR=0.0.0.0:50051 GIT_DATA_DIR=/data/git SETFORK_METRICS_ADDR=0.0.0.0:9464
 USER setfork
-EXPOSE 50051
+EXPOSE 50051 9464
 HEALTHCHECK --interval=30s --timeout=4s --start-period=10s --retries=3 \
   CMD grpc_health_probe -addr=127.0.0.1:50051 || exit 1
 CMD ["setfork-core"]

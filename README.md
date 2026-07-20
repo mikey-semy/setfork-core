@@ -43,6 +43,21 @@ bare-репо), `SETFORK_CORE_TOKEN` (Bearer-токен канала; без н�
 `SETFORK_ALLOW_INSECURE=1` — локальный dev). Rate-limit: `SETFORK_RPC_RPM`,
 `SETFORK_RPC_RPM_HEAVY` (0 = выключить).
 
+## Наблюдаемость
+
+- **Логи** — `tracing`: уровень через `RUST_LOG` (дефолт `info`), `SETFORK_LOG_JSON=1` —
+  JSON-строки. Каждый RPC с ошибкой логируется (метод, gRPC-код, латентность, msg);
+  успешные — на `debug`. Ошибки проекции — `ERROR` с owner/slug и подсказкой `reproject`.
+- **Метрики** — Prometheus на `SETFORK_METRICS_ADDR` (дефолт `127.0.0.1:9464`, `/metrics`;
+  `0`/`off` — выключить): `rpc_requests_total{method,code}`, `rpc_duration_seconds{method}`,
+  `rpc_rate_limited_total{method}`, `projection_failures_total{op}`, `db_healthy`,
+  `db_pool_size`, `db_pool_idle`.
+- **Health** (grpc.health.v1) — привязан к БД: фоновая проба `SELECT 1` каждые 5с,
+  при недоступности БД сервис уходит в NOT_SERVING (оркестратор уводит трафик) и
+  возвращается в SERVING после восстановления.
+- **Reflection** (v1 + v1alpha) — `grpcurl -plaintext host:50051 list` работает без
+  локальных proto-файлов.
+
 ## Golden-сверка с TS
 
 CLI-режимы гоняют тот же код-пас, что и RPC, без транспорта — байты/JSON сверяются
