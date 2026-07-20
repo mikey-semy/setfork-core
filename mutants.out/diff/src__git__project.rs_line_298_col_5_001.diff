@@ -1,0 +1,22 @@
+--- src/git/project.rs
++++ replace branch_snapshot -> Option<BranchSnapshotData> with Some(Default::default())
+@@ -290,18 +290,17 @@
+     pub desc: String,
+     pub tags: Vec<String>,
+     pub ordered: bool,
+     pub steps: Vec<ProjStep>,
+ }
+ 
+ /// Снапшот ветки по refname: мета list.json + шаги с tip'а. Для read-only рендера.
+ pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {
+-    let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;
+-    snapshot_from_data(tip, &raw, &step_md)
++    Some(Default::default()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Материализация произвольного коммита (merge-base для трёхстороннего merge).
+ pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {
+     let repo = git2::Repository::open_bare(bare).ok()?;
+     let oid = git2::Oid::from_str(sha).ok()?;
+     let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;
+     snapshot_from_data(tip, &raw, &step_md)

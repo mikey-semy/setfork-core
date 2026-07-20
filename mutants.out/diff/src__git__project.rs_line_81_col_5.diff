@@ -1,0 +1,28 @@
+--- src/git/project.rs
++++ replace read_commit_data -> Option<TipData> with None
+@@ -73,24 +73,17 @@
+ pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {
+     let repo = git2::Repository::open_bare(bare).ok()?;
+     let tip = repo.refname_to_id(refname).ok()?;
+     read_commit_data(&repo, tip)
+ }
+ 
+ // Общее чтение материализации из конкретного коммита (ref-tip или merge-base).
+ fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> {
+-    let commit = repo.find_commit(oid).ok()?;
+-    let tree = commit.tree().ok()?;
+-    let entry = tree.get_path(Path::new("list.json")).ok()?;
+-    let blob = entry.to_object(repo).ok()?;
+-    let raw = blob.as_blob()?.content().to_vec();
+-    let subject = commit.summary().ok().flatten().unwrap_or("").to_string();
+-    let steps = read_step_files(repo, &tree);
+-    Some((oid.to_string(), raw, subject, steps))
++    None /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.
+ // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).
+ fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {
+     let mut out = HashMap::new();
+     let steps_tree = match tree.get_path(Path::new("steps")).ok().and_then(|e| e.to_object(repo).ok()) {
+         Some(obj) => match obj.into_tree() {

@@ -1,0 +1,3330 @@
+[
+  {
+    "diff": "--- src/blocks.rs\n+++ replace is_step_type -> bool with true\n@@ -2,17 +2,17 @@\n //! правил нормализации type/content (аудит 2026-07-20, P2-13: правило было\n //! скопировано в 8 местах — services/list, collab, db, git/project|serialize).\n //! Всё остальное — блоки (text/image/poll/…), несущие type/content.\n //! Пустая строка приравнена к 'step': proto3 не отличает '' от отсутствия\n //! поля, БД хранит 'step' явно.\n \n /// Шаг ли это (все прочие типы — блоки с type/content).\n pub fn is_step_type(t: &str) -> bool {\n-    t.is_empty() || t == \"step\"\n+    true /* ~ changed by cargo-mutants ~ */\n }\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "is_step_type",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 11
+        },
+        "start": {
+          "column": 1,
+          "line": 8
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/blocks.rs:10:5: replace is_step_type -> bool with true",
+    "package": "setfork-core",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 32,
+        "line": 10
+      },
+      "start": {
+        "column": 5,
+        "line": 10
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace is_step_type -> bool with false\n@@ -2,17 +2,17 @@\n //! правил нормализации type/content (аудит 2026-07-20, P2-13: правило было\n //! скопировано в 8 местах — services/list, collab, db, git/project|serialize).\n //! Всё остальное — блоки (text/image/poll/…), несущие type/content.\n //! Пустая строка приравнена к 'step': proto3 не отличает '' от отсутствия\n //! поля, БД хранит 'step' явно.\n \n /// Шаг ли это (все прочие типы — блоки с type/content).\n pub fn is_step_type(t: &str) -> bool {\n-    t.is_empty() || t == \"step\"\n+    false /* ~ changed by cargo-mutants ~ */\n }\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "is_step_type",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 11
+        },
+        "start": {
+          "column": 1,
+          "line": 8
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/blocks.rs:10:5: replace is_step_type -> bool with false",
+    "package": "setfork-core",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 32,
+        "line": 10
+      },
+      "start": {
+        "column": 5,
+        "line": 10
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace || with && in is_step_type\n@@ -2,17 +2,17 @@\n //! правил нормализации type/content (аудит 2026-07-20, P2-13: правило было\n //! скопировано в 8 местах — services/list, collab, db, git/project|serialize).\n //! Всё остальное — блоки (text/image/poll/…), несущие type/content.\n //! Пустая строка приравнена к 'step': proto3 не отличает '' от отсутствия\n //! поля, БД хранит 'step' явно.\n \n /// Шаг ли это (все прочие типы — блоки с type/content).\n pub fn is_step_type(t: &str) -> bool {\n-    t.is_empty() || t == \"step\"\n+    t.is_empty() && /* ~ changed by cargo-mutants ~ */ t == \"step\"\n }\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "is_step_type",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 11
+        },
+        "start": {
+          "column": 1,
+          "line": 8
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/blocks.rs:10:18: replace || with && in is_step_type",
+    "package": "setfork-core",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 20,
+        "line": 10
+      },
+      "start": {
+        "column": 18,
+        "line": 10
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace == with != in is_step_type\n@@ -2,17 +2,17 @@\n //! правил нормализации type/content (аудит 2026-07-20, P2-13: правило было\n //! скопировано в 8 местах — services/list, collab, db, git/project|serialize).\n //! Всё остальное — блоки (text/image/poll/…), несущие type/content.\n //! Пустая строка приравнена к 'step': proto3 не отличает '' от отсутствия\n //! поля, БД хранит 'step' явно.\n \n /// Шаг ли это (все прочие типы — блоки с type/content).\n pub fn is_step_type(t: &str) -> bool {\n-    t.is_empty() || t == \"step\"\n+    t.is_empty() || t != /* ~ changed by cargo-mutants ~ */ \"step\"\n }\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "is_step_type",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 11
+        },
+        "start": {
+          "column": 1,
+          "line": 8
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/blocks.rs:10:23: replace == with != in is_step_type",
+    "package": "setfork-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 25,
+        "line": 10
+      },
+      "start": {
+        "column": 23,
+        "line": 10
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace storage_type -> String with String::new()\n@@ -7,17 +7,17 @@\n \n /// Шаг ли это (все прочие типы — блоки с type/content).\n pub fn is_step_type(t: &str) -> bool {\n     t.is_empty() || t == \"step\"\n }\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n-    if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n+    String::new() /* ~ changed by cargo-mutants ~ */\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n pub fn wire_type(t: Option<&str>) -> String {\n     match t {\n         Some(t) if !is_step_type(t) => t.to_string(),\n         _ => String::new(),\n     }\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "storage_type",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 16
+        },
+        "start": {
+          "column": 1,
+          "line": 13
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/blocks.rs:15:5: replace storage_type -> String with String::new()",
+    "package": "setfork-core",
+    "replacement": "String::new()",
+    "span": {
+      "end": {
+        "column": 69,
+        "line": 15
+      },
+      "start": {
+        "column": 5,
+        "line": 15
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace storage_type -> String with \"xyzzy\".into()\n@@ -7,17 +7,17 @@\n \n /// Шаг ли это (все прочие типы — блоки с type/content).\n pub fn is_step_type(t: &str) -> bool {\n     t.is_empty() || t == \"step\"\n }\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n-    if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n+    \"xyzzy\".into() /* ~ changed by cargo-mutants ~ */\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n pub fn wire_type(t: Option<&str>) -> String {\n     match t {\n         Some(t) if !is_step_type(t) => t.to_string(),\n         _ => String::new(),\n     }\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "storage_type",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 16
+        },
+        "start": {
+          "column": 1,
+          "line": 13
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/blocks.rs:15:5: replace storage_type -> String with \"xyzzy\".into()",
+    "package": "setfork-core",
+    "replacement": "\"xyzzy\".into()",
+    "span": {
+      "end": {
+        "column": 69,
+        "line": 15
+      },
+      "start": {
+        "column": 5,
+        "line": 15
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace wire_type -> String with String::new()\n@@ -12,20 +12,17 @@\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n pub fn wire_type(t: Option<&str>) -> String {\n-    match t {\n-        Some(t) if !is_step_type(t) => t.to_string(),\n-        _ => String::new(),\n-    }\n+    String::new() /* ~ changed by cargo-mutants ~ */\n }\n \n /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}\n /// (мягкость к клиентскому вводу, как в TS-адаптерах).\n pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {\n     if is_step_type(step_type) || content_json.is_empty() {\n         serde_json::json!({})\n     } else {\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "wire_type",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 24
+        },
+        "start": {
+          "column": 1,
+          "line": 18
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/blocks.rs:20:5: replace wire_type -> String with String::new()",
+    "package": "setfork-core",
+    "replacement": "String::new()",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 23
+      },
+      "start": {
+        "column": 5,
+        "line": 20
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace wire_type -> String with \"xyzzy\".into()\n@@ -12,20 +12,17 @@\n \n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n pub fn wire_type(t: Option<&str>) -> String {\n-    match t {\n-        Some(t) if !is_step_type(t) => t.to_string(),\n-        _ => String::new(),\n-    }\n+    \"xyzzy\".into() /* ~ changed by cargo-mutants ~ */\n }\n \n /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}\n /// (мягкость к клиентскому вводу, как в TS-адаптерах).\n pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {\n     if is_step_type(step_type) || content_json.is_empty() {\n         serde_json::json!({})\n     } else {\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "wire_type",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 24
+        },
+        "start": {
+          "column": 1,
+          "line": 18
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/blocks.rs:20:5: replace wire_type -> String with \"xyzzy\".into()",
+    "package": "setfork-core",
+    "replacement": "\"xyzzy\".into()",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 23
+      },
+      "start": {
+        "column": 5,
+        "line": 20
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace match guard !is_step_type(t) with true in wire_type\n@@ -13,17 +13,17 @@\n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n pub fn wire_type(t: Option<&str>) -> String {\n     match t {\n-        Some(t) if !is_step_type(t) => t.to_string(),\n+        Some(t) if true /* ~ changed by cargo-mutants ~ */ => t.to_string(),\n         _ => String::new(),\n     }\n }\n \n /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}\n /// (мягкость к клиентскому вводу, как в TS-адаптерах).\n pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {\n     if is_step_type(step_type) || content_json.is_empty() {\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "wire_type",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 24
+        },
+        "start": {
+          "column": 1,
+          "line": 18
+        }
+      }
+    },
+    "genre": "MatchArmGuard",
+    "name": "src/blocks.rs:21:20: replace match guard !is_step_type(t) with true in wire_type",
+    "package": "setfork-core",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 36,
+        "line": 21
+      },
+      "start": {
+        "column": 20,
+        "line": 21
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace match guard !is_step_type(t) with false in wire_type\n@@ -13,17 +13,17 @@\n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n pub fn wire_type(t: Option<&str>) -> String {\n     match t {\n-        Some(t) if !is_step_type(t) => t.to_string(),\n+        Some(t) if false /* ~ changed by cargo-mutants ~ */ => t.to_string(),\n         _ => String::new(),\n     }\n }\n \n /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}\n /// (мягкость к клиентскому вводу, как в TS-адаптерах).\n pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {\n     if is_step_type(step_type) || content_json.is_empty() {\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "wire_type",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 24
+        },
+        "start": {
+          "column": 1,
+          "line": 18
+        }
+      }
+    },
+    "genre": "MatchArmGuard",
+    "name": "src/blocks.rs:21:20: replace match guard !is_step_type(t) with false in wire_type",
+    "package": "setfork-core",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 36,
+        "line": 21
+      },
+      "start": {
+        "column": 20,
+        "line": 21
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ delete ! in wire_type\n@@ -13,17 +13,17 @@\n /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.\n pub fn storage_type(t: &str) -> String {\n     if is_step_type(t) { \"step\".to_string() } else { t.to_string() }\n }\n \n /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.\n pub fn wire_type(t: Option<&str>) -> String {\n     match t {\n-        Some(t) if !is_step_type(t) => t.to_string(),\n+        Some(t) if  /* ~ changed by cargo-mutants ~ */is_step_type(t) => t.to_string(),\n         _ => String::new(),\n     }\n }\n \n /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}\n /// (мягкость к клиентскому вводу, как в TS-адаптерах).\n pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {\n     if is_step_type(step_type) || content_json.is_empty() {\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "wire_type",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 24
+        },
+        "start": {
+          "column": 1,
+          "line": 18
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "src/blocks.rs:21:20: delete ! in wire_type",
+    "package": "setfork-core",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 21
+      },
+      "start": {
+        "column": 20,
+        "line": 21
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace content_value -> serde_json::Value with Default::default()\n@@ -21,21 +21,17 @@\n         Some(t) if !is_step_type(t) => t.to_string(),\n         _ => String::new(),\n     }\n }\n \n /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}\n /// (мягкость к клиентскому вводу, как в TS-адаптерах).\n pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {\n-    if is_step_type(step_type) || content_json.is_empty() {\n-        serde_json::json!({})\n-    } else {\n-        serde_json::from_str(content_json).unwrap_or_else(|_| serde_json::json!({}))\n-    }\n+    Default::default() /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     #[test]\n     fn step_predicate_and_normalization() {\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "content_value",
+      "return_type": "-> serde_json::Value",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 34
+        },
+        "start": {
+          "column": 1,
+          "line": 26
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/blocks.rs:29:5: replace content_value -> serde_json::Value with Default::default()",
+    "package": "setfork-core",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 33
+      },
+      "start": {
+        "column": 5,
+        "line": 29
+      }
+    }
+  },
+  {
+    "diff": "--- src/blocks.rs\n+++ replace || with && in content_value\n@@ -21,17 +21,17 @@\n         Some(t) if !is_step_type(t) => t.to_string(),\n         _ => String::new(),\n     }\n }\n \n /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}\n /// (мягкость к клиентскому вводу, как в TS-адаптерах).\n pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {\n-    if is_step_type(step_type) || content_json.is_empty() {\n+    if is_step_type(step_type) && /* ~ changed by cargo-mutants ~ */ content_json.is_empty() {\n         serde_json::json!({})\n     } else {\n         serde_json::from_str(content_json).unwrap_or_else(|_| serde_json::json!({}))\n     }\n }\n \n #[cfg(test)]\n mod tests {\n",
+    "file": "src/blocks.rs",
+    "function": {
+      "function_name": "content_value",
+      "return_type": "-> serde_json::Value",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 34
+        },
+        "start": {
+          "column": 1,
+          "line": 26
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/blocks.rs:29:32: replace || with && in content_value",
+    "package": "setfork-core",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 34,
+        "line": 29
+      },
+      "start": {
+        "column": 32,
+        "line": 29
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace RateLimitLayer::with -> Self with Default::default()\n@@ -52,17 +52,17 @@\n     /// читался дважды — main и этот модуль; аудит 2026-07-20, P2-14).\n     pub fn new(rpm: u32, rpm_heavy: u32, token: Option<&str>) -> Self {\n         tracing::info!(rpm, rpm_heavy, \"rate-limit per-метод (0 = выкл)\");\n         Self::with(rpm, rpm_heavy, token.map(|t| format!(\"Bearer {t}\")))\n     }\n \n     // Явные параметры — общий конструктор new и юнит-тестов.\n     fn with(rpm: u32, rpm_heavy: u32, expected_auth: Option<String>) -> Self {\n-        Self { inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }) }\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl<S> Layer<S> for RateLimitLayer {\n     type Service = RateLimited<S>;\n     fn layer(&self, service: S) -> Self::Service {\n         RateLimited { inner: service, state: self.inner.clone() }\n     }\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimitLayer::with",
+      "return_type": "-> Self",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 61
+        },
+        "start": {
+          "column": 5,
+          "line": 59
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:60:9: replace RateLimitLayer::with -> Self with Default::default()",
+    "package": "setfork-core",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 111,
+        "line": 60
+      },
+      "start": {
+        "column": 9,
+        "line": 60
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace <impl Layer<S> for RateLimitLayer>::layer -> Self::Service with Default::default()\n@@ -59,17 +59,17 @@\n     fn with(rpm: u32, rpm_heavy: u32, expected_auth: Option<String>) -> Self {\n         Self { inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }) }\n     }\n }\n \n impl<S> Layer<S> for RateLimitLayer {\n     type Service = RateLimited<S>;\n     fn layer(&self, service: S) -> Self::Service {\n-        RateLimited { inner: service, state: self.inner.clone() }\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n #[derive(Clone)]\n pub struct RateLimited<S> {\n     inner: S,\n     state: Arc<State>,\n }\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "<impl Layer<S> for RateLimitLayer>::layer",
+      "return_type": "-> Self::Service",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 68
+        },
+        "start": {
+          "column": 5,
+          "line": 66
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:67:9: replace <impl Layer<S> for RateLimitLayer>::layer -> Self::Service with Default::default()",
+    "package": "setfork-core",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 66,
+        "line": 67
+      },
+      "start": {
+        "column": 9,
+        "line": 67
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace RateLimited<S>::allow -> bool with true\n@@ -73,46 +73,17 @@\n     inner: S,\n     state: Arc<State>,\n }\n \n impl<S> RateLimited<S> {\n     /// true = запрос пропускаем. Путь вида /setfork.git.v1.GitCore/ReceivePack.\n     fn allow(&self, path: &str, auth: Option<&str>) -> bool {\n         // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).\n-        if path.starts_with(\"/grpc.health\") || path.starts_with(\"/grpc.reflection\") {\n-            return true;\n-        }\n-        // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже\n-        // всё равно вернёт unauthenticated. Так лимит защищает только реальный\n-        // (авторизованный) трафик, а не служит вектором DoS.\n-        if let Some(expected) = &self.state.expected_auth\n-            && auth != Some(expected.as_str())\n-        {\n-            return true;\n-        }\n-        let method = path.rsplit('/').next().unwrap_or(path);\n-        let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };\n-        if limit == 0 {\n-            return true;\n-        }\n-        let now = Instant::now();\n-        // Отравление мьютекса (паника держателя) не должно ронять весь трафик:\n-        // окна внутри валидны как данные — забираем их как есть.\n-        let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());\n-        let q = windows.entry(method.to_string()).or_default();\n-        while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {\n-            q.pop_front();\n-        }\n-        if q.len() as u32 >= limit {\n-            metrics::counter!(\"rpc_rate_limited_total\", \"method\" => method.to_string()).increment(1);\n-            return false;\n-        }\n-        q.push_back(now);\n-        true\n+        true /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl<S, ReqBody> Service<Request<ReqBody>> for RateLimited<S>\n where\n     S: Service<Request<ReqBody>, Response = Response<Body>> + Send,\n     S::Future: Send + 'static,\n {\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:81:9: replace RateLimited<S>::allow -> bool with true",
+    "package": "setfork-core",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 13,
+        "line": 110
+      },
+      "start": {
+        "column": 9,
+        "line": 81
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace RateLimited<S>::allow -> bool with false\n@@ -73,46 +73,17 @@\n     inner: S,\n     state: Arc<State>,\n }\n \n impl<S> RateLimited<S> {\n     /// true = запрос пропускаем. Путь вида /setfork.git.v1.GitCore/ReceivePack.\n     fn allow(&self, path: &str, auth: Option<&str>) -> bool {\n         // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).\n-        if path.starts_with(\"/grpc.health\") || path.starts_with(\"/grpc.reflection\") {\n-            return true;\n-        }\n-        // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже\n-        // всё равно вернёт unauthenticated. Так лимит защищает только реальный\n-        // (авторизованный) трафик, а не служит вектором DoS.\n-        if let Some(expected) = &self.state.expected_auth\n-            && auth != Some(expected.as_str())\n-        {\n-            return true;\n-        }\n-        let method = path.rsplit('/').next().unwrap_or(path);\n-        let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };\n-        if limit == 0 {\n-            return true;\n-        }\n-        let now = Instant::now();\n-        // Отравление мьютекса (паника держателя) не должно ронять весь трафик:\n-        // окна внутри валидны как данные — забираем их как есть.\n-        let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());\n-        let q = windows.entry(method.to_string()).or_default();\n-        while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {\n-            q.pop_front();\n-        }\n-        if q.len() as u32 >= limit {\n-            metrics::counter!(\"rpc_rate_limited_total\", \"method\" => method.to_string()).increment(1);\n-            return false;\n-        }\n-        q.push_back(now);\n-        true\n+        false /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n impl<S, ReqBody> Service<Request<ReqBody>> for RateLimited<S>\n where\n     S: Service<Request<ReqBody>, Response = Response<Body>> + Send,\n     S::Future: Send + 'static,\n {\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:81:9: replace RateLimited<S>::allow -> bool with false",
+    "package": "setfork-core",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 13,
+        "line": 110
+      },
+      "start": {
+        "column": 9,
+        "line": 81
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace || with && in RateLimited<S>::allow\n@@ -73,17 +73,17 @@\n     inner: S,\n     state: Arc<State>,\n }\n \n impl<S> RateLimited<S> {\n     /// true = запрос пропускаем. Путь вида /setfork.git.v1.GitCore/ReceivePack.\n     fn allow(&self, path: &str, auth: Option<&str>) -> bool {\n         // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).\n-        if path.starts_with(\"/grpc.health\") || path.starts_with(\"/grpc.reflection\") {\n+        if path.starts_with(\"/grpc.health\") && /* ~ changed by cargo-mutants ~ */ path.starts_with(\"/grpc.reflection\") {\n             return true;\n         }\n         // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже\n         // всё равно вернёт unauthenticated. Так лимит защищает только реальный\n         // (авторизованный) трафик, а не служит вектором DoS.\n         if let Some(expected) = &self.state.expected_auth\n             && auth != Some(expected.as_str())\n         {\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:81:45: replace || with && in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 47,
+        "line": 81
+      },
+      "start": {
+        "column": 45,
+        "line": 81
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace && with || in RateLimited<S>::allow\n@@ -80,17 +80,17 @@\n         // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).\n         if path.starts_with(\"/grpc.health\") || path.starts_with(\"/grpc.reflection\") {\n             return true;\n         }\n         // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже\n         // всё равно вернёт unauthenticated. Так лимит защищает только реальный\n         // (авторизованный) трафик, а не служит вектором DoS.\n         if let Some(expected) = &self.state.expected_auth\n-            && auth != Some(expected.as_str())\n+            || /* ~ changed by cargo-mutants ~ */ auth != Some(expected.as_str())\n         {\n             return true;\n         }\n         let method = path.rsplit('/').next().unwrap_or(path);\n         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };\n         if limit == 0 {\n             return true;\n         }\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:88:13: replace && with || in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 88
+      },
+      "start": {
+        "column": 13,
+        "line": 88
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace != with == in RateLimited<S>::allow\n@@ -80,17 +80,17 @@\n         // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).\n         if path.starts_with(\"/grpc.health\") || path.starts_with(\"/grpc.reflection\") {\n             return true;\n         }\n         // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже\n         // всё равно вернёт unauthenticated. Так лимит защищает только реальный\n         // (авторизованный) трафик, а не служит вектором DoS.\n         if let Some(expected) = &self.state.expected_auth\n-            && auth != Some(expected.as_str())\n+            && auth == /* ~ changed by cargo-mutants ~ */ Some(expected.as_str())\n         {\n             return true;\n         }\n         let method = path.rsplit('/').next().unwrap_or(path);\n         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };\n         if limit == 0 {\n             return true;\n         }\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:88:21: replace != with == in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 88
+      },
+      "start": {
+        "column": 21,
+        "line": 88
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace == with != in RateLimited<S>::allow\n@@ -86,17 +86,17 @@\n         // (авторизованный) трафик, а не служит вектором DoS.\n         if let Some(expected) = &self.state.expected_auth\n             && auth != Some(expected.as_str())\n         {\n             return true;\n         }\n         let method = path.rsplit('/').next().unwrap_or(path);\n         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };\n-        if limit == 0 {\n+        if limit != /* ~ changed by cargo-mutants ~ */ 0 {\n             return true;\n         }\n         let now = Instant::now();\n         // Отравление мьютекса (паника держателя) не должно ронять весь трафик:\n         // окна внутри валидны как данные — забираем их как есть.\n         let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());\n         let q = windows.entry(method.to_string()).or_default();\n         while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:94:18: replace == with != in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 20,
+        "line": 94
+      },
+      "start": {
+        "column": 18,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace > with == in RateLimited<S>::allow\n@@ -94,17 +94,17 @@\n         if limit == 0 {\n             return true;\n         }\n         let now = Instant::now();\n         // Отравление мьютекса (паника держателя) не должно ронять весь трафик:\n         // окна внутри валидны как данные — забираем их как есть.\n         let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());\n         let q = windows.entry(method.to_string()).or_default();\n-        while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {\n+        while q.front().is_some_and(|t| now.duration_since(*t) == /* ~ changed by cargo-mutants ~ */ WINDOW) {\n             q.pop_front();\n         }\n         if q.len() as u32 >= limit {\n             metrics::counter!(\"rpc_rate_limited_total\", \"method\" => method.to_string()).increment(1);\n             return false;\n         }\n         q.push_back(now);\n         true\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:102:64: replace > with == in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 65,
+        "line": 102
+      },
+      "start": {
+        "column": 64,
+        "line": 102
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace > with < in RateLimited<S>::allow\n@@ -94,17 +94,17 @@\n         if limit == 0 {\n             return true;\n         }\n         let now = Instant::now();\n         // Отравление мьютекса (паника держателя) не должно ронять весь трафик:\n         // окна внутри валидны как данные — забираем их как есть.\n         let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());\n         let q = windows.entry(method.to_string()).or_default();\n-        while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {\n+        while q.front().is_some_and(|t| now.duration_since(*t) < /* ~ changed by cargo-mutants ~ */ WINDOW) {\n             q.pop_front();\n         }\n         if q.len() as u32 >= limit {\n             metrics::counter!(\"rpc_rate_limited_total\", \"method\" => method.to_string()).increment(1);\n             return false;\n         }\n         q.push_back(now);\n         true\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:102:64: replace > with < in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 65,
+        "line": 102
+      },
+      "start": {
+        "column": 64,
+        "line": 102
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace > with >= in RateLimited<S>::allow\n@@ -94,17 +94,17 @@\n         if limit == 0 {\n             return true;\n         }\n         let now = Instant::now();\n         // Отравление мьютекса (паника держателя) не должно ронять весь трафик:\n         // окна внутри валидны как данные — забираем их как есть.\n         let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());\n         let q = windows.entry(method.to_string()).or_default();\n-        while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {\n+        while q.front().is_some_and(|t| now.duration_since(*t) >= /* ~ changed by cargo-mutants ~ */ WINDOW) {\n             q.pop_front();\n         }\n         if q.len() as u32 >= limit {\n             metrics::counter!(\"rpc_rate_limited_total\", \"method\" => method.to_string()).increment(1);\n             return false;\n         }\n         q.push_back(now);\n         true\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:102:64: replace > with >= in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 65,
+        "line": 102
+      },
+      "start": {
+        "column": 64,
+        "line": 102
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace >= with < in RateLimited<S>::allow\n@@ -97,17 +97,17 @@\n         let now = Instant::now();\n         // Отравление мьютекса (паника держателя) не должно ронять весь трафик:\n         // окна внутри валидны как данные — забираем их как есть.\n         let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());\n         let q = windows.entry(method.to_string()).or_default();\n         while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {\n             q.pop_front();\n         }\n-        if q.len() as u32 >= limit {\n+        if q.len() as u32 < /* ~ changed by cargo-mutants ~ */ limit {\n             metrics::counter!(\"rpc_rate_limited_total\", \"method\" => method.to_string()).increment(1);\n             return false;\n         }\n         q.push_back(now);\n         true\n     }\n }\n \n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "RateLimited<S>::allow",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 111
+        },
+        "start": {
+          "column": 5,
+          "line": 78
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/ratelimit.rs:105:27: replace >= with < in RateLimited<S>::allow",
+    "package": "setfork-core",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 29,
+        "line": 105
+      },
+      "start": {
+        "column": 27,
+        "line": 105
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::new()\n@@ -119,17 +119,17 @@\n     type Response = S::Response;\n     type Error = S::Error;\n     type Future = futures_util::future::Either<\n         S::Future,\n         futures_util::future::Ready<Result<Self::Response, Self::Error>>,\n     >;\n \n     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {\n-        self.inner.poll_ready(cx)\n+        Poll::new() /* ~ changed by cargo-mutants ~ */\n     }\n \n     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {\n         let auth = req.headers().get(\"authorization\").and_then(|v| v.to_str().ok()).map(str::to_owned);\n         if self.allow(req.uri().path(), auth.as_deref()) {\n             futures_util::future::Either::Left(self.inner.call(req))\n         } else {\n             // gRPC-отказ без вызова inner: RESOURCE_EXHAUSTED в trailers-only ответе.\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+      "return_type": "-> Poll<Result<(), Self::Error>>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 128
+        },
+        "start": {
+          "column": 5,
+          "line": 126
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::new()",
+    "package": "setfork-core",
+    "replacement": "Poll::new()",
+    "span": {
+      "end": {
+        "column": 34,
+        "line": 127
+      },
+      "start": {
+        "column": 9,
+        "line": 127
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::from_iter([Ok(())])\n@@ -119,17 +119,17 @@\n     type Response = S::Response;\n     type Error = S::Error;\n     type Future = futures_util::future::Either<\n         S::Future,\n         futures_util::future::Ready<Result<Self::Response, Self::Error>>,\n     >;\n \n     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {\n-        self.inner.poll_ready(cx)\n+        Poll::from_iter([Ok(())]) /* ~ changed by cargo-mutants ~ */\n     }\n \n     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {\n         let auth = req.headers().get(\"authorization\").and_then(|v| v.to_str().ok()).map(str::to_owned);\n         if self.allow(req.uri().path(), auth.as_deref()) {\n             futures_util::future::Either::Left(self.inner.call(req))\n         } else {\n             // gRPC-отказ без вызова inner: RESOURCE_EXHAUSTED в trailers-only ответе.\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+      "return_type": "-> Poll<Result<(), Self::Error>>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 128
+        },
+        "start": {
+          "column": 5,
+          "line": 126
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::from_iter([Ok(())])",
+    "package": "setfork-core",
+    "replacement": "Poll::from_iter([Ok(())])",
+    "span": {
+      "end": {
+        "column": 34,
+        "line": 127
+      },
+      "start": {
+        "column": 9,
+        "line": 127
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::new(Ok(()))\n@@ -119,17 +119,17 @@\n     type Response = S::Response;\n     type Error = S::Error;\n     type Future = futures_util::future::Either<\n         S::Future,\n         futures_util::future::Ready<Result<Self::Response, Self::Error>>,\n     >;\n \n     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {\n-        self.inner.poll_ready(cx)\n+        Poll::new(Ok(())) /* ~ changed by cargo-mutants ~ */\n     }\n \n     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {\n         let auth = req.headers().get(\"authorization\").and_then(|v| v.to_str().ok()).map(str::to_owned);\n         if self.allow(req.uri().path(), auth.as_deref()) {\n             futures_util::future::Either::Left(self.inner.call(req))\n         } else {\n             // gRPC-отказ без вызова inner: RESOURCE_EXHAUSTED в trailers-only ответе.\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+      "return_type": "-> Poll<Result<(), Self::Error>>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 128
+        },
+        "start": {
+          "column": 5,
+          "line": 126
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::new(Ok(()))",
+    "package": "setfork-core",
+    "replacement": "Poll::new(Ok(()))",
+    "span": {
+      "end": {
+        "column": 34,
+        "line": 127
+      },
+      "start": {
+        "column": 9,
+        "line": 127
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::from(Ok(()))\n@@ -119,17 +119,17 @@\n     type Response = S::Response;\n     type Error = S::Error;\n     type Future = futures_util::future::Either<\n         S::Future,\n         futures_util::future::Ready<Result<Self::Response, Self::Error>>,\n     >;\n \n     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {\n-        self.inner.poll_ready(cx)\n+        Poll::from(Ok(())) /* ~ changed by cargo-mutants ~ */\n     }\n \n     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {\n         let auth = req.headers().get(\"authorization\").and_then(|v| v.to_str().ok()).map(str::to_owned);\n         if self.allow(req.uri().path(), auth.as_deref()) {\n             futures_util::future::Either::Left(self.inner.call(req))\n         } else {\n             // gRPC-отказ без вызова inner: RESOURCE_EXHAUSTED в trailers-only ответе.\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+      "return_type": "-> Poll<Result<(), Self::Error>>",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 128
+        },
+        "start": {
+          "column": 5,
+          "line": 126
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::from(Ok(()))",
+    "package": "setfork-core",
+    "replacement": "Poll::from(Ok(()))",
+    "span": {
+      "end": {
+        "column": 34,
+        "line": 127
+      },
+      "start": {
+        "column": 9,
+        "line": 127
+      }
+    }
+  },
+  {
+    "diff": "--- src/ratelimit.rs\n+++ replace <impl Service<Request<ReqBody>> for RateLimited<S>>::call -> Self::Future with Default::default()\n@@ -123,30 +123,17 @@\n         futures_util::future::Ready<Result<Self::Response, Self::Error>>,\n     >;\n \n     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {\n         self.inner.poll_ready(cx)\n     }\n \n     fn call(&mut self, req: Request<ReqBody>) -> Self::Future {\n-        let auth = req.headers().get(\"authorization\").and_then(|v| v.to_str().ok()).map(str::to_owned);\n-        if self.allow(req.uri().path(), auth.as_deref()) {\n-            futures_util::future::Either::Left(self.inner.call(req))\n-        } else {\n-            // gRPC-отказ без вызова inner: RESOURCE_EXHAUSTED в trailers-only ответе.\n-            let resp = Response::builder()\n-                .status(200)\n-                .header(\"content-type\", \"application/grpc\")\n-                .header(\"grpc-status\", \"8\") // RESOURCE_EXHAUSTED\n-                .header(\"grpc-message\", \"rate limited\")\n-                .body(Body::empty())\n-                .expect(\"static response\");\n-            futures_util::future::Either::Right(futures_util::future::ready(Ok(resp)))\n-        }\n+        Default::default() /* ~ changed by cargo-mutants ~ */\n     }\n }\n \n #[cfg(test)]\n mod tests {\n     use super::*;\n \n     fn limited(rpm: u32, rpm_heavy: u32, auth: Option<&str>) -> RateLimited<()> {\n",
+    "file": "src/ratelimit.rs",
+    "function": {
+      "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::call",
+      "return_type": "-> Self::Future",
+      "span": {
+        "end": {
+          "column": 6,
+          "line": 145
+        },
+        "start": {
+          "column": 5,
+          "line": 130
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/ratelimit.rs:131:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::call -> Self::Future with Default::default()",
+    "package": "setfork-core",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 144
+      },
+      "start": {
+        "column": 9,
+        "line": 131
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_tip -> Option<TipData> with None\n@@ -61,17 +61,17 @@\n     steps: Option<Vec<RawStep>>,\n }\n \n /// Owned-снимок tip'а: (hex sha, содержимое list.json, subject коммита,\n /// steps/NN-*.md по 1-based номеру NN). git2-объекты не Send — извлекаем всё до await.\n type TipData = (String, Vec<u8>, String, HashMap<i32, String>);\n \n fn read_tip(bare: &Path) -> Option<TipData> {\n-    read_ref_tip(bare, MAIN_REF)\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n /// То же для произвольного ref (ветки) — база просмотра списка «на ветке».\n pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let tip = repo.refname_to_id(refname).ok()?;\n     read_commit_data(&repo, tip)\n }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_tip",
+      "return_type": "-> Option<TipData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 70
+        },
+        "start": {
+          "column": 1,
+          "line": 68
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:69:5: replace read_tip -> Option<TipData> with None",
+    "package": "setfork-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 69
+      },
+      "start": {
+        "column": 5,
+        "line": 69
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_tip -> Option<TipData> with Some(Default::default())\n@@ -61,17 +61,17 @@\n     steps: Option<Vec<RawStep>>,\n }\n \n /// Owned-снимок tip'а: (hex sha, содержимое list.json, subject коммита,\n /// steps/NN-*.md по 1-based номеру NN). git2-объекты не Send — извлекаем всё до await.\n type TipData = (String, Vec<u8>, String, HashMap<i32, String>);\n \n fn read_tip(bare: &Path) -> Option<TipData> {\n-    read_ref_tip(bare, MAIN_REF)\n+    Some(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// То же для произвольного ref (ветки) — база просмотра списка «на ветке».\n pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let tip = repo.refname_to_id(refname).ok()?;\n     read_commit_data(&repo, tip)\n }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_tip",
+      "return_type": "-> Option<TipData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 70
+        },
+        "start": {
+          "column": 1,
+          "line": 68
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:69:5: replace read_tip -> Option<TipData> with Some(Default::default())",
+    "package": "setfork-core",
+    "replacement": "Some(Default::default())",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 69
+      },
+      "start": {
+        "column": 5,
+        "line": 69
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_ref_tip -> Option<TipData> with None\n@@ -66,19 +66,17 @@\n type TipData = (String, Vec<u8>, String, HashMap<i32, String>);\n \n fn read_tip(bare: &Path) -> Option<TipData> {\n     read_ref_tip(bare, MAIN_REF)\n }\n \n /// То же для произвольного ref (ветки) — база просмотра списка «на ветке».\n pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {\n-    let repo = git2::Repository::open_bare(bare).ok()?;\n-    let tip = repo.refname_to_id(refname).ok()?;\n-    read_commit_data(&repo, tip)\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n // Общее чтение материализации из конкретного коммита (ref-tip или merge-base).\n fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> {\n     let commit = repo.find_commit(oid).ok()?;\n     let tree = commit.tree().ok()?;\n     let entry = tree.get_path(Path::new(\"list.json\")).ok()?;\n     let blob = entry.to_object(repo).ok()?;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_ref_tip",
+      "return_type": "-> Option<TipData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 77
+        },
+        "start": {
+          "column": 1,
+          "line": 72
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:74:5: replace read_ref_tip -> Option<TipData> with None",
+    "package": "setfork-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 76
+      },
+      "start": {
+        "column": 5,
+        "line": 74
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_ref_tip -> Option<TipData> with Some(Default::default())\n@@ -66,19 +66,17 @@\n type TipData = (String, Vec<u8>, String, HashMap<i32, String>);\n \n fn read_tip(bare: &Path) -> Option<TipData> {\n     read_ref_tip(bare, MAIN_REF)\n }\n \n /// То же для произвольного ref (ветки) — база просмотра списка «на ветке».\n pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {\n-    let repo = git2::Repository::open_bare(bare).ok()?;\n-    let tip = repo.refname_to_id(refname).ok()?;\n-    read_commit_data(&repo, tip)\n+    Some(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n // Общее чтение материализации из конкретного коммита (ref-tip или merge-base).\n fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> {\n     let commit = repo.find_commit(oid).ok()?;\n     let tree = commit.tree().ok()?;\n     let entry = tree.get_path(Path::new(\"list.json\")).ok()?;\n     let blob = entry.to_object(repo).ok()?;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_ref_tip",
+      "return_type": "-> Option<TipData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 77
+        },
+        "start": {
+          "column": 1,
+          "line": 72
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:74:5: replace read_ref_tip -> Option<TipData> with Some(Default::default())",
+    "package": "setfork-core",
+    "replacement": "Some(Default::default())",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 76
+      },
+      "start": {
+        "column": 5,
+        "line": 74
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_commit_data -> Option<TipData> with None\n@@ -73,24 +73,17 @@\n pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let tip = repo.refname_to_id(refname).ok()?;\n     read_commit_data(&repo, tip)\n }\n \n // Общее чтение материализации из конкретного коммита (ref-tip или merge-base).\n fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> {\n-    let commit = repo.find_commit(oid).ok()?;\n-    let tree = commit.tree().ok()?;\n-    let entry = tree.get_path(Path::new(\"list.json\")).ok()?;\n-    let blob = entry.to_object(repo).ok()?;\n-    let raw = blob.as_blob()?.content().to_vec();\n-    let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n-    let steps = read_step_files(repo, &tree);\n-    Some((oid.to_string(), raw, subject, steps))\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n     let mut out = HashMap::new();\n     let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n         Some(obj) => match obj.into_tree() {\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_commit_data",
+      "return_type": "-> Option<TipData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 89
+        },
+        "start": {
+          "column": 1,
+          "line": 80
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:81:5: replace read_commit_data -> Option<TipData> with None",
+    "package": "setfork-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 49,
+        "line": 88
+      },
+      "start": {
+        "column": 5,
+        "line": 81
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_commit_data -> Option<TipData> with Some(Default::default())\n@@ -73,24 +73,17 @@\n pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let tip = repo.refname_to_id(refname).ok()?;\n     read_commit_data(&repo, tip)\n }\n \n // Общее чтение материализации из конкретного коммита (ref-tip или merge-base).\n fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> {\n-    let commit = repo.find_commit(oid).ok()?;\n-    let tree = commit.tree().ok()?;\n-    let entry = tree.get_path(Path::new(\"list.json\")).ok()?;\n-    let blob = entry.to_object(repo).ok()?;\n-    let raw = blob.as_blob()?.content().to_vec();\n-    let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n-    let steps = read_step_files(repo, &tree);\n-    Some((oid.to_string(), raw, subject, steps))\n+    Some(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n     let mut out = HashMap::new();\n     let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n         Some(obj) => match obj.into_tree() {\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_commit_data",
+      "return_type": "-> Option<TipData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 89
+        },
+        "start": {
+          "column": 1,
+          "line": 80
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:81:5: replace read_commit_data -> Option<TipData> with Some(Default::default())",
+    "package": "setfork-core",
+    "replacement": "Some(Default::default())",
+    "span": {
+      "end": {
+        "column": 49,
+        "line": 88
+      },
+      "start": {
+        "column": 5,
+        "line": 81
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_step_files -> HashMap<i32, String> with HashMap::new()\n@@ -86,46 +86,17 @@\n     let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n     let steps = read_step_files(repo, &tree);\n     Some((oid.to_string(), raw, subject, steps))\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n-    let mut out = HashMap::new();\n-    let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n-        Some(obj) => match obj.into_tree() {\n-            Ok(t) => t,\n-            Err(_) => return out,\n-        },\n-        None => return out,\n-    };\n-    for e in steps_tree.iter() {\n-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n-        let name = match e.name() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if !name.ends_with(\".md\") {\n-            continue;\n-        }\n-        // NN — цифры до первого '-' (или до '.md', если slug пуст).\n-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n-        let n: i32 = match digits.parse() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n-        {\n-            out.insert(n, s);\n-        }\n-    }\n-    out\n+    HashMap::new() /* ~ changed by cargo-mutants ~ */\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n /// которое можно однозначно распарсить обратно из формата bundle::step_file.\n #[derive(Debug, PartialEq)]\n pub struct ParsedStepMd {\n     pub title: Option<String>,\n     pub desc: Option<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::new()",
+    "package": "setfork-core",
+    "replacement": "HashMap::new()",
+    "span": {
+      "end": {
+        "column": 8,
+        "line": 123
+      },
+      "start": {
+        "column": 5,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(0, String::new())])\n@@ -86,46 +86,17 @@\n     let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n     let steps = read_step_files(repo, &tree);\n     Some((oid.to_string(), raw, subject, steps))\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n-    let mut out = HashMap::new();\n-    let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n-        Some(obj) => match obj.into_tree() {\n-            Ok(t) => t,\n-            Err(_) => return out,\n-        },\n-        None => return out,\n-    };\n-    for e in steps_tree.iter() {\n-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n-        let name = match e.name() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if !name.ends_with(\".md\") {\n-            continue;\n-        }\n-        // NN — цифры до первого '-' (или до '.md', если slug пуст).\n-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n-        let n: i32 = match digits.parse() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n-        {\n-            out.insert(n, s);\n-        }\n-    }\n-    out\n+    HashMap::from_iter([(0, String::new())]) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n /// которое можно однозначно распарсить обратно из формата bundle::step_file.\n #[derive(Debug, PartialEq)]\n pub struct ParsedStepMd {\n     pub title: Option<String>,\n     pub desc: Option<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(0, String::new())])",
+    "package": "setfork-core",
+    "replacement": "HashMap::from_iter([(0, String::new())])",
+    "span": {
+      "end": {
+        "column": 8,
+        "line": 123
+      },
+      "start": {
+        "column": 5,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(0, \"xyzzy\".into())])\n@@ -86,46 +86,17 @@\n     let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n     let steps = read_step_files(repo, &tree);\n     Some((oid.to_string(), raw, subject, steps))\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n-    let mut out = HashMap::new();\n-    let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n-        Some(obj) => match obj.into_tree() {\n-            Ok(t) => t,\n-            Err(_) => return out,\n-        },\n-        None => return out,\n-    };\n-    for e in steps_tree.iter() {\n-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n-        let name = match e.name() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if !name.ends_with(\".md\") {\n-            continue;\n-        }\n-        // NN — цифры до первого '-' (или до '.md', если slug пуст).\n-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n-        let n: i32 = match digits.parse() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n-        {\n-            out.insert(n, s);\n-        }\n-    }\n-    out\n+    HashMap::from_iter([(0, \"xyzzy\".into())]) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n /// которое можно однозначно распарсить обратно из формата bundle::step_file.\n #[derive(Debug, PartialEq)]\n pub struct ParsedStepMd {\n     pub title: Option<String>,\n     pub desc: Option<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(0, \"xyzzy\".into())])",
+    "package": "setfork-core",
+    "replacement": "HashMap::from_iter([(0, \"xyzzy\".into())])",
+    "span": {
+      "end": {
+        "column": 8,
+        "line": 123
+      },
+      "start": {
+        "column": 5,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(1, String::new())])\n@@ -86,46 +86,17 @@\n     let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n     let steps = read_step_files(repo, &tree);\n     Some((oid.to_string(), raw, subject, steps))\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n-    let mut out = HashMap::new();\n-    let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n-        Some(obj) => match obj.into_tree() {\n-            Ok(t) => t,\n-            Err(_) => return out,\n-        },\n-        None => return out,\n-    };\n-    for e in steps_tree.iter() {\n-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n-        let name = match e.name() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if !name.ends_with(\".md\") {\n-            continue;\n-        }\n-        // NN — цифры до первого '-' (или до '.md', если slug пуст).\n-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n-        let n: i32 = match digits.parse() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n-        {\n-            out.insert(n, s);\n-        }\n-    }\n-    out\n+    HashMap::from_iter([(1, String::new())]) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n /// которое можно однозначно распарсить обратно из формата bundle::step_file.\n #[derive(Debug, PartialEq)]\n pub struct ParsedStepMd {\n     pub title: Option<String>,\n     pub desc: Option<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(1, String::new())])",
+    "package": "setfork-core",
+    "replacement": "HashMap::from_iter([(1, String::new())])",
+    "span": {
+      "end": {
+        "column": 8,
+        "line": 123
+      },
+      "start": {
+        "column": 5,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(1, \"xyzzy\".into())])\n@@ -86,46 +86,17 @@\n     let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n     let steps = read_step_files(repo, &tree);\n     Some((oid.to_string(), raw, subject, steps))\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n-    let mut out = HashMap::new();\n-    let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n-        Some(obj) => match obj.into_tree() {\n-            Ok(t) => t,\n-            Err(_) => return out,\n-        },\n-        None => return out,\n-    };\n-    for e in steps_tree.iter() {\n-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n-        let name = match e.name() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if !name.ends_with(\".md\") {\n-            continue;\n-        }\n-        // NN — цифры до первого '-' (или до '.md', если slug пуст).\n-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n-        let n: i32 = match digits.parse() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n-        {\n-            out.insert(n, s);\n-        }\n-    }\n-    out\n+    HashMap::from_iter([(1, \"xyzzy\".into())]) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n /// которое можно однозначно распарсить обратно из формата bundle::step_file.\n #[derive(Debug, PartialEq)]\n pub struct ParsedStepMd {\n     pub title: Option<String>,\n     pub desc: Option<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(1, \"xyzzy\".into())])",
+    "package": "setfork-core",
+    "replacement": "HashMap::from_iter([(1, \"xyzzy\".into())])",
+    "span": {
+      "end": {
+        "column": 8,
+        "line": 123
+      },
+      "start": {
+        "column": 5,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(-1, String::new())])\n@@ -86,46 +86,17 @@\n     let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n     let steps = read_step_files(repo, &tree);\n     Some((oid.to_string(), raw, subject, steps))\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n-    let mut out = HashMap::new();\n-    let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n-        Some(obj) => match obj.into_tree() {\n-            Ok(t) => t,\n-            Err(_) => return out,\n-        },\n-        None => return out,\n-    };\n-    for e in steps_tree.iter() {\n-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n-        let name = match e.name() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if !name.ends_with(\".md\") {\n-            continue;\n-        }\n-        // NN — цифры до первого '-' (или до '.md', если slug пуст).\n-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n-        let n: i32 = match digits.parse() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n-        {\n-            out.insert(n, s);\n-        }\n-    }\n-    out\n+    HashMap::from_iter([(-1, String::new())]) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n /// которое можно однозначно распарсить обратно из формата bundle::step_file.\n #[derive(Debug, PartialEq)]\n pub struct ParsedStepMd {\n     pub title: Option<String>,\n     pub desc: Option<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(-1, String::new())])",
+    "package": "setfork-core",
+    "replacement": "HashMap::from_iter([(-1, String::new())])",
+    "span": {
+      "end": {
+        "column": 8,
+        "line": 123
+      },
+      "start": {
+        "column": 5,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(-1, \"xyzzy\".into())])\n@@ -86,46 +86,17 @@\n     let subject = commit.summary().ok().flatten().unwrap_or(\"\").to_string();\n     let steps = read_step_files(repo, &tree);\n     Some((oid.to_string(), raw, subject, steps))\n }\n \n // Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.\n // Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).\n fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {\n-    let mut out = HashMap::new();\n-    let steps_tree = match tree.get_path(Path::new(\"steps\")).ok().and_then(|e| e.to_object(repo).ok()) {\n-        Some(obj) => match obj.into_tree() {\n-            Ok(t) => t,\n-            Err(_) => return out,\n-        },\n-        None => return out,\n-    };\n-    for e in steps_tree.iter() {\n-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n-        let name = match e.name() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if !name.ends_with(\".md\") {\n-            continue;\n-        }\n-        // NN — цифры до первого '-' (или до '.md', если slug пуст).\n-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n-        let n: i32 = match digits.parse() {\n-            Ok(n) => n,\n-            Err(_) => continue,\n-        };\n-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n-        {\n-            out.insert(n, s);\n-        }\n-    }\n-    out\n+    HashMap::from_iter([(-1, \"xyzzy\".into())]) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n /// которое можно однозначно распарсить обратно из формата bundle::step_file.\n #[derive(Debug, PartialEq)]\n pub struct ParsedStepMd {\n     pub title: Option<String>,\n     pub desc: Option<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(-1, \"xyzzy\".into())])",
+    "package": "setfork-core",
+    "replacement": "HashMap::from_iter([(-1, \"xyzzy\".into())])",
+    "span": {
+      "end": {
+        "column": 8,
+        "line": 123
+      },
+      "start": {
+        "column": 5,
+        "line": 94
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ delete ! in read_step_files\n@@ -100,17 +100,17 @@\n         None => return out,\n     };\n     for e in steps_tree.iter() {\n         // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).\n         let name = match e.name() {\n             Ok(n) => n,\n             Err(_) => continue,\n         };\n-        if !name.ends_with(\".md\") {\n+        if  /* ~ changed by cargo-mutants ~ */name.ends_with(\".md\") {\n             continue;\n         }\n         // NN — цифры до первого '-' (или до '.md', если slug пуст).\n         let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n         let n: i32 = match digits.parse() {\n             Ok(n) => n,\n             Err(_) => continue,\n         };\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "src/git/project.rs:108:12: delete ! in read_step_files",
+    "package": "setfork-core",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 13,
+        "line": 108
+      },
+      "start": {
+        "column": 12,
+        "line": 108
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace && with || in read_step_files\n@@ -110,17 +110,17 @@\n         }\n         // NN — цифры до первого '-' (или до '.md', если slug пуст).\n         let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();\n         let n: i32 = match digits.parse() {\n             Ok(n) => n,\n             Err(_) => continue,\n         };\n         if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())\n-            && let Ok(s) = String::from_utf8(blob.content().to_vec())\n+            || /* ~ changed by cargo-mutants ~ */ let Ok(s) = String::from_utf8(blob.content().to_vec())\n         {\n             out.insert(n, s);\n         }\n     }\n     out\n }\n \n /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "read_step_files",
+      "return_type": "-> HashMap<i32, String>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 124
+        },
+        "start": {
+          "column": 1,
+          "line": 93
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:118:13: replace && with || in read_step_files",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 118
+      },
+      "start": {
+        "column": 13,
+        "line": 118
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace front_value -> String with String::new()\n@@ -130,22 +130,17 @@\n     pub title: Option<String>,\n     pub desc: Option<String>,\n     pub command: Option<String>,\n }\n \n /// Значение front-matter вида `key: <json-строка>` или `key: raw` → строка.\n /// version_files пишет title/section/command как JSON.stringify(...), level — сырьём.\n fn front_value(raw: &str) -> String {\n-    let t = raw.trim();\n-    if t.starts_with('\"') {\n-        serde_json::from_str::<String>(t).unwrap_or_else(|_| t.to_string())\n-    } else {\n-        t.to_string()\n-    }\n+    String::new() /* ~ changed by cargo-mutants ~ */\n }\n \n /// Обратный парс steps/NN-*.md → title/desc/command (зеркало bundle::step_file).\n /// Возвращает None для полей, которых нет в файле; вызывающий берёт их из list.json.\n /// Безопасное подмножество: subtasks/refs/why/section/level НЕ реэкспортируем\n /// (их источник — list.json), чтобы round-trip оставался идемпотентным.\n pub fn parse_step_md(content: &str) -> ParsedStepMd {\n     let mut title = None;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "front_value",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 144
+        },
+        "start": {
+          "column": 1,
+          "line": 135
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:138:5: replace front_value -> String with String::new()",
+    "package": "setfork-core",
+    "replacement": "String::new()",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 143
+      },
+      "start": {
+        "column": 5,
+        "line": 138
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace front_value -> String with \"xyzzy\".into()\n@@ -130,22 +130,17 @@\n     pub title: Option<String>,\n     pub desc: Option<String>,\n     pub command: Option<String>,\n }\n \n /// Значение front-matter вида `key: <json-строка>` или `key: raw` → строка.\n /// version_files пишет title/section/command как JSON.stringify(...), level — сырьём.\n fn front_value(raw: &str) -> String {\n-    let t = raw.trim();\n-    if t.starts_with('\"') {\n-        serde_json::from_str::<String>(t).unwrap_or_else(|_| t.to_string())\n-    } else {\n-        t.to_string()\n-    }\n+    \"xyzzy\".into() /* ~ changed by cargo-mutants ~ */\n }\n \n /// Обратный парс steps/NN-*.md → title/desc/command (зеркало bundle::step_file).\n /// Возвращает None для полей, которых нет в файле; вызывающий берёт их из list.json.\n /// Безопасное подмножество: subtasks/refs/why/section/level НЕ реэкспортируем\n /// (их источник — list.json), чтобы round-trip оставался идемпотентным.\n pub fn parse_step_md(content: &str) -> ParsedStepMd {\n     let mut title = None;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "front_value",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 144
+        },
+        "start": {
+          "column": 1,
+          "line": 135
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:138:5: replace front_value -> String with \"xyzzy\".into()",
+    "package": "setfork-core",
+    "replacement": "\"xyzzy\".into()",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 143
+      },
+      "start": {
+        "column": 5,
+        "line": 138
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace parse_step_md -> ParsedStepMd with Default::default()\n@@ -143,59 +143,17 @@\n     }\n }\n \n /// Обратный парс steps/NN-*.md → title/desc/command (зеркало bundle::step_file).\n /// Возвращает None для полей, которых нет в файле; вызывающий берёт их из list.json.\n /// Безопасное подмножество: subtasks/refs/why/section/level НЕ реэкспортируем\n /// (их источник — list.json), чтобы round-trip оставался идемпотентным.\n pub fn parse_step_md(content: &str) -> ParsedStepMd {\n-    let mut title = None;\n-    let mut command = None;\n-\n-    // 1) Front-matter между первой парой строк \"---\".\n-    let mut lines = content.lines();\n-    let mut body_start = 0usize; // индекс строки, с которой начинается тело\n-    if lines.next() == Some(\"---\") {\n-        let mut idx = 1usize;\n-        for line in content.lines().skip(1) {\n-            idx += 1;\n-            if line.trim_end() == \"---\" {\n-                body_start = idx; // после закрывающего \"---\"\n-                break;\n-            }\n-            if let Some(rest) = line.strip_prefix(\"title:\") {\n-                title = Some(front_value(rest));\n-            } else if let Some(rest) = line.strip_prefix(\"command:\") {\n-                command = Some(front_value(rest));\n-            }\n-        }\n-    }\n-\n-    // 2) Тело: desc — это текст ДО первого маркера (**Why:**, subtask \"- [ ]\", ref \"- \").\n-    //    version_files кладёт desc первым блоком и отделяет пустой строкой.\n-    let body: Vec<&str> = content.lines().skip(body_start).collect();\n-    let mut desc_lines: Vec<&str> = Vec::new();\n-    for line in &body {\n-        let t = line.trim_start();\n-        if t.starts_with(\"**Why:**\") || t.starts_with(\"- [ ] \") || t.starts_with(\"- \") {\n-            break;\n-        }\n-        desc_lines.push(line);\n-    }\n-    // Обрезаем ведущие/замыкающие пустые строки (front-matter отделён пустой строкой).\n-    while desc_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {\n-        desc_lines.remove(0);\n-    }\n-    while desc_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) {\n-        desc_lines.pop();\n-    }\n-    let desc = if desc_lines.is_empty() { None } else { Some(desc_lines.join(\"\\n\")) };\n-\n-    ParsedStepMd { title, desc, command }\n+    Default::default() /* ~ changed by cargo-mutants ~ */\n }\n \n // Тег vN на запушенный tip (git2, force).\n fn tag_version(bare: &Path, ver: i32, tip_hex: &str) -> Result<(), git2::Error> {\n     let repo = git2::Repository::open_bare(bare)?;\n     let oid = git2::Oid::from_str(tip_hex)?;\n     let obj = repo.find_object(oid, Some(git2::ObjectType::Commit))?;\n     repo.tag_lightweight(&format!(\"v{ver}\"), &obj, true)?;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_step_md",
+      "return_type": "-> ParsedStepMd",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 194
+        },
+        "start": {
+          "column": 1,
+          "line": 146
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:151:5: replace parse_step_md -> ParsedStepMd with Default::default()",
+    "package": "setfork-core",
+    "replacement": "Default::default()",
+    "span": {
+      "end": {
+        "column": 42,
+        "line": 193
+      },
+      "start": {
+        "column": 5,
+        "line": 151
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace == with != in parse_step_md\n@@ -149,17 +149,17 @@\n /// (их источник — list.json), чтобы round-trip оставался идемпотентным.\n pub fn parse_step_md(content: &str) -> ParsedStepMd {\n     let mut title = None;\n     let mut command = None;\n \n     // 1) Front-matter между первой парой строк \"---\".\n     let mut lines = content.lines();\n     let mut body_start = 0usize; // индекс строки, с которой начинается тело\n-    if lines.next() == Some(\"---\") {\n+    if lines.next() != /* ~ changed by cargo-mutants ~ */ Some(\"---\") {\n         let mut idx = 1usize;\n         for line in content.lines().skip(1) {\n             idx += 1;\n             if line.trim_end() == \"---\" {\n                 body_start = idx; // после закрывающего \"---\"\n                 break;\n             }\n             if let Some(rest) = line.strip_prefix(\"title:\") {\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_step_md",
+      "return_type": "-> ParsedStepMd",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 194
+        },
+        "start": {
+          "column": 1,
+          "line": 146
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:157:21: replace == with != in parse_step_md",
+    "package": "setfork-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 157
+      },
+      "start": {
+        "column": 21,
+        "line": 157
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with -= in parse_step_md\n@@ -152,17 +152,17 @@\n     let mut command = None;\n \n     // 1) Front-matter между первой парой строк \"---\".\n     let mut lines = content.lines();\n     let mut body_start = 0usize; // индекс строки, с которой начинается тело\n     if lines.next() == Some(\"---\") {\n         let mut idx = 1usize;\n         for line in content.lines().skip(1) {\n-            idx += 1;\n+            idx -= /* ~ changed by cargo-mutants ~ */ 1;\n             if line.trim_end() == \"---\" {\n                 body_start = idx; // после закрывающего \"---\"\n                 break;\n             }\n             if let Some(rest) = line.strip_prefix(\"title:\") {\n                 title = Some(front_value(rest));\n             } else if let Some(rest) = line.strip_prefix(\"command:\") {\n                 command = Some(front_value(rest));\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_step_md",
+      "return_type": "-> ParsedStepMd",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 194
+        },
+        "start": {
+          "column": 1,
+          "line": 146
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:160:17: replace += with -= in parse_step_md",
+    "package": "setfork-core",
+    "replacement": "-=",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 160
+      },
+      "start": {
+        "column": 17,
+        "line": 160
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with *= in parse_step_md\n@@ -152,17 +152,17 @@\n     let mut command = None;\n \n     // 1) Front-matter между первой парой строк \"---\".\n     let mut lines = content.lines();\n     let mut body_start = 0usize; // индекс строки, с которой начинается тело\n     if lines.next() == Some(\"---\") {\n         let mut idx = 1usize;\n         for line in content.lines().skip(1) {\n-            idx += 1;\n+            idx *= /* ~ changed by cargo-mutants ~ */ 1;\n             if line.trim_end() == \"---\" {\n                 body_start = idx; // после закрывающего \"---\"\n                 break;\n             }\n             if let Some(rest) = line.strip_prefix(\"title:\") {\n                 title = Some(front_value(rest));\n             } else if let Some(rest) = line.strip_prefix(\"command:\") {\n                 command = Some(front_value(rest));\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_step_md",
+      "return_type": "-> ParsedStepMd",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 194
+        },
+        "start": {
+          "column": 1,
+          "line": 146
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:160:17: replace += with *= in parse_step_md",
+    "package": "setfork-core",
+    "replacement": "*=",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 160
+      },
+      "start": {
+        "column": 17,
+        "line": 160
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace == with != in parse_step_md\n@@ -153,17 +153,17 @@\n \n     // 1) Front-matter между первой парой строк \"---\".\n     let mut lines = content.lines();\n     let mut body_start = 0usize; // индекс строки, с которой начинается тело\n     if lines.next() == Some(\"---\") {\n         let mut idx = 1usize;\n         for line in content.lines().skip(1) {\n             idx += 1;\n-            if line.trim_end() == \"---\" {\n+            if line.trim_end() != /* ~ changed by cargo-mutants ~ */ \"---\" {\n                 body_start = idx; // после закрывающего \"---\"\n                 break;\n             }\n             if let Some(rest) = line.strip_prefix(\"title:\") {\n                 title = Some(front_value(rest));\n             } else if let Some(rest) = line.strip_prefix(\"command:\") {\n                 command = Some(front_value(rest));\n             }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_step_md",
+      "return_type": "-> ParsedStepMd",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 194
+        },
+        "start": {
+          "column": 1,
+          "line": 146
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:161:32: replace == with != in parse_step_md",
+    "package": "setfork-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 34,
+        "line": 161
+      },
+      "start": {
+        "column": 32,
+        "line": 161
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace || with && in parse_step_md\n@@ -171,17 +171,17 @@\n     }\n \n     // 2) Тело: desc — это текст ДО первого маркера (**Why:**, subtask \"- [ ]\", ref \"- \").\n     //    version_files кладёт desc первым блоком и отделяет пустой строкой.\n     let body: Vec<&str> = content.lines().skip(body_start).collect();\n     let mut desc_lines: Vec<&str> = Vec::new();\n     for line in &body {\n         let t = line.trim_start();\n-        if t.starts_with(\"**Why:**\") || t.starts_with(\"- [ ] \") || t.starts_with(\"- \") {\n+        if t.starts_with(\"**Why:**\") || t.starts_with(\"- [ ] \") && /* ~ changed by cargo-mutants ~ */ t.starts_with(\"- \") {\n             break;\n         }\n         desc_lines.push(line);\n     }\n     // Обрезаем ведущие/замыкающие пустые строки (front-matter отделён пустой строкой).\n     while desc_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {\n         desc_lines.remove(0);\n     }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_step_md",
+      "return_type": "-> ParsedStepMd",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 194
+        },
+        "start": {
+          "column": 1,
+          "line": 146
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:179:65: replace || with && in parse_step_md",
+    "package": "setfork-core",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 67,
+        "line": 179
+      },
+      "start": {
+        "column": 65,
+        "line": 179
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace || with && in parse_step_md\n@@ -171,17 +171,17 @@\n     }\n \n     // 2) Тело: desc — это текст ДО первого маркера (**Why:**, subtask \"- [ ]\", ref \"- \").\n     //    version_files кладёт desc первым блоком и отделяет пустой строкой.\n     let body: Vec<&str> = content.lines().skip(body_start).collect();\n     let mut desc_lines: Vec<&str> = Vec::new();\n     for line in &body {\n         let t = line.trim_start();\n-        if t.starts_with(\"**Why:**\") || t.starts_with(\"- [ ] \") || t.starts_with(\"- \") {\n+        if t.starts_with(\"**Why:**\") && /* ~ changed by cargo-mutants ~ */ t.starts_with(\"- [ ] \") || t.starts_with(\"- \") {\n             break;\n         }\n         desc_lines.push(line);\n     }\n     // Обрезаем ведущие/замыкающие пустые строки (front-matter отделён пустой строкой).\n     while desc_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {\n         desc_lines.remove(0);\n     }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_step_md",
+      "return_type": "-> ParsedStepMd",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 194
+        },
+        "start": {
+          "column": 1,
+          "line": 146
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:179:38: replace || with && in parse_step_md",
+    "package": "setfork-core",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 40,
+        "line": 179
+      },
+      "start": {
+        "column": 38,
+        "line": 179
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace tag_version -> Result<(), git2::Error> with Ok(())\n@@ -190,21 +190,17 @@\n     }\n     let desc = if desc_lines.is_empty() { None } else { Some(desc_lines.join(\"\\n\")) };\n \n     ParsedStepMd { title, desc, command }\n }\n \n // Тег vN на запушенный tip (git2, force).\n fn tag_version(bare: &Path, ver: i32, tip_hex: &str) -> Result<(), git2::Error> {\n-    let repo = git2::Repository::open_bare(bare)?;\n-    let oid = git2::Oid::from_str(tip_hex)?;\n-    let obj = repo.find_object(oid, Some(git2::ObjectType::Commit))?;\n-    repo.tag_lightweight(&format!(\"v{ver}\"), &obj, true)?;\n-    Ok(())\n+    Ok(()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "tag_version",
+      "return_type": "-> Result<(), git2::Error>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 203
+        },
+        "start": {
+          "column": 1,
+          "line": 197
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:198:5: replace tag_version -> Result<(), git2::Error> with Ok(())",
+    "package": "setfork-core",
+    "replacement": "Ok(())",
+    "span": {
+      "end": {
+        "column": 11,
+        "line": 202
+      },
+      "start": {
+        "column": 5,
+        "line": 198
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace strip_v_prefix -> String with String::new()\n@@ -199,31 +199,17 @@\n     let oid = git2::Oid::from_str(tip_hex)?;\n     let obj = repo.find_object(oid, Some(git2::ObjectType::Commit))?;\n     repo.tag_lightweight(&format!(\"v{ver}\"), &obj, true)?;\n     Ok(())\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n-    let b = s.as_bytes();\n-    if b.first() == Some(&b'v') {\n-        let mut i = 1;\n-        while i < b.len() && b[i].is_ascii_digit() {\n-            i += 1;\n-        }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n-            i += 1;\n-            while i < b.len() && b[i] == b' ' {\n-                i += 1;\n-            }\n-            return s[i..].to_string();\n-        }\n-    }\n-    s.to_string()\n+    String::new() /* ~ changed by cargo-mutants ~ */\n }\n \n // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).\n fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {\n     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.\n     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).\n     let mut kept: Vec<(i32, ProjStep)> = Vec::new();\n     for (idx, s) in steps_raw.iter().enumerate() {\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:207:5: replace strip_v_prefix -> String with String::new()",
+    "package": "setfork-core",
+    "replacement": "String::new()",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 221
+      },
+      "start": {
+        "column": 5,
+        "line": 207
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace strip_v_prefix -> String with \"xyzzy\".into()\n@@ -199,31 +199,17 @@\n     let oid = git2::Oid::from_str(tip_hex)?;\n     let obj = repo.find_object(oid, Some(git2::ObjectType::Commit))?;\n     repo.tag_lightweight(&format!(\"v{ver}\"), &obj, true)?;\n     Ok(())\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n-    let b = s.as_bytes();\n-    if b.first() == Some(&b'v') {\n-        let mut i = 1;\n-        while i < b.len() && b[i].is_ascii_digit() {\n-            i += 1;\n-        }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n-            i += 1;\n-            while i < b.len() && b[i] == b' ' {\n-                i += 1;\n-            }\n-            return s[i..].to_string();\n-        }\n-    }\n-    s.to_string()\n+    \"xyzzy\".into() /* ~ changed by cargo-mutants ~ */\n }\n \n // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).\n fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {\n     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.\n     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).\n     let mut kept: Vec<(i32, ProjStep)> = Vec::new();\n     for (idx, s) in steps_raw.iter().enumerate() {\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:207:5: replace strip_v_prefix -> String with \"xyzzy\".into()",
+    "package": "setfork-core",
+    "replacement": "\"xyzzy\".into()",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 221
+      },
+      "start": {
+        "column": 5,
+        "line": 207
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace == with != in strip_v_prefix\n@@ -200,17 +200,17 @@\n     let obj = repo.find_object(oid, Some(git2::ObjectType::Commit))?;\n     repo.tag_lightweight(&format!(\"v{ver}\"), &obj, true)?;\n     Ok(())\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n-    if b.first() == Some(&b'v') {\n+    if b.first() != /* ~ changed by cargo-mutants ~ */ Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:208:18: replace == with != in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 20,
+        "line": 208
+      },
+      "start": {
+        "column": 18,
+        "line": 208
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace && with || in strip_v_prefix\n@@ -202,17 +202,17 @@\n     Ok(())\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n-        while i < b.len() && b[i].is_ascii_digit() {\n+        while i < b.len() || /* ~ changed by cargo-mutants ~ */ b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:210:27: replace && with || in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 29,
+        "line": 210
+      },
+      "start": {
+        "column": 27,
+        "line": 210
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with == in strip_v_prefix\n@@ -202,17 +202,17 @@\n     Ok(())\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n-        while i < b.len() && b[i].is_ascii_digit() {\n+        while i == /* ~ changed by cargo-mutants ~ */ b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:210:17: replace < with == in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 210
+      },
+      "start": {
+        "column": 17,
+        "line": 210
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with > in strip_v_prefix\n@@ -202,17 +202,17 @@\n     Ok(())\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n-        while i < b.len() && b[i].is_ascii_digit() {\n+        while i > /* ~ changed by cargo-mutants ~ */ b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:210:17: replace < with > in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 210
+      },
+      "start": {
+        "column": 17,
+        "line": 210
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with <= in strip_v_prefix\n@@ -202,17 +202,17 @@\n     Ok(())\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n-        while i < b.len() && b[i].is_ascii_digit() {\n+        while i <= /* ~ changed by cargo-mutants ~ */ b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:210:17: replace < with <= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 210
+      },
+      "start": {
+        "column": 17,
+        "line": 210
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with -= in strip_v_prefix\n@@ -203,17 +203,17 @@\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n-            i += 1;\n+            i -= /* ~ changed by cargo-mutants ~ */ 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:211:15: replace += with -= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "-=",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 211
+      },
+      "start": {
+        "column": 15,
+        "line": 211
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with *= in strip_v_prefix\n@@ -203,17 +203,17 @@\n }\n \n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n-            i += 1;\n+            i *= /* ~ changed by cargo-mutants ~ */ 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:211:15: replace += with *= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "*=",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 211
+      },
+      "start": {
+        "column": 15,
+        "line": 211
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace && with || in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i > 1 && i < b.len() || /* ~ changed by cargo-mutants ~ */ b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:33: replace && with || in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 35,
+        "line": 213
+      },
+      "start": {
+        "column": 33,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace && with || in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i > 1 || /* ~ changed by cargo-mutants ~ */ i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:18: replace && with || in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 20,
+        "line": 213
+      },
+      "start": {
+        "column": 18,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace > with == in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i == /* ~ changed by cargo-mutants ~ */ 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:14: replace > with == in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 213
+      },
+      "start": {
+        "column": 14,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace > with < in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i < /* ~ changed by cargo-mutants ~ */ 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:14: replace > with < in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "<",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 213
+      },
+      "start": {
+        "column": 14,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace > with >= in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i >= /* ~ changed by cargo-mutants ~ */ 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:14: replace > with >= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": ">=",
+    "span": {
+      "end": {
+        "column": 15,
+        "line": 213
+      },
+      "start": {
+        "column": 14,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with == in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i > 1 && i == /* ~ changed by cargo-mutants ~ */ b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:23: replace < with == in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 24,
+        "line": 213
+      },
+      "start": {
+        "column": 23,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with > in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i > 1 && i > /* ~ changed by cargo-mutants ~ */ b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:23: replace < with > in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 24,
+        "line": 213
+      },
+      "start": {
+        "column": 23,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with <= in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i > 1 && i <= /* ~ changed by cargo-mutants ~ */ b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:23: replace < with <= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 24,
+        "line": 213
+      },
+      "start": {
+        "column": 23,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace == with != in strip_v_prefix\n@@ -205,17 +205,17 @@\n /// Срезает префикс \"vN: \" из subject коммита (порт /^v\\d+:\\s*/).\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n-        if i > 1 && i < b.len() && b[i] == b':' {\n+        if i > 1 && i < b.len() && b[i] != /* ~ changed by cargo-mutants ~ */ b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:213:41: replace == with != in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 43,
+        "line": 213
+      },
+      "start": {
+        "column": 41,
+        "line": 213
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with -= in strip_v_prefix\n@@ -206,17 +206,17 @@\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n-            i += 1;\n+            i -= /* ~ changed by cargo-mutants ~ */ 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:214:15: replace += with -= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "-=",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 214
+      },
+      "start": {
+        "column": 15,
+        "line": 214
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with *= in strip_v_prefix\n@@ -206,17 +206,17 @@\n fn strip_v_prefix(s: &str) -> String {\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n-            i += 1;\n+            i *= /* ~ changed by cargo-mutants ~ */ 1;\n             while i < b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:214:15: replace += with *= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "*=",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 214
+      },
+      "start": {
+        "column": 15,
+        "line": 214
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace && with || in strip_v_prefix\n@@ -207,17 +207,17 @@\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n-            while i < b.len() && b[i] == b' ' {\n+            while i < b.len() || /* ~ changed by cargo-mutants ~ */ b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n \n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:215:31: replace && with || in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 33,
+        "line": 215
+      },
+      "start": {
+        "column": 31,
+        "line": 215
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with == in strip_v_prefix\n@@ -207,17 +207,17 @@\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n-            while i < b.len() && b[i] == b' ' {\n+            while i == /* ~ changed by cargo-mutants ~ */ b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n \n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:215:21: replace < with == in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 215
+      },
+      "start": {
+        "column": 21,
+        "line": 215
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with > in strip_v_prefix\n@@ -207,17 +207,17 @@\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n-            while i < b.len() && b[i] == b' ' {\n+            while i > /* ~ changed by cargo-mutants ~ */ b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n \n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:215:21: replace < with > in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 215
+      },
+      "start": {
+        "column": 21,
+        "line": 215
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace < with <= in strip_v_prefix\n@@ -207,17 +207,17 @@\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n-            while i < b.len() && b[i] == b' ' {\n+            while i <= /* ~ changed by cargo-mutants ~ */ b.len() && b[i] == b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n \n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:215:21: replace < with <= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 215
+      },
+      "start": {
+        "column": 21,
+        "line": 215
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace == with != in strip_v_prefix\n@@ -207,17 +207,17 @@\n     let b = s.as_bytes();\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n-            while i < b.len() && b[i] == b' ' {\n+            while i < b.len() && b[i] != /* ~ changed by cargo-mutants ~ */ b' ' {\n                 i += 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n \n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:215:39: replace == with != in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 41,
+        "line": 215
+      },
+      "start": {
+        "column": 39,
+        "line": 215
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with -= in strip_v_prefix\n@@ -208,17 +208,17 @@\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n-                i += 1;\n+                i -= /* ~ changed by cargo-mutants ~ */ 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n \n // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:216:19: replace += with -= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "-=",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 216
+      },
+      "start": {
+        "column": 19,
+        "line": 216
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace += with *= in strip_v_prefix\n@@ -208,17 +208,17 @@\n     if b.first() == Some(&b'v') {\n         let mut i = 1;\n         while i < b.len() && b[i].is_ascii_digit() {\n             i += 1;\n         }\n         if i > 1 && i < b.len() && b[i] == b':' {\n             i += 1;\n             while i < b.len() && b[i] == b' ' {\n-                i += 1;\n+                i *= /* ~ changed by cargo-mutants ~ */ 1;\n             }\n             return s[i..].to_string();\n         }\n     }\n     s.to_string()\n }\n \n // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "strip_v_prefix",
+      "return_type": "-> String",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 222
+        },
+        "start": {
+          "column": 1,
+          "line": 205
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:216:19: replace += with *= in strip_v_prefix",
+    "package": "setfork-core",
+    "replacement": "*=",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 216
+      },
+      "start": {
+        "column": 19,
+        "line": 216
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace parse_steps -> Vec<ProjStep> with vec![]\n@@ -220,72 +220,17 @@\n     }\n     s.to_string()\n }\n \n // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).\n fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {\n     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.\n     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).\n-    let mut kept: Vec<(i32, ProjStep)> = Vec::new();\n-    for (idx, s) in steps_raw.iter().enumerate() {\n-        let bt = s.block_type.clone().unwrap_or_default();\n-        let is_step = is_step_type(&bt);\n-        if is_step && s.title.as_deref().unwrap_or(\"\").trim().is_empty() {\n-            continue;\n-        }\n-        let step = ProjStep {\n-            block_type: if is_step { String::new() } else { bt },\n-            content: if is_step {\n-                serde_json::Value::Null\n-            } else {\n-                s.content.clone().unwrap_or(serde_json::Value::Null)\n-            },\n-            title: s.title.clone().unwrap_or_default(),\n-            desc: s.desc.clone().unwrap_or_default(),\n-            command: s.command.clone().unwrap_or_default(),\n-            level: s.level.clone().unwrap_or_default(),\n-            why: s.why.clone().unwrap_or_default(),\n-            section: s.section.clone().unwrap_or_default(),\n-            subtasks: s.subtasks.clone().unwrap_or_default(),\n-            refs: s\n-                .refs\n-                .as_ref()\n-                .map(|rs| {\n-                    rs.iter()\n-                        .filter(|r| !r.label.as_deref().unwrap_or(\"\").trim().is_empty())\n-                        .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })\n-                        .collect()\n-                })\n-                .unwrap_or_default(),\n-        };\n-        kept.push((s.n.unwrap_or((idx as i32) + 1), step));\n-    }\n-\n-    // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные\n-    // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n-    // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n-    for (orig_n, step) in kept.iter_mut() {\n-        if !is_step_type(&step.block_type) {\n-            continue;\n-        }\n-        let Some(content) = step_md.get(orig_n) else { continue };\n-        let md = parse_step_md(content);\n-        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n-            step.title = t;\n-        }\n-        if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n-            step.desc = d;\n-        }\n-        if let Some(c) = md.command.filter(|c| *c != step.command) {\n-            step.command = c;\n-        }\n-    }\n-\n-    kept.into_iter().map(|(_, s)| s).collect()\n+    vec![] /* ~ changed by cargo-mutants ~ */\n }\n \n /// Снапшот произвольного ref (ветки): мета list.json + шаги. Для read-only рендера.\n pub struct BranchSnapshotData {\n     pub tip: String,\n     pub title: String,\n     pub desc: String,\n     pub tags: Vec<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:228:5: replace parse_steps -> Vec<ProjStep> with vec![]",
+    "package": "setfork-core",
+    "replacement": "vec![]",
+    "span": {
+      "end": {
+        "column": 47,
+        "line": 283
+      },
+      "start": {
+        "column": 5,
+        "line": 228
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace parse_steps -> Vec<ProjStep> with vec![Default::default()]\n@@ -220,72 +220,17 @@\n     }\n     s.to_string()\n }\n \n // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).\n fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {\n     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.\n     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).\n-    let mut kept: Vec<(i32, ProjStep)> = Vec::new();\n-    for (idx, s) in steps_raw.iter().enumerate() {\n-        let bt = s.block_type.clone().unwrap_or_default();\n-        let is_step = is_step_type(&bt);\n-        if is_step && s.title.as_deref().unwrap_or(\"\").trim().is_empty() {\n-            continue;\n-        }\n-        let step = ProjStep {\n-            block_type: if is_step { String::new() } else { bt },\n-            content: if is_step {\n-                serde_json::Value::Null\n-            } else {\n-                s.content.clone().unwrap_or(serde_json::Value::Null)\n-            },\n-            title: s.title.clone().unwrap_or_default(),\n-            desc: s.desc.clone().unwrap_or_default(),\n-            command: s.command.clone().unwrap_or_default(),\n-            level: s.level.clone().unwrap_or_default(),\n-            why: s.why.clone().unwrap_or_default(),\n-            section: s.section.clone().unwrap_or_default(),\n-            subtasks: s.subtasks.clone().unwrap_or_default(),\n-            refs: s\n-                .refs\n-                .as_ref()\n-                .map(|rs| {\n-                    rs.iter()\n-                        .filter(|r| !r.label.as_deref().unwrap_or(\"\").trim().is_empty())\n-                        .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })\n-                        .collect()\n-                })\n-                .unwrap_or_default(),\n-        };\n-        kept.push((s.n.unwrap_or((idx as i32) + 1), step));\n-    }\n-\n-    // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные\n-    // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n-    // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n-    for (orig_n, step) in kept.iter_mut() {\n-        if !is_step_type(&step.block_type) {\n-            continue;\n-        }\n-        let Some(content) = step_md.get(orig_n) else { continue };\n-        let md = parse_step_md(content);\n-        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n-            step.title = t;\n-        }\n-        if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n-            step.desc = d;\n-        }\n-        if let Some(c) = md.command.filter(|c| *c != step.command) {\n-            step.command = c;\n-        }\n-    }\n-\n-    kept.into_iter().map(|(_, s)| s).collect()\n+    vec![Default::default()] /* ~ changed by cargo-mutants ~ */\n }\n \n /// Снапшот произвольного ref (ветки): мета list.json + шаги. Для read-only рендера.\n pub struct BranchSnapshotData {\n     pub tip: String,\n     pub title: String,\n     pub desc: String,\n     pub tags: Vec<String>,\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:228:5: replace parse_steps -> Vec<ProjStep> with vec![Default::default()]",
+    "package": "setfork-core",
+    "replacement": "vec![Default::default()]",
+    "span": {
+      "end": {
+        "column": 47,
+        "line": 283
+      },
+      "start": {
+        "column": 5,
+        "line": 228
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace && with || in parse_steps\n@@ -224,17 +224,17 @@\n // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).\n fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {\n     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.\n     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).\n     let mut kept: Vec<(i32, ProjStep)> = Vec::new();\n     for (idx, s) in steps_raw.iter().enumerate() {\n         let bt = s.block_type.clone().unwrap_or_default();\n         let is_step = is_step_type(&bt);\n-        if is_step && s.title.as_deref().unwrap_or(\"\").trim().is_empty() {\n+        if is_step || /* ~ changed by cargo-mutants ~ */ s.title.as_deref().unwrap_or(\"\").trim().is_empty() {\n             continue;\n         }\n         let step = ProjStep {\n             block_type: if is_step { String::new() } else { bt },\n             content: if is_step {\n                 serde_json::Value::Null\n             } else {\n                 s.content.clone().unwrap_or(serde_json::Value::Null)\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:232:20: replace && with || in parse_steps",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 22,
+        "line": 232
+      },
+      "start": {
+        "column": 20,
+        "line": 232
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ delete ! in parse_steps\n@@ -246,17 +246,17 @@\n             why: s.why.clone().unwrap_or_default(),\n             section: s.section.clone().unwrap_or_default(),\n             subtasks: s.subtasks.clone().unwrap_or_default(),\n             refs: s\n                 .refs\n                 .as_ref()\n                 .map(|rs| {\n                     rs.iter()\n-                        .filter(|r| !r.label.as_deref().unwrap_or(\"\").trim().is_empty())\n+                        .filter(|r|  /* ~ changed by cargo-mutants ~ */r.label.as_deref().unwrap_or(\"\").trim().is_empty())\n                         .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })\n                         .collect()\n                 })\n                 .unwrap_or_default(),\n         };\n         kept.push((s.n.unwrap_or((idx as i32) + 1), step));\n     }\n \n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "src/git/project.rs:254:37: delete ! in parse_steps",
+    "package": "setfork-core",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 38,
+        "line": 254
+      },
+      "start": {
+        "column": 37,
+        "line": 254
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace + with - in parse_steps\n@@ -252,17 +252,17 @@\n                 .map(|rs| {\n                     rs.iter()\n                         .filter(|r| !r.label.as_deref().unwrap_or(\"\").trim().is_empty())\n                         .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })\n                         .collect()\n                 })\n                 .unwrap_or_default(),\n         };\n-        kept.push((s.n.unwrap_or((idx as i32) + 1), step));\n+        kept.push((s.n.unwrap_or((idx as i32) - /* ~ changed by cargo-mutants ~ */ 1), step));\n     }\n \n     // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные\n     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n     for (orig_n, step) in kept.iter_mut() {\n         if !is_step_type(&step.block_type) {\n             continue;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:260:47: replace + with - in parse_steps",
+    "package": "setfork-core",
+    "replacement": "-",
+    "span": {
+      "end": {
+        "column": 48,
+        "line": 260
+      },
+      "start": {
+        "column": 47,
+        "line": 260
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace + with * in parse_steps\n@@ -252,17 +252,17 @@\n                 .map(|rs| {\n                     rs.iter()\n                         .filter(|r| !r.label.as_deref().unwrap_or(\"\").trim().is_empty())\n                         .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })\n                         .collect()\n                 })\n                 .unwrap_or_default(),\n         };\n-        kept.push((s.n.unwrap_or((idx as i32) + 1), step));\n+        kept.push((s.n.unwrap_or((idx as i32) * /* ~ changed by cargo-mutants ~ */ 1), step));\n     }\n \n     // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные\n     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n     for (orig_n, step) in kept.iter_mut() {\n         if !is_step_type(&step.block_type) {\n             continue;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:260:47: replace + with * in parse_steps",
+    "package": "setfork-core",
+    "replacement": "*",
+    "span": {
+      "end": {
+        "column": 48,
+        "line": 260
+      },
+      "start": {
+        "column": 47,
+        "line": 260
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ delete ! in parse_steps\n@@ -259,17 +259,17 @@\n         };\n         kept.push((s.n.unwrap_or((idx as i32) + 1), step));\n     }\n \n     // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные\n     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n     for (orig_n, step) in kept.iter_mut() {\n-        if !is_step_type(&step.block_type) {\n+        if  /* ~ changed by cargo-mutants ~ */is_step_type(&step.block_type) {\n             continue;\n         }\n         let Some(content) = step_md.get(orig_n) else { continue };\n         let md = parse_step_md(content);\n         if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n             step.title = t;\n         }\n         if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "src/git/project.rs:267:12: delete ! in parse_steps",
+    "package": "setfork-core",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 13,
+        "line": 267
+      },
+      "start": {
+        "column": 12,
+        "line": 267
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace && with || in parse_steps\n@@ -264,17 +264,17 @@\n     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n     for (orig_n, step) in kept.iter_mut() {\n         if !is_step_type(&step.block_type) {\n             continue;\n         }\n         let Some(content) = step_md.get(orig_n) else { continue };\n         let md = parse_step_md(content);\n-        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n+        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() || /* ~ changed by cargo-mutants ~ */ *t != step.title) {\n             step.title = t;\n         }\n         if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n             step.desc = d;\n         }\n         if let Some(c) = md.command.filter(|c| *c != step.command) {\n             step.command = c;\n         }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:272:67: replace && with || in parse_steps",
+    "package": "setfork-core",
+    "replacement": "||",
+    "span": {
+      "end": {
+        "column": 69,
+        "line": 272
+      },
+      "start": {
+        "column": 67,
+        "line": 272
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ delete ! in parse_steps\n@@ -264,17 +264,17 @@\n     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n     for (orig_n, step) in kept.iter_mut() {\n         if !is_step_type(&step.block_type) {\n             continue;\n         }\n         let Some(content) = step_md.get(orig_n) else { continue };\n         let md = parse_step_md(content);\n-        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n+        if let Some(t) = md.title.filter(|t|  /* ~ changed by cargo-mutants ~ */t.trim().is_empty() && *t != step.title) {\n             step.title = t;\n         }\n         if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n             step.desc = d;\n         }\n         if let Some(c) = md.command.filter(|c| *c != step.command) {\n             step.command = c;\n         }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "src/git/project.rs:272:46: delete ! in parse_steps",
+    "package": "setfork-core",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 47,
+        "line": 272
+      },
+      "start": {
+        "column": 46,
+        "line": 272
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace != with == in parse_steps\n@@ -264,17 +264,17 @@\n     // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.\n     // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.\n     for (orig_n, step) in kept.iter_mut() {\n         if !is_step_type(&step.block_type) {\n             continue;\n         }\n         let Some(content) = step_md.get(orig_n) else { continue };\n         let md = parse_step_md(content);\n-        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n+        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t == /* ~ changed by cargo-mutants ~ */ step.title) {\n             step.title = t;\n         }\n         if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n             step.desc = d;\n         }\n         if let Some(c) = md.command.filter(|c| *c != step.command) {\n             step.command = c;\n         }\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:272:73: replace != with == in parse_steps",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 75,
+        "line": 272
+      },
+      "start": {
+        "column": 73,
+        "line": 272
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace != with == in parse_steps\n@@ -267,17 +267,17 @@\n         if !is_step_type(&step.block_type) {\n             continue;\n         }\n         let Some(content) = step_md.get(orig_n) else { continue };\n         let md = parse_step_md(content);\n         if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n             step.title = t;\n         }\n-        if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n+        if let Some(d) = md.desc.filter(|d| *d == /* ~ changed by cargo-mutants ~ */ step.desc) {\n             step.desc = d;\n         }\n         if let Some(c) = md.command.filter(|c| *c != step.command) {\n             step.command = c;\n         }\n     }\n \n     kept.into_iter().map(|(_, s)| s).collect()\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:275:48: replace != with == in parse_steps",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 50,
+        "line": 275
+      },
+      "start": {
+        "column": 48,
+        "line": 275
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace != with == in parse_steps\n@@ -270,17 +270,17 @@\n         let Some(content) = step_md.get(orig_n) else { continue };\n         let md = parse_step_md(content);\n         if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {\n             step.title = t;\n         }\n         if let Some(d) = md.desc.filter(|d| *d != step.desc) {\n             step.desc = d;\n         }\n-        if let Some(c) = md.command.filter(|c| *c != step.command) {\n+        if let Some(c) = md.command.filter(|c| *c == /* ~ changed by cargo-mutants ~ */ step.command) {\n             step.command = c;\n         }\n     }\n \n     kept.into_iter().map(|(_, s)| s).collect()\n }\n \n /// Снапшот произвольного ref (ветки): мета list.json + шаги. Для read-only рендера.\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "parse_steps",
+      "return_type": "-> Vec<ProjStep>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 284
+        },
+        "start": {
+          "column": 1,
+          "line": 225
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "src/git/project.rs:278:51: replace != with == in parse_steps",
+    "package": "setfork-core",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 53,
+        "line": 278
+      },
+      "start": {
+        "column": 51,
+        "line": 278
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace branch_snapshot -> Option<BranchSnapshotData> with None\n@@ -290,18 +290,17 @@\n     pub desc: String,\n     pub tags: Vec<String>,\n     pub ordered: bool,\n     pub steps: Vec<ProjStep>,\n }\n \n /// Снапшот ветки по refname: мета list.json + шаги с tip'а. Для read-only рендера.\n pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {\n-    let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;\n-    snapshot_from_data(tip, &raw, &step_md)\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n /// Материализация произвольного коммита (merge-base для трёхстороннего merge).\n pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let oid = git2::Oid::from_str(sha).ok()?;\n     let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;\n     snapshot_from_data(tip, &raw, &step_md)\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "branch_snapshot",
+      "return_type": "-> Option<BranchSnapshotData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 300
+        },
+        "start": {
+          "column": 1,
+          "line": 296
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:298:5: replace branch_snapshot -> Option<BranchSnapshotData> with None",
+    "package": "setfork-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 44,
+        "line": 299
+      },
+      "start": {
+        "column": 5,
+        "line": 298
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace branch_snapshot -> Option<BranchSnapshotData> with Some(Default::default())\n@@ -290,18 +290,17 @@\n     pub desc: String,\n     pub tags: Vec<String>,\n     pub ordered: bool,\n     pub steps: Vec<ProjStep>,\n }\n \n /// Снапшот ветки по refname: мета list.json + шаги с tip'а. Для read-only рендера.\n pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {\n-    let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;\n-    snapshot_from_data(tip, &raw, &step_md)\n+    Some(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Материализация произвольного коммита (merge-base для трёхстороннего merge).\n pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let oid = git2::Oid::from_str(sha).ok()?;\n     let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;\n     snapshot_from_data(tip, &raw, &step_md)\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "branch_snapshot",
+      "return_type": "-> Option<BranchSnapshotData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 300
+        },
+        "start": {
+          "column": 1,
+          "line": 296
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:298:5: replace branch_snapshot -> Option<BranchSnapshotData> with Some(Default::default())",
+    "package": "setfork-core",
+    "replacement": "Some(Default::default())",
+    "span": {
+      "end": {
+        "column": 44,
+        "line": 299
+      },
+      "start": {
+        "column": 5,
+        "line": 298
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace commit_snapshot -> Option<BranchSnapshotData> with None\n@@ -296,20 +296,17 @@\n /// Снапшот ветки по refname: мета list.json + шаги с tip'а. Для read-only рендера.\n pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {\n     let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;\n     snapshot_from_data(tip, &raw, &step_md)\n }\n \n /// Материализация произвольного коммита (merge-base для трёхстороннего merge).\n pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {\n-    let repo = git2::Repository::open_bare(bare).ok()?;\n-    let oid = git2::Oid::from_str(sha).ok()?;\n-    let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;\n-    snapshot_from_data(tip, &raw, &step_md)\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -> Option<BranchSnapshotData> {\n     let parsed: RawList = serde_json::from_slice(raw).ok()?;\n     let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), step_md);\n     Some(BranchSnapshotData {\n         tip,\n         title: parsed.title.unwrap_or_default(),\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "commit_snapshot",
+      "return_type": "-> Option<BranchSnapshotData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 308
+        },
+        "start": {
+          "column": 1,
+          "line": 302
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:304:5: replace commit_snapshot -> Option<BranchSnapshotData> with None",
+    "package": "setfork-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 44,
+        "line": 307
+      },
+      "start": {
+        "column": 5,
+        "line": 304
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace commit_snapshot -> Option<BranchSnapshotData> with Some(Default::default())\n@@ -296,20 +296,17 @@\n /// Снапшот ветки по refname: мета list.json + шаги с tip'а. Для read-only рендера.\n pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {\n     let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;\n     snapshot_from_data(tip, &raw, &step_md)\n }\n \n /// Материализация произвольного коммита (merge-base для трёхстороннего merge).\n pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {\n-    let repo = git2::Repository::open_bare(bare).ok()?;\n-    let oid = git2::Oid::from_str(sha).ok()?;\n-    let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;\n-    snapshot_from_data(tip, &raw, &step_md)\n+    Some(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -> Option<BranchSnapshotData> {\n     let parsed: RawList = serde_json::from_slice(raw).ok()?;\n     let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), step_md);\n     Some(BranchSnapshotData {\n         tip,\n         title: parsed.title.unwrap_or_default(),\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "commit_snapshot",
+      "return_type": "-> Option<BranchSnapshotData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 308
+        },
+        "start": {
+          "column": 1,
+          "line": 302
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:304:5: replace commit_snapshot -> Option<BranchSnapshotData> with Some(Default::default())",
+    "package": "setfork-core",
+    "replacement": "Some(Default::default())",
+    "span": {
+      "end": {
+        "column": 44,
+        "line": 307
+      },
+      "start": {
+        "column": 5,
+        "line": 304
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace snapshot_from_data -> Option<BranchSnapshotData> with None\n@@ -303,26 +303,17 @@\n pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let oid = git2::Oid::from_str(sha).ok()?;\n     let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;\n     snapshot_from_data(tip, &raw, &step_md)\n }\n \n fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -> Option<BranchSnapshotData> {\n-    let parsed: RawList = serde_json::from_slice(raw).ok()?;\n-    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), step_md);\n-    Some(BranchSnapshotData {\n-        tip,\n-        title: parsed.title.unwrap_or_default(),\n-        desc: parsed.desc.unwrap_or_default(),\n-        tags: parsed.tags.unwrap_or_default(),\n-        ordered: parsed.ordered.unwrap_or(true),\n-        steps,\n-    })\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n /// Проецирует запушенный tip main → новая версия списка (порт project.ts projectPushedCommit).\n /// Источник контента — list.json в корне дерева.\n ///\n /// Семантика результата (важно для вызывающих):\n /// - `Ok(Some(v))` — создана версия v;\n /// - `Ok(None)` — проецировать нечего (нет валидного list.json/steps) — НЕ ошибка;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "snapshot_from_data",
+      "return_type": "-> Option<BranchSnapshotData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 321
+        },
+        "start": {
+          "column": 1,
+          "line": 310
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:311:5: replace snapshot_from_data -> Option<BranchSnapshotData> with None",
+    "package": "setfork-core",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 320
+      },
+      "start": {
+        "column": 5,
+        "line": 311
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace snapshot_from_data -> Option<BranchSnapshotData> with Some(Default::default())\n@@ -303,26 +303,17 @@\n pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {\n     let repo = git2::Repository::open_bare(bare).ok()?;\n     let oid = git2::Oid::from_str(sha).ok()?;\n     let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;\n     snapshot_from_data(tip, &raw, &step_md)\n }\n \n fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -> Option<BranchSnapshotData> {\n-    let parsed: RawList = serde_json::from_slice(raw).ok()?;\n-    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), step_md);\n-    Some(BranchSnapshotData {\n-        tip,\n-        title: parsed.title.unwrap_or_default(),\n-        desc: parsed.desc.unwrap_or_default(),\n-        tags: parsed.tags.unwrap_or_default(),\n-        ordered: parsed.ordered.unwrap_or(true),\n-        steps,\n-    })\n+    Some(Default::default()) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Проецирует запушенный tip main → новая версия списка (порт project.ts projectPushedCommit).\n /// Источник контента — list.json в корне дерева.\n ///\n /// Семантика результата (важно для вызывающих):\n /// - `Ok(Some(v))` — создана версия v;\n /// - `Ok(None)` — проецировать нечего (нет валидного list.json/steps) — НЕ ошибка;\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "snapshot_from_data",
+      "return_type": "-> Option<BranchSnapshotData>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 321
+        },
+        "start": {
+          "column": 1,
+          "line": 310
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:311:5: replace snapshot_from_data -> Option<BranchSnapshotData> with Some(Default::default())",
+    "package": "setfork-core",
+    "replacement": "Some(Default::default())",
+    "span": {
+      "end": {
+        "column": 7,
+        "line": 320
+      },
+      "start": {
+        "column": 5,
+        "line": 311
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(None)\n@@ -331,66 +331,17 @@\n ///   (CLI-режим в main.rs).\n pub async fn project_pushed_commit(\n     pool: &PgPool,\n     template_id: Uuid,\n     bare: &Path,\n ) -> Result<Option<i32>, sqlx::Error> {\n     // git2-объекты не Send и блокируют поток → всё git-чтение в spawn_blocking,\n     // наружу только owned-данные.\n-    let bare_read = bare.to_path_buf();\n-    let Some((tip, raw, subject, step_md)) =\n-        tokio::task::spawn_blocking(move || read_tip(&bare_read)).await.map_err(join_err)?\n-    else {\n-        return Ok(None);\n-    };\n-    let parsed: RawList = match serde_json::from_slice(&raw) {\n-        Ok(p) => p,\n-        Err(e) => {\n-            // Пользовательский вход: битый list.json — не сбой сервиса, но след оставляем.\n-            tracing::warn!(%template_id, error = %e, \"проекция: list.json не парсится — версия не создана\");\n-            return Ok(None);\n-        }\n-    };\n-    let Some(steps_raw) = parsed.steps.as_ref() else {\n-        return Ok(None);\n-    };\n-\n-    let note: String = {\n-        let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();\n-        if stripped.trim().is_empty() { \"pushed via git\".to_string() } else { stripped }\n-    };\n-\n-    let steps = parse_steps(steps_raw, &step_md);\n-\n-    let ver = db::add_version(pool, template_id, &note, &steps).await?;\n-    // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.\n-    if let Err(e) = db::update_meta(\n-        pool,\n-        template_id,\n-        parsed.title.clone(),\n-        parsed.desc.clone(),\n-        parsed.tags.clone(),\n-        parsed.ordered,\n-    )\n-    .await\n-    {\n-        tracing::error!(%template_id, ver, error = %e, \"проекция: версия создана, но мета не обновлена\");\n-    }\n-    // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo\n-    // может повторно досыпать версию поверх (шум истории, не потеря данных).\n-    let bare_tag = bare.to_path_buf();\n-    match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {\n-        Ok(Ok(())) => {}\n-        Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен\"),\n-        Err(e) => {\n-            tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен (задача прервана)\")\n-        }\n-    }\n-    Ok(Some(ver))\n+    Ok(None) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::{ParsedStepMd, parse_step_md, strip_v_prefix};\n     use crate::git::bundle::{SerStep, StepRef};\n \n     #[test]\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "project_pushed_commit",
+      "return_type": "-> Result<Option<i32>, sqlx::Error>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 389
+        },
+        "start": {
+          "column": 1,
+          "line": 323
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(None)",
+    "package": "setfork-core",
+    "replacement": "Ok(None)",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 388
+      },
+      "start": {
+        "column": 5,
+        "line": 339
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(0))\n@@ -331,66 +331,17 @@\n ///   (CLI-режим в main.rs).\n pub async fn project_pushed_commit(\n     pool: &PgPool,\n     template_id: Uuid,\n     bare: &Path,\n ) -> Result<Option<i32>, sqlx::Error> {\n     // git2-объекты не Send и блокируют поток → всё git-чтение в spawn_blocking,\n     // наружу только owned-данные.\n-    let bare_read = bare.to_path_buf();\n-    let Some((tip, raw, subject, step_md)) =\n-        tokio::task::spawn_blocking(move || read_tip(&bare_read)).await.map_err(join_err)?\n-    else {\n-        return Ok(None);\n-    };\n-    let parsed: RawList = match serde_json::from_slice(&raw) {\n-        Ok(p) => p,\n-        Err(e) => {\n-            // Пользовательский вход: битый list.json — не сбой сервиса, но след оставляем.\n-            tracing::warn!(%template_id, error = %e, \"проекция: list.json не парсится — версия не создана\");\n-            return Ok(None);\n-        }\n-    };\n-    let Some(steps_raw) = parsed.steps.as_ref() else {\n-        return Ok(None);\n-    };\n-\n-    let note: String = {\n-        let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();\n-        if stripped.trim().is_empty() { \"pushed via git\".to_string() } else { stripped }\n-    };\n-\n-    let steps = parse_steps(steps_raw, &step_md);\n-\n-    let ver = db::add_version(pool, template_id, &note, &steps).await?;\n-    // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.\n-    if let Err(e) = db::update_meta(\n-        pool,\n-        template_id,\n-        parsed.title.clone(),\n-        parsed.desc.clone(),\n-        parsed.tags.clone(),\n-        parsed.ordered,\n-    )\n-    .await\n-    {\n-        tracing::error!(%template_id, ver, error = %e, \"проекция: версия создана, но мета не обновлена\");\n-    }\n-    // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo\n-    // может повторно досыпать версию поверх (шум истории, не потеря данных).\n-    let bare_tag = bare.to_path_buf();\n-    match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {\n-        Ok(Ok(())) => {}\n-        Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен\"),\n-        Err(e) => {\n-            tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен (задача прервана)\")\n-        }\n-    }\n-    Ok(Some(ver))\n+    Ok(Some(0)) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::{ParsedStepMd, parse_step_md, strip_v_prefix};\n     use crate::git::bundle::{SerStep, StepRef};\n \n     #[test]\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "project_pushed_commit",
+      "return_type": "-> Result<Option<i32>, sqlx::Error>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 389
+        },
+        "start": {
+          "column": 1,
+          "line": 323
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(0))",
+    "package": "setfork-core",
+    "replacement": "Ok(Some(0))",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 388
+      },
+      "start": {
+        "column": 5,
+        "line": 339
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(1))\n@@ -331,66 +331,17 @@\n ///   (CLI-режим в main.rs).\n pub async fn project_pushed_commit(\n     pool: &PgPool,\n     template_id: Uuid,\n     bare: &Path,\n ) -> Result<Option<i32>, sqlx::Error> {\n     // git2-объекты не Send и блокируют поток → всё git-чтение в spawn_blocking,\n     // наружу только owned-данные.\n-    let bare_read = bare.to_path_buf();\n-    let Some((tip, raw, subject, step_md)) =\n-        tokio::task::spawn_blocking(move || read_tip(&bare_read)).await.map_err(join_err)?\n-    else {\n-        return Ok(None);\n-    };\n-    let parsed: RawList = match serde_json::from_slice(&raw) {\n-        Ok(p) => p,\n-        Err(e) => {\n-            // Пользовательский вход: битый list.json — не сбой сервиса, но след оставляем.\n-            tracing::warn!(%template_id, error = %e, \"проекция: list.json не парсится — версия не создана\");\n-            return Ok(None);\n-        }\n-    };\n-    let Some(steps_raw) = parsed.steps.as_ref() else {\n-        return Ok(None);\n-    };\n-\n-    let note: String = {\n-        let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();\n-        if stripped.trim().is_empty() { \"pushed via git\".to_string() } else { stripped }\n-    };\n-\n-    let steps = parse_steps(steps_raw, &step_md);\n-\n-    let ver = db::add_version(pool, template_id, &note, &steps).await?;\n-    // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.\n-    if let Err(e) = db::update_meta(\n-        pool,\n-        template_id,\n-        parsed.title.clone(),\n-        parsed.desc.clone(),\n-        parsed.tags.clone(),\n-        parsed.ordered,\n-    )\n-    .await\n-    {\n-        tracing::error!(%template_id, ver, error = %e, \"проекция: версия создана, но мета не обновлена\");\n-    }\n-    // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo\n-    // может повторно досыпать версию поверх (шум истории, не потеря данных).\n-    let bare_tag = bare.to_path_buf();\n-    match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {\n-        Ok(Ok(())) => {}\n-        Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен\"),\n-        Err(e) => {\n-            tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен (задача прервана)\")\n-        }\n-    }\n-    Ok(Some(ver))\n+    Ok(Some(1)) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::{ParsedStepMd, parse_step_md, strip_v_prefix};\n     use crate::git::bundle::{SerStep, StepRef};\n \n     #[test]\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "project_pushed_commit",
+      "return_type": "-> Result<Option<i32>, sqlx::Error>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 389
+        },
+        "start": {
+          "column": 1,
+          "line": 323
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(1))",
+    "package": "setfork-core",
+    "replacement": "Ok(Some(1))",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 388
+      },
+      "start": {
+        "column": 5,
+        "line": 339
+      }
+    }
+  },
+  {
+    "diff": "--- src/git/project.rs\n+++ replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(-1))\n@@ -331,66 +331,17 @@\n ///   (CLI-режим в main.rs).\n pub async fn project_pushed_commit(\n     pool: &PgPool,\n     template_id: Uuid,\n     bare: &Path,\n ) -> Result<Option<i32>, sqlx::Error> {\n     // git2-объекты не Send и блокируют поток → всё git-чтение в spawn_blocking,\n     // наружу только owned-данные.\n-    let bare_read = bare.to_path_buf();\n-    let Some((tip, raw, subject, step_md)) =\n-        tokio::task::spawn_blocking(move || read_tip(&bare_read)).await.map_err(join_err)?\n-    else {\n-        return Ok(None);\n-    };\n-    let parsed: RawList = match serde_json::from_slice(&raw) {\n-        Ok(p) => p,\n-        Err(e) => {\n-            // Пользовательский вход: битый list.json — не сбой сервиса, но след оставляем.\n-            tracing::warn!(%template_id, error = %e, \"проекция: list.json не парсится — версия не создана\");\n-            return Ok(None);\n-        }\n-    };\n-    let Some(steps_raw) = parsed.steps.as_ref() else {\n-        return Ok(None);\n-    };\n-\n-    let note: String = {\n-        let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();\n-        if stripped.trim().is_empty() { \"pushed via git\".to_string() } else { stripped }\n-    };\n-\n-    let steps = parse_steps(steps_raw, &step_md);\n-\n-    let ver = db::add_version(pool, template_id, &note, &steps).await?;\n-    // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.\n-    if let Err(e) = db::update_meta(\n-        pool,\n-        template_id,\n-        parsed.title.clone(),\n-        parsed.desc.clone(),\n-        parsed.tags.clone(),\n-        parsed.ordered,\n-    )\n-    .await\n-    {\n-        tracing::error!(%template_id, ver, error = %e, \"проекция: версия создана, но мета не обновлена\");\n-    }\n-    // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo\n-    // может повторно досыпать версию поверх (шум истории, не потеря данных).\n-    let bare_tag = bare.to_path_buf();\n-    match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {\n-        Ok(Ok(())) => {}\n-        Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен\"),\n-        Err(e) => {\n-            tracing::error!(%template_id, ver, error = %e, \"проекция: тег не поставлен (задача прервана)\")\n-        }\n-    }\n-    Ok(Some(ver))\n+    Ok(Some(-1)) /* ~ changed by cargo-mutants ~ */\n }\n \n #[cfg(test)]\n mod tests {\n     use super::{ParsedStepMd, parse_step_md, strip_v_prefix};\n     use crate::git::bundle::{SerStep, StepRef};\n \n     #[test]\n",
+    "file": "src/git/project.rs",
+    "function": {
+      "function_name": "project_pushed_commit",
+      "return_type": "-> Result<Option<i32>, sqlx::Error>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 389
+        },
+        "start": {
+          "column": 1,
+          "line": 323
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(-1))",
+    "package": "setfork-core",
+    "replacement": "Ok(Some(-1))",
+    "span": {
+      "end": {
+        "column": 18,
+        "line": 388
+      },
+      "start": {
+        "column": 5,
+        "line": 339
+      }
+    }
+  }
+]

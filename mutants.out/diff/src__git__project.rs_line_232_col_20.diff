@@ -1,0 +1,21 @@
+--- src/git/project.rs
++++ replace && with || in parse_steps
+@@ -224,17 +224,17 @@
+ // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).
+ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {
+     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.
+     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).
+     let mut kept: Vec<(i32, ProjStep)> = Vec::new();
+     for (idx, s) in steps_raw.iter().enumerate() {
+         let bt = s.block_type.clone().unwrap_or_default();
+         let is_step = is_step_type(&bt);
+-        if is_step && s.title.as_deref().unwrap_or("").trim().is_empty() {
++        if is_step || /* ~ changed by cargo-mutants ~ */ s.title.as_deref().unwrap_or("").trim().is_empty() {
+             continue;
+         }
+         let step = ProjStep {
+             block_type: if is_step { String::new() } else { bt },
+             content: if is_step {
+                 serde_json::Value::Null
+             } else {
+                 s.content.clone().unwrap_or(serde_json::Value::Null)

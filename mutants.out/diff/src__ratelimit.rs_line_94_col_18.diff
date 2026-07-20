@@ -1,0 +1,21 @@
+--- src/ratelimit.rs
++++ replace == with != in RateLimited<S>::allow
+@@ -86,17 +86,17 @@
+         // (авторизованный) трафик, а не служит вектором DoS.
+         if let Some(expected) = &self.state.expected_auth
+             && auth != Some(expected.as_str())
+         {
+             return true;
+         }
+         let method = path.rsplit('/').next().unwrap_or(path);
+         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };
+-        if limit == 0 {
++        if limit != /* ~ changed by cargo-mutants ~ */ 0 {
+             return true;
+         }
+         let now = Instant::now();
+         // Отравление мьютекса (паника держателя) не должно ронять весь трафик:
+         // окна внутри валидны как данные — забираем их как есть.
+         let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());
+         let q = windows.entry(method.to_string()).or_default();
+         while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {

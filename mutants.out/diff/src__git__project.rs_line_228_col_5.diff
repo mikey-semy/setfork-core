@@ -1,0 +1,76 @@
+--- src/git/project.rs
++++ replace parse_steps -> Vec<ProjStep> with vec![]
+@@ -220,72 +220,17 @@
+     }
+     s.to_string()
+ }
+ 
+ // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).
+ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {
+     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.
+     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).
+-    let mut kept: Vec<(i32, ProjStep)> = Vec::new();
+-    for (idx, s) in steps_raw.iter().enumerate() {
+-        let bt = s.block_type.clone().unwrap_or_default();
+-        let is_step = is_step_type(&bt);
+-        if is_step && s.title.as_deref().unwrap_or("").trim().is_empty() {
+-            continue;
+-        }
+-        let step = ProjStep {
+-            block_type: if is_step { String::new() } else { bt },
+-            content: if is_step {
+-                serde_json::Value::Null
+-            } else {
+-                s.content.clone().unwrap_or(serde_json::Value::Null)
+-            },
+-            title: s.title.clone().unwrap_or_default(),
+-            desc: s.desc.clone().unwrap_or_default(),
+-            command: s.command.clone().unwrap_or_default(),
+-            level: s.level.clone().unwrap_or_default(),
+-            why: s.why.clone().unwrap_or_default(),
+-            section: s.section.clone().unwrap_or_default(),
+-            subtasks: s.subtasks.clone().unwrap_or_default(),
+-            refs: s
+-                .refs
+-                .as_ref()
+-                .map(|rs| {
+-                    rs.iter()
+-                        .filter(|r| !r.label.as_deref().unwrap_or("").trim().is_empty())
+-                        .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })
+-                        .collect()
+-                })
+-                .unwrap_or_default(),
+-        };
+-        kept.push((s.n.unwrap_or((idx as i32) + 1), step));
+-    }
+-
+-    // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные
+-    // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.
+-    // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.
+-    for (orig_n, step) in kept.iter_mut() {
+-        if !is_step_type(&step.block_type) {
+-            continue;
+-        }
+-        let Some(content) = step_md.get(orig_n) else { continue };
+-        let md = parse_step_md(content);
+-        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {
+-            step.title = t;
+-        }
+-        if let Some(d) = md.desc.filter(|d| *d != step.desc) {
+-            step.desc = d;
+-        }
+-        if let Some(c) = md.command.filter(|c| *c != step.command) {
+-            step.command = c;
+-        }
+-    }
+-
+-    kept.into_iter().map(|(_, s)| s).collect()
++    vec![] /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// Снапшот произвольного ref (ветки): мета list.json + шаги. Для read-only рендера.
+ pub struct BranchSnapshotData {
+     pub tip: String,
+     pub title: String,
+     pub desc: String,
+     pub tags: Vec<String>,

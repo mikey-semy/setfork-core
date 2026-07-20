@@ -1,0 +1,6570 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 161.3935872,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.8696343,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:10:5: replace is_step_type -> bool with true",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "is_step_type",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 8,
+                "column": 1
+              },
+              "end": {
+                "line": 11,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 10,
+              "column": 5
+            },
+            "end": {
+              "line": 10,
+              "column": 32
+            }
+          },
+          "replacement": "true",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_10_col_5.log",
+      "diff_path": "diff/src__blocks.rs_line_10_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 14.8989239,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.4023997,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:10:5: replace is_step_type -> bool with false",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "is_step_type",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 8,
+                "column": 1
+              },
+              "end": {
+                "line": 11,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 10,
+              "column": 5
+            },
+            "end": {
+              "line": 10,
+              "column": 32
+            }
+          },
+          "replacement": "false",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_10_col_5_001.log",
+      "diff_path": "diff/src__blocks.rs_line_10_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.1798487,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6945135,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:10:18: replace || with && in is_step_type",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "is_step_type",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 8,
+                "column": 1
+              },
+              "end": {
+                "line": 11,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 10,
+              "column": 18
+            },
+            "end": {
+              "line": 10,
+              "column": 20
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_10_col_18.log",
+      "diff_path": "diff/src__blocks.rs_line_10_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.1964937,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.639414,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:10:23: replace == with != in is_step_type",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "is_step_type",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 8,
+                "column": 1
+              },
+              "end": {
+                "line": 11,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 10,
+              "column": 23
+            },
+            "end": {
+              "line": 10,
+              "column": 25
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_10_col_23.log",
+      "diff_path": "diff/src__blocks.rs_line_10_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.1306029,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.8790267,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:15:5: replace storage_type -> String with String::new()",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "storage_type",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 13,
+                "column": 1
+              },
+              "end": {
+                "line": 16,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 15,
+              "column": 5
+            },
+            "end": {
+              "line": 15,
+              "column": 69
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_15_col_5.log",
+      "diff_path": "diff/src__blocks.rs_line_15_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.512957,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6862331,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:15:5: replace storage_type -> String with \"xyzzy\".into()",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "storage_type",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 13,
+                "column": 1
+              },
+              "end": {
+                "line": 16,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 15,
+              "column": 5
+            },
+            "end": {
+              "line": 15,
+              "column": 69
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_15_col_5_001.log",
+      "diff_path": "diff/src__blocks.rs_line_15_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.1465164,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.3438938,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:20:5: replace wire_type -> String with String::new()",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "wire_type",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 24,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 20,
+              "column": 5
+            },
+            "end": {
+              "line": 23,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_20_col_5.log",
+      "diff_path": "diff/src__blocks.rs_line_20_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.9573309,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.0596665,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:20:5: replace wire_type -> String with \"xyzzy\".into()",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "wire_type",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 24,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 20,
+              "column": 5
+            },
+            "end": {
+              "line": 23,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_20_col_5_001.log",
+      "diff_path": "diff/src__blocks.rs_line_20_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.8387814,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 16.7657037,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:21:20: replace match guard !is_step_type(t) with true in wire_type",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "wire_type",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 24,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 21,
+              "column": 20
+            },
+            "end": {
+              "line": 21,
+              "column": 36
+            }
+          },
+          "replacement": "true",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_21_col_20.log",
+      "diff_path": "diff/src__blocks.rs_line_21_col_20.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 14.8161569,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 12.6300983,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:21:20: replace match guard !is_step_type(t) with false in wire_type",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "wire_type",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 24,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 21,
+              "column": 20
+            },
+            "end": {
+              "line": 21,
+              "column": 36
+            }
+          },
+          "replacement": "false",
+          "genre": "MatchArmGuard"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_21_col_20_001.log",
+      "diff_path": "diff/src__blocks.rs_line_21_col_20_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 16.2233333,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.7024287,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:21:20: delete ! in wire_type",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "wire_type",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 18,
+                "column": 1
+              },
+              "end": {
+                "line": 24,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 21,
+              "column": 20
+            },
+            "end": {
+              "line": 21,
+              "column": 21
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_21_col_20_002.log",
+      "diff_path": "diff/src__blocks.rs_line_21_col_20_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.2118065,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.7786681,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:29:5: replace content_value -> serde_json::Value with Default::default()",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "content_value",
+            "return_type": "-> serde_json::Value",
+            "span": {
+              "start": {
+                "line": 26,
+                "column": 1
+              },
+              "end": {
+                "line": 34,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 29,
+              "column": 5
+            },
+            "end": {
+              "line": 33,
+              "column": 6
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_29_col_5.log",
+      "diff_path": "diff/src__blocks.rs_line_29_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 14.6585046,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 10.7087266,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/blocks.rs:29:32: replace || with && in content_value",
+          "package": "setfork-core",
+          "file": "src/blocks.rs",
+          "function": {
+            "function_name": "content_value",
+            "return_type": "-> serde_json::Value",
+            "span": {
+              "start": {
+                "line": 26,
+                "column": 1
+              },
+              "end": {
+                "line": 34,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 29,
+              "column": 32
+            },
+            "end": {
+              "line": 29,
+              "column": 34
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__blocks.rs_line_29_col_32.log",
+      "diff_path": "diff/src__blocks.rs_line_29_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.6035744,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.4995871,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:60:9: replace RateLimitLayer::with -> Self with Default::default()",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimitLayer::with",
+            "return_type": "-> Self",
+            "span": {
+              "start": {
+                "line": 59,
+                "column": 5
+              },
+              "end": {
+                "line": 61,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 60,
+              "column": 9
+            },
+            "end": {
+              "line": 60,
+              "column": 111
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_60_col_9.log",
+      "diff_path": "diff/src__ratelimit.rs_line_60_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.2849955,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:67:9: replace <impl Layer<S> for RateLimitLayer>::layer -> Self::Service with Default::default()",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "<impl Layer<S> for RateLimitLayer>::layer",
+            "return_type": "-> Self::Service",
+            "span": {
+              "start": {
+                "line": 66,
+                "column": 5
+              },
+              "end": {
+                "line": 68,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 67,
+              "column": 9
+            },
+            "end": {
+              "line": 67,
+              "column": 66
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_67_col_9.log",
+      "diff_path": "diff/src__ratelimit.rs_line_67_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.1840768,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:81:9: replace RateLimited<S>::allow -> bool with true",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 81,
+              "column": 9
+            },
+            "end": {
+              "line": 110,
+              "column": 13
+            }
+          },
+          "replacement": "true",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__ratelimit.rs_line_81_col_9.log",
+      "diff_path": "diff/src__ratelimit.rs_line_81_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 15.9679519,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.4926118,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:81:9: replace RateLimited<S>::allow -> bool with false",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 81,
+              "column": 9
+            },
+            "end": {
+              "line": 110,
+              "column": 13
+            }
+          },
+          "replacement": "false",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__ratelimit.rs_line_81_col_9_001.log",
+      "diff_path": "diff/src__ratelimit.rs_line_81_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.8555493,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.7332221,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:81:45: replace || with && in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 81,
+              "column": 45
+            },
+            "end": {
+              "line": 81,
+              "column": 47
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__ratelimit.rs_line_81_col_45.log",
+      "diff_path": "diff/src__ratelimit.rs_line_81_col_45.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 14.2702931,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.980098,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:88:13: replace && with || in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 88,
+              "column": 13
+            },
+            "end": {
+              "line": 88,
+              "column": 15
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_88_col_13.log",
+      "diff_path": "diff/src__ratelimit.rs_line_88_col_13.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.0842667,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:88:21: replace != with == in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 88,
+              "column": 21
+            },
+            "end": {
+              "line": 88,
+              "column": 23
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__ratelimit.rs_line_88_col_21.log",
+      "diff_path": "diff/src__ratelimit.rs_line_88_col_21.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.4598003,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.1536374,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:94:18: replace == with != in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 18
+            },
+            "end": {
+              "line": 94,
+              "column": 20
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__ratelimit.rs_line_94_col_18.log",
+      "diff_path": "diff/src__ratelimit.rs_line_94_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.0093275,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.0431211,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:102:64: replace > with == in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 102,
+              "column": 64
+            },
+            "end": {
+              "line": 102,
+              "column": 65
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__ratelimit.rs_line_102_col_64.log",
+      "diff_path": "diff/src__ratelimit.rs_line_102_col_64.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.3619387,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.2932688,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:102:64: replace > with < in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 102,
+              "column": 64
+            },
+            "end": {
+              "line": 102,
+              "column": 65
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__ratelimit.rs_line_102_col_64_001.log",
+      "diff_path": "diff/src__ratelimit.rs_line_102_col_64_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.0790038,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.9920442,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:102:64: replace > with >= in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 102,
+              "column": 64
+            },
+            "end": {
+              "line": 102,
+              "column": 65
+            }
+          },
+          "replacement": ">=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__ratelimit.rs_line_102_col_64_002.log",
+      "diff_path": "diff/src__ratelimit.rs_line_102_col_64_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.9393786,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.538696999999999,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:105:27: replace >= with < in RateLimited<S>::allow",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "RateLimited<S>::allow",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 78,
+                "column": 5
+              },
+              "end": {
+                "line": 111,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 105,
+              "column": 27
+            },
+            "end": {
+              "line": 105,
+              "column": 29
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_105_col_27.log",
+      "diff_path": "diff/src__ratelimit.rs_line_105_col_27.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.1849839,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::new()",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+            "return_type": "-> Poll<Result<(), Self::Error>>",
+            "span": {
+              "start": {
+                "line": 126,
+                "column": 5
+              },
+              "end": {
+                "line": 128,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 127,
+              "column": 9
+            },
+            "end": {
+              "line": 127,
+              "column": 34
+            }
+          },
+          "replacement": "Poll::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_127_col_9.log",
+      "diff_path": "diff/src__ratelimit.rs_line_127_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.9294017,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::from_iter([Ok(())])",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+            "return_type": "-> Poll<Result<(), Self::Error>>",
+            "span": {
+              "start": {
+                "line": 126,
+                "column": 5
+              },
+              "end": {
+                "line": 128,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 127,
+              "column": 9
+            },
+            "end": {
+              "line": 127,
+              "column": 34
+            }
+          },
+          "replacement": "Poll::from_iter([Ok(())])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_127_col_9_001.log",
+      "diff_path": "diff/src__ratelimit.rs_line_127_col_9_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.1352983,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::new(Ok(()))",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+            "return_type": "-> Poll<Result<(), Self::Error>>",
+            "span": {
+              "start": {
+                "line": 126,
+                "column": 5
+              },
+              "end": {
+                "line": 128,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 127,
+              "column": 9
+            },
+            "end": {
+              "line": 127,
+              "column": 34
+            }
+          },
+          "replacement": "Poll::new(Ok(()))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_127_col_9_002.log",
+      "diff_path": "diff/src__ratelimit.rs_line_127_col_9_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.2828455,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:127:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready -> Poll<Result<(), Self::Error>> with Poll::from(Ok(()))",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::poll_ready",
+            "return_type": "-> Poll<Result<(), Self::Error>>",
+            "span": {
+              "start": {
+                "line": 126,
+                "column": 5
+              },
+              "end": {
+                "line": 128,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 127,
+              "column": 9
+            },
+            "end": {
+              "line": 127,
+              "column": 34
+            }
+          },
+          "replacement": "Poll::from(Ok(()))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__ratelimit.rs_line_127_col_9_003.log",
+      "diff_path": "diff/src__ratelimit.rs_line_127_col_9_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.6265853,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.7397145,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/ratelimit.rs:131:9: replace <impl Service<Request<ReqBody>> for RateLimited<S>>::call -> Self::Future with Default::default()",
+          "package": "setfork-core",
+          "file": "src/ratelimit.rs",
+          "function": {
+            "function_name": "<impl Service<Request<ReqBody>> for RateLimited<S>>::call",
+            "return_type": "-> Self::Future",
+            "span": {
+              "start": {
+                "line": 130,
+                "column": 5
+              },
+              "end": {
+                "line": 145,
+                "column": 6
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 131,
+              "column": 9
+            },
+            "end": {
+              "line": 144,
+              "column": 10
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__ratelimit.rs_line_131_col_9.log",
+      "diff_path": "diff/src__ratelimit.rs_line_131_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.2352622,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:69:5: replace read_tip -> Option<TipData> with None",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_tip",
+            "return_type": "-> Option<TipData>",
+            "span": {
+              "start": {
+                "line": 68,
+                "column": 1
+              },
+              "end": {
+                "line": 70,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 69,
+              "column": 5
+            },
+            "end": {
+              "line": 69,
+              "column": 33
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_69_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_69_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.034119,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.9495995,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:69:5: replace read_tip -> Option<TipData> with Some(Default::default())",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_tip",
+            "return_type": "-> Option<TipData>",
+            "span": {
+              "start": {
+                "line": 68,
+                "column": 1
+              },
+              "end": {
+                "line": 70,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 69,
+              "column": 5
+            },
+            "end": {
+              "line": 69,
+              "column": 33
+            }
+          },
+          "replacement": "Some(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_69_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_69_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.3950055,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.6958099,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:74:5: replace read_ref_tip -> Option<TipData> with None",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_ref_tip",
+            "return_type": "-> Option<TipData>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 1
+              },
+              "end": {
+                "line": 77,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 74,
+              "column": 5
+            },
+            "end": {
+              "line": 76,
+              "column": 33
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_74_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_74_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 16.8731865,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.2548089,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:74:5: replace read_ref_tip -> Option<TipData> with Some(Default::default())",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_ref_tip",
+            "return_type": "-> Option<TipData>",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 1
+              },
+              "end": {
+                "line": 77,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 74,
+              "column": 5
+            },
+            "end": {
+              "line": 76,
+              "column": 33
+            }
+          },
+          "replacement": "Some(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_74_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_74_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 13.8201526,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.5132584,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:81:5: replace read_commit_data -> Option<TipData> with None",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_commit_data",
+            "return_type": "-> Option<TipData>",
+            "span": {
+              "start": {
+                "line": 80,
+                "column": 1
+              },
+              "end": {
+                "line": 89,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 81,
+              "column": 5
+            },
+            "end": {
+              "line": 88,
+              "column": 49
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_81_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_81_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 19.672356,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.0249639,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:81:5: replace read_commit_data -> Option<TipData> with Some(Default::default())",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_commit_data",
+            "return_type": "-> Option<TipData>",
+            "span": {
+              "start": {
+                "line": 80,
+                "column": 1
+              },
+              "end": {
+                "line": 89,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 81,
+              "column": 5
+            },
+            "end": {
+              "line": 88,
+              "column": 49
+            }
+          },
+          "replacement": "Some(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_81_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_81_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.2321991,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.833584,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::new()",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 5
+            },
+            "end": {
+              "line": 123,
+              "column": 8
+            }
+          },
+          "replacement": "HashMap::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_94_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_94_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 18.2481967,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.2382691,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(0, String::new())])",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 5
+            },
+            "end": {
+              "line": 123,
+              "column": 8
+            }
+          },
+          "replacement": "HashMap::from_iter([(0, String::new())])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_94_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_94_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 15.6118904,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.7902717,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(0, \"xyzzy\".into())])",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 5
+            },
+            "end": {
+              "line": 123,
+              "column": 8
+            }
+          },
+          "replacement": "HashMap::from_iter([(0, \"xyzzy\".into())])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_94_col_5_002.log",
+      "diff_path": "diff/src__git__project.rs_line_94_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.6840206,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.8347442,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(1, String::new())])",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 5
+            },
+            "end": {
+              "line": 123,
+              "column": 8
+            }
+          },
+          "replacement": "HashMap::from_iter([(1, String::new())])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_94_col_5_003.log",
+      "diff_path": "diff/src__git__project.rs_line_94_col_5_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.872535599999999,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.3950424,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(1, \"xyzzy\".into())])",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 5
+            },
+            "end": {
+              "line": 123,
+              "column": 8
+            }
+          },
+          "replacement": "HashMap::from_iter([(1, \"xyzzy\".into())])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_94_col_5_004.log",
+      "diff_path": "diff/src__git__project.rs_line_94_col_5_004.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.1345273,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.5509609,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(-1, String::new())])",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 5
+            },
+            "end": {
+              "line": 123,
+              "column": 8
+            }
+          },
+          "replacement": "HashMap::from_iter([(-1, String::new())])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_94_col_5_005.log",
+      "diff_path": "diff/src__git__project.rs_line_94_col_5_005.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.8021251,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.9846197,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:94:5: replace read_step_files -> HashMap<i32, String> with HashMap::from_iter([(-1, \"xyzzy\".into())])",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 94,
+              "column": 5
+            },
+            "end": {
+              "line": 123,
+              "column": 8
+            }
+          },
+          "replacement": "HashMap::from_iter([(-1, \"xyzzy\".into())])",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_94_col_5_006.log",
+      "diff_path": "diff/src__git__project.rs_line_94_col_5_006.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.3830364,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.3421427,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:108:12: delete ! in read_step_files",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 108,
+              "column": 12
+            },
+            "end": {
+              "line": 108,
+              "column": 13
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_108_col_12.log",
+      "diff_path": "diff/src__git__project.rs_line_108_col_12.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 17.3240945,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.380547,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:118:13: replace && with || in read_step_files",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "read_step_files",
+            "return_type": "-> HashMap<i32, String>",
+            "span": {
+              "start": {
+                "line": 93,
+                "column": 1
+              },
+              "end": {
+                "line": 124,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 118,
+              "column": 13
+            },
+            "end": {
+              "line": 118,
+              "column": 15
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__git__project.rs_line_118_col_13.log",
+      "diff_path": "diff/src__git__project.rs_line_118_col_13.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.0302578000000002,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:138:5: replace front_value -> String with String::new()",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "front_value",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 135,
+                "column": 1
+              },
+              "end": {
+                "line": 144,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 138,
+              "column": 5
+            },
+            "end": {
+              "line": 143,
+              "column": 6
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_138_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_138_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 16.994972,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.2987232,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:138:5: replace front_value -> String with \"xyzzy\".into()",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "front_value",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 135,
+                "column": 1
+              },
+              "end": {
+                "line": 144,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 138,
+              "column": 5
+            },
+            "end": {
+              "line": 143,
+              "column": 6
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_138_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_138_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.9687406,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.1616436,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:151:5: replace parse_step_md -> ParsedStepMd with Default::default()",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_step_md",
+            "return_type": "-> ParsedStepMd",
+            "span": {
+              "start": {
+                "line": 146,
+                "column": 1
+              },
+              "end": {
+                "line": 194,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 151,
+              "column": 5
+            },
+            "end": {
+              "line": 193,
+              "column": 42
+            }
+          },
+          "replacement": "Default::default()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__git__project.rs_line_151_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_151_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.7880666,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:157:21: replace == with != in parse_step_md",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_step_md",
+            "return_type": "-> ParsedStepMd",
+            "span": {
+              "start": {
+                "line": 146,
+                "column": 1
+              },
+              "end": {
+                "line": 194,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 157,
+              "column": 21
+            },
+            "end": {
+              "line": 157,
+              "column": 23
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_157_col_21.log",
+      "diff_path": "diff/src__git__project.rs_line_157_col_21.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 17.5614074,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.4462575,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:160:17: replace += with -= in parse_step_md",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_step_md",
+            "return_type": "-> ParsedStepMd",
+            "span": {
+              "start": {
+                "line": 146,
+                "column": 1
+              },
+              "end": {
+                "line": 194,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 160,
+              "column": 17
+            },
+            "end": {
+              "line": 160,
+              "column": 19
+            }
+          },
+          "replacement": "-=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_160_col_17.log",
+      "diff_path": "diff/src__git__project.rs_line_160_col_17.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.1169787,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.8449883,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:160:17: replace += with *= in parse_step_md",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_step_md",
+            "return_type": "-> ParsedStepMd",
+            "span": {
+              "start": {
+                "line": 146,
+                "column": 1
+              },
+              "end": {
+                "line": 194,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 160,
+              "column": 17
+            },
+            "end": {
+              "line": 160,
+              "column": 19
+            }
+          },
+          "replacement": "*=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_160_col_17_001.log",
+      "diff_path": "diff/src__git__project.rs_line_160_col_17_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.2303562,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.0390422,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:161:32: replace == with != in parse_step_md",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_step_md",
+            "return_type": "-> ParsedStepMd",
+            "span": {
+              "start": {
+                "line": 146,
+                "column": 1
+              },
+              "end": {
+                "line": 194,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 161,
+              "column": 32
+            },
+            "end": {
+              "line": 161,
+              "column": 34
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_161_col_32.log",
+      "diff_path": "diff/src__git__project.rs_line_161_col_32.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.0317784,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.6315394,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:179:65: replace || with && in parse_step_md",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_step_md",
+            "return_type": "-> ParsedStepMd",
+            "span": {
+              "start": {
+                "line": 146,
+                "column": 1
+              },
+              "end": {
+                "line": 194,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 179,
+              "column": 65
+            },
+            "end": {
+              "line": 179,
+              "column": 67
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_179_col_65.log",
+      "diff_path": "diff/src__git__project.rs_line_179_col_65.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.1511813,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.5131551,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:179:38: replace || with && in parse_step_md",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_step_md",
+            "return_type": "-> ParsedStepMd",
+            "span": {
+              "start": {
+                "line": 146,
+                "column": 1
+              },
+              "end": {
+                "line": 194,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 179,
+              "column": 38
+            },
+            "end": {
+              "line": 179,
+              "column": 40
+            }
+          },
+          "replacement": "&&",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_179_col_38.log",
+      "diff_path": "diff/src__git__project.rs_line_179_col_38.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.1082955,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.0877652,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:198:5: replace tag_version -> Result<(), git2::Error> with Ok(())",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "tag_version",
+            "return_type": "-> Result<(), git2::Error>",
+            "span": {
+              "start": {
+                "line": 197,
+                "column": 1
+              },
+              "end": {
+                "line": 203,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 198,
+              "column": 5
+            },
+            "end": {
+              "line": 202,
+              "column": 11
+            }
+          },
+          "replacement": "Ok(())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_198_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_198_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 18.3385392,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.4366437,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:207:5: replace strip_v_prefix -> String with String::new()",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 207,
+              "column": 5
+            },
+            "end": {
+              "line": 221,
+              "column": 18
+            }
+          },
+          "replacement": "String::new()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_207_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_207_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 16.6139787,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6872506,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:207:5: replace strip_v_prefix -> String with \"xyzzy\".into()",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 207,
+              "column": 5
+            },
+            "end": {
+              "line": 221,
+              "column": 18
+            }
+          },
+          "replacement": "\"xyzzy\".into()",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_207_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_207_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.487702,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6843937,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:208:18: replace == with != in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 208,
+              "column": 18
+            },
+            "end": {
+              "line": 208,
+              "column": 20
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_208_col_18.log",
+      "diff_path": "diff/src__git__project.rs_line_208_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 17.3320736,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.1931868,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:210:27: replace && with || in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 210,
+              "column": 27
+            },
+            "end": {
+              "line": 210,
+              "column": 29
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_210_col_27.log",
+      "diff_path": "diff/src__git__project.rs_line_210_col_27.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.4745198,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6298936,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:210:17: replace < with == in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 210,
+              "column": 17
+            },
+            "end": {
+              "line": 210,
+              "column": 18
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_210_col_17.log",
+      "diff_path": "diff/src__git__project.rs_line_210_col_17.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.0938026,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6313572,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:210:17: replace < with > in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 210,
+              "column": 17
+            },
+            "end": {
+              "line": 210,
+              "column": 18
+            }
+          },
+          "replacement": ">",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_210_col_17_001.log",
+      "diff_path": "diff/src__git__project.rs_line_210_col_17_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.4190146,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.2305805,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:210:17: replace < with <= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 210,
+              "column": 17
+            },
+            "end": {
+              "line": 210,
+              "column": 18
+            }
+          },
+          "replacement": "<=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_210_col_17_002.log",
+      "diff_path": "diff/src__git__project.rs_line_210_col_17_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.300316,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.9896442,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:211:15: replace += with -= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 211,
+              "column": 15
+            },
+            "end": {
+              "line": 211,
+              "column": 17
+            }
+          },
+          "replacement": "-=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_211_col_15.log",
+      "diff_path": "diff/src__git__project.rs_line_211_col_15.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.8080289,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.8849986,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:211:15: replace += with *= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 211,
+              "column": 15
+            },
+            "end": {
+              "line": 211,
+              "column": 17
+            }
+          },
+          "replacement": "*=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Timeout",
+      "log_path": "log/src__git__project.rs_line_211_col_15_001.log",
+      "diff_path": "diff/src__git__project.rs_line_211_col_15_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.5917643,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 90.1138589,
+          "process_status": "Timeout",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:33: replace && with || in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 33
+            },
+            "end": {
+              "line": 213,
+              "column": 35
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_33.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_33.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 24.0063273,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 10.6228089,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:18: replace && with || in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 18
+            },
+            "end": {
+              "line": 213,
+              "column": 20
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_18.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 30.6082414,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 24.8348472,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:14: replace > with == in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 14
+            },
+            "end": {
+              "line": 213,
+              "column": 15
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_14.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_14.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 29.115652,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 16.3434491,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:14: replace > with < in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 14
+            },
+            "end": {
+              "line": 213,
+              "column": 15
+            }
+          },
+          "replacement": "<",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_14_001.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_14_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.0088008,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.1221356,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:14: replace > with >= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 14
+            },
+            "end": {
+              "line": 213,
+              "column": 15
+            }
+          },
+          "replacement": ">=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_14_002.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_14_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 17.4995012,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 15.099801,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:23: replace < with == in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 23
+            },
+            "end": {
+              "line": 213,
+              "column": 24
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_23.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_23.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.3169744,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.3606003,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:23: replace < with > in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 23
+            },
+            "end": {
+              "line": 213,
+              "column": 24
+            }
+          },
+          "replacement": ">",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_23_001.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_23_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 14.2373209,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.8755907,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:23: replace < with <= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 23
+            },
+            "end": {
+              "line": 213,
+              "column": 24
+            }
+          },
+          "replacement": "<=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_23_002.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_23_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.369311100000001,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.9364772,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:213:41: replace == with != in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 213,
+              "column": 41
+            },
+            "end": {
+              "line": 213,
+              "column": 43
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_213_col_41.log",
+      "diff_path": "diff/src__git__project.rs_line_213_col_41.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.5876442,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.1914703,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:214:15: replace += with -= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 214,
+              "column": 15
+            },
+            "end": {
+              "line": 214,
+              "column": 17
+            }
+          },
+          "replacement": "-=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_214_col_15.log",
+      "diff_path": "diff/src__git__project.rs_line_214_col_15.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.5039568,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 11.8813872,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:214:15: replace += with *= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 214,
+              "column": 15
+            },
+            "end": {
+              "line": 214,
+              "column": 17
+            }
+          },
+          "replacement": "*=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_214_col_15_001.log",
+      "diff_path": "diff/src__git__project.rs_line_214_col_15_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 15.380234399999999,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.8296822,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:215:31: replace && with || in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 215,
+              "column": 31
+            },
+            "end": {
+              "line": 215,
+              "column": 33
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_215_col_31.log",
+      "diff_path": "diff/src__git__project.rs_line_215_col_31.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.3807322,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.7402614,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:215:21: replace < with == in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 215,
+              "column": 21
+            },
+            "end": {
+              "line": 215,
+              "column": 22
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_215_col_21.log",
+      "diff_path": "diff/src__git__project.rs_line_215_col_21.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.8210892,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6731997,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:215:21: replace < with > in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 215,
+              "column": 21
+            },
+            "end": {
+              "line": 215,
+              "column": 22
+            }
+          },
+          "replacement": ">",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_215_col_21_001.log",
+      "diff_path": "diff/src__git__project.rs_line_215_col_21_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.600708000000001,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.6404911,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:215:21: replace < with <= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 215,
+              "column": 21
+            },
+            "end": {
+              "line": 215,
+              "column": 22
+            }
+          },
+          "replacement": "<=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_215_col_21_002.log",
+      "diff_path": "diff/src__git__project.rs_line_215_col_21_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.8950894,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.0520066,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:215:39: replace == with != in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 215,
+              "column": 39
+            },
+            "end": {
+              "line": 215,
+              "column": 41
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_215_col_39.log",
+      "diff_path": "diff/src__git__project.rs_line_215_col_39.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 13.415629299999999,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 9.3475417,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:216:19: replace += with -= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 216,
+              "column": 19
+            },
+            "end": {
+              "line": 216,
+              "column": 21
+            }
+          },
+          "replacement": "-=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/src__git__project.rs_line_216_col_19.log",
+      "diff_path": "diff/src__git__project.rs_line_216_col_19.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.3761183,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 8.4824047,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:216:19: replace += with *= in strip_v_prefix",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "strip_v_prefix",
+            "return_type": "-> String",
+            "span": {
+              "start": {
+                "line": 205,
+                "column": 1
+              },
+              "end": {
+                "line": 222,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 216,
+              "column": 19
+            },
+            "end": {
+              "line": 216,
+              "column": 21
+            }
+          },
+          "replacement": "*=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "Timeout",
+      "log_path": "log/src__git__project.rs_line_216_col_19_001.log",
+      "diff_path": "diff/src__git__project.rs_line_216_col_19_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.705658,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 90.0197631,
+          "process_status": "Timeout",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:228:5: replace parse_steps -> Vec<ProjStep> with vec![]",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 228,
+              "column": 5
+            },
+            "end": {
+              "line": 283,
+              "column": 47
+            }
+          },
+          "replacement": "vec![]",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_228_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_228_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 18.9839262,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.3868563,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:228:5: replace parse_steps -> Vec<ProjStep> with vec![Default::default()]",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 228,
+              "column": 5
+            },
+            "end": {
+              "line": 283,
+              "column": 47
+            }
+          },
+          "replacement": "vec![Default::default()]",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__git__project.rs_line_228_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_228_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.4878191,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:232:20: replace && with || in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 232,
+              "column": 20
+            },
+            "end": {
+              "line": 232,
+              "column": 22
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_232_col_20.log",
+      "diff_path": "diff/src__git__project.rs_line_232_col_20.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 19.7064019,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.9333964,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:254:37: delete ! in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 254,
+              "column": 37
+            },
+            "end": {
+              "line": 254,
+              "column": 38
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_254_col_37.log",
+      "diff_path": "diff/src__git__project.rs_line_254_col_37.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 10.7136826,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.2250927,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:260:47: replace + with - in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 260,
+              "column": 47
+            },
+            "end": {
+              "line": 260,
+              "column": 48
+            }
+          },
+          "replacement": "-",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_260_col_47.log",
+      "diff_path": "diff/src__git__project.rs_line_260_col_47.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.6005477,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.5971798,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:260:47: replace + with * in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 260,
+              "column": 47
+            },
+            "end": {
+              "line": 260,
+              "column": 48
+            }
+          },
+          "replacement": "*",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_260_col_47_001.log",
+      "diff_path": "diff/src__git__project.rs_line_260_col_47_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.4264651,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.3214292,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:267:12: delete ! in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 267,
+              "column": 12
+            },
+            "end": {
+              "line": 267,
+              "column": 13
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_267_col_12.log",
+      "diff_path": "diff/src__git__project.rs_line_267_col_12.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.7530939,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.3850079,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:272:67: replace && with || in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 272,
+              "column": 67
+            },
+            "end": {
+              "line": 272,
+              "column": 69
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_272_col_67.log",
+      "diff_path": "diff/src__git__project.rs_line_272_col_67.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.3869425,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.4111288,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:272:46: delete ! in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 272,
+              "column": 46
+            },
+            "end": {
+              "line": 272,
+              "column": 47
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_272_col_46.log",
+      "diff_path": "diff/src__git__project.rs_line_272_col_46.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.729115,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.3819926,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:272:73: replace != with == in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 272,
+              "column": 73
+            },
+            "end": {
+              "line": 272,
+              "column": 75
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_272_col_73.log",
+      "diff_path": "diff/src__git__project.rs_line_272_col_73.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 12.8208274,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.643372,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:275:48: replace != with == in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 275,
+              "column": 48
+            },
+            "end": {
+              "line": 275,
+              "column": 50
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_275_col_48.log",
+      "diff_path": "diff/src__git__project.rs_line_275_col_48.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 13.3535491,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.3921776,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:278:51: replace != with == in parse_steps",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "parse_steps",
+            "return_type": "-> Vec<ProjStep>",
+            "span": {
+              "start": {
+                "line": 225,
+                "column": 1
+              },
+              "end": {
+                "line": 284,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 278,
+              "column": 51
+            },
+            "end": {
+              "line": 278,
+              "column": 53
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_278_col_51.log",
+      "diff_path": "diff/src__git__project.rs_line_278_col_51.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 11.8854637,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 23.3372633,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:298:5: replace branch_snapshot -> Option<BranchSnapshotData> with None",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "branch_snapshot",
+            "return_type": "-> Option<BranchSnapshotData>",
+            "span": {
+              "start": {
+                "line": 296,
+                "column": 1
+              },
+              "end": {
+                "line": 300,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 298,
+              "column": 5
+            },
+            "end": {
+              "line": 299,
+              "column": 44
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_298_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_298_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 24.5586881,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 21.2510098,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:298:5: replace branch_snapshot -> Option<BranchSnapshotData> with Some(Default::default())",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "branch_snapshot",
+            "return_type": "-> Option<BranchSnapshotData>",
+            "span": {
+              "start": {
+                "line": 296,
+                "column": 1
+              },
+              "end": {
+                "line": 300,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 298,
+              "column": 5
+            },
+            "end": {
+              "line": 299,
+              "column": 44
+            }
+          },
+          "replacement": "Some(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__git__project.rs_line_298_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_298_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.2360802,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:304:5: replace commit_snapshot -> Option<BranchSnapshotData> with None",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "commit_snapshot",
+            "return_type": "-> Option<BranchSnapshotData>",
+            "span": {
+              "start": {
+                "line": 302,
+                "column": 1
+              },
+              "end": {
+                "line": 308,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 304,
+              "column": 5
+            },
+            "end": {
+              "line": 307,
+              "column": 44
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_304_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_304_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 20.1702639,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.2845978,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:304:5: replace commit_snapshot -> Option<BranchSnapshotData> with Some(Default::default())",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "commit_snapshot",
+            "return_type": "-> Option<BranchSnapshotData>",
+            "span": {
+              "start": {
+                "line": 302,
+                "column": 1
+              },
+              "end": {
+                "line": 308,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 304,
+              "column": 5
+            },
+            "end": {
+              "line": 307,
+              "column": 44
+            }
+          },
+          "replacement": "Some(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__git__project.rs_line_304_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_304_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.2888895,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:311:5: replace snapshot_from_data -> Option<BranchSnapshotData> with None",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "snapshot_from_data",
+            "return_type": "-> Option<BranchSnapshotData>",
+            "span": {
+              "start": {
+                "line": 310,
+                "column": 1
+              },
+              "end": {
+                "line": 321,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 311,
+              "column": 5
+            },
+            "end": {
+              "line": 320,
+              "column": 7
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_311_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_311_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 21.297947399999998,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 13.9424234,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:311:5: replace snapshot_from_data -> Option<BranchSnapshotData> with Some(Default::default())",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "snapshot_from_data",
+            "return_type": "-> Option<BranchSnapshotData>",
+            "span": {
+              "start": {
+                "line": 310,
+                "column": 1
+              },
+              "end": {
+                "line": 321,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 311,
+              "column": 5
+            },
+            "end": {
+              "line": 320,
+              "column": 7
+            }
+          },
+          "replacement": "Some(Default::default())",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "Unviable",
+      "log_path": "log/src__git__project.rs_line_311_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_311_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.130941,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(None)",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "project_pushed_commit",
+            "return_type": "-> Result<Option<i32>, sqlx::Error>",
+            "span": {
+              "start": {
+                "line": 323,
+                "column": 1
+              },
+              "end": {
+                "line": 389,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 339,
+              "column": 5
+            },
+            "end": {
+              "line": 388,
+              "column": 18
+            }
+          },
+          "replacement": "Ok(None)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_339_col_5.log",
+      "diff_path": "diff/src__git__project.rs_line_339_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 25.3630994,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.6988131,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(0))",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "project_pushed_commit",
+            "return_type": "-> Result<Option<i32>, sqlx::Error>",
+            "span": {
+              "start": {
+                "line": 323,
+                "column": 1
+              },
+              "end": {
+                "line": 389,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 339,
+              "column": 5
+            },
+            "end": {
+              "line": 388,
+              "column": 18
+            }
+          },
+          "replacement": "Ok(Some(0))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_339_col_5_001.log",
+      "diff_path": "diff/src__git__project.rs_line_339_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 16.9932391,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.2817265,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(1))",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "project_pushed_commit",
+            "return_type": "-> Result<Option<i32>, sqlx::Error>",
+            "span": {
+              "start": {
+                "line": 323,
+                "column": 1
+              },
+              "end": {
+                "line": 389,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 339,
+              "column": 5
+            },
+            "end": {
+              "line": 388,
+              "column": 18
+            }
+          },
+          "replacement": "Ok(Some(1))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_339_col_5_002.log",
+      "diff_path": "diff/src__git__project.rs_line_339_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 23.7293946,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 20.9429907,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "src/git/project.rs:339:5: replace project_pushed_commit -> Result<Option<i32>, sqlx::Error> with Ok(Some(-1))",
+          "package": "setfork-core",
+          "file": "src/git/project.rs",
+          "function": {
+            "function_name": "project_pushed_commit",
+            "return_type": "-> Result<Option<i32>, sqlx::Error>",
+            "span": {
+              "start": {
+                "line": 323,
+                "column": 1
+              },
+              "end": {
+                "line": 389,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 339,
+              "column": 5
+            },
+            "end": {
+              "line": 388,
+              "column": 18
+            }
+          },
+          "replacement": "Ok(Some(-1))",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "MissedMutant",
+      "log_path": "log/src__git__project.rs_line_339_col_5_003.log",
+      "diff_path": "diff/src__git__project.rs_line_339_col_5_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 16.9527308,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 14.5916955,
+          "process_status": "Success",
+          "argv": [
+            "C:\\Users\\Mike\\.rustup\\toolchains\\stable-x86_64-pc-windows-msvc\\bin\\cargo.exe",
+            "test",
+            "--verbose",
+            "--package=setfork-core@0.1.0"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 104,
+  "missed": 38,
+  "caught": 50,
+  "timeout": 2,
+  "unviable": 14,
+  "success": 0,
+  "start_time": "2026-07-20T12:31:58.2584336Z",
+  "end_time": "2026-07-20T13:17:57.6837898Z",
+  "cargo_mutants_version": "27.1.0"
+}

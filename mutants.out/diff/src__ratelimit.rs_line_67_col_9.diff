@@ -1,0 +1,21 @@
+--- src/ratelimit.rs
++++ replace <impl Layer<S> for RateLimitLayer>::layer -> Self::Service with Default::default()
+@@ -59,17 +59,17 @@
+     fn with(rpm: u32, rpm_heavy: u32, expected_auth: Option<String>) -> Self {
+         Self { inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }) }
+     }
+ }
+ 
+ impl<S> Layer<S> for RateLimitLayer {
+     type Service = RateLimited<S>;
+     fn layer(&self, service: S) -> Self::Service {
+-        RateLimited { inner: service, state: self.inner.clone() }
++        Default::default() /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ #[derive(Clone)]
+ pub struct RateLimited<S> {
+     inner: S,
+     state: Arc<State>,
+ }

@@ -1,0 +1,21 @@
+--- src/git/project.rs
++++ replace read_tip -> Option<TipData> with Some(Default::default())
+@@ -61,17 +61,17 @@
+     steps: Option<Vec<RawStep>>,
+ }
+ 
+ /// Owned-снимок tip'а: (hex sha, содержимое list.json, subject коммита,
+ /// steps/NN-*.md по 1-based номеру NN). git2-объекты не Send — извлекаем всё до await.
+ type TipData = (String, Vec<u8>, String, HashMap<i32, String>);
+ 
+ fn read_tip(bare: &Path) -> Option<TipData> {
+-    read_ref_tip(bare, MAIN_REF)
++    Some(Default::default()) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// То же для произвольного ref (ветки) — база просмотра списка «на ветке».
+ pub fn read_ref_tip(bare: &Path, refname: &str) -> Option<TipData> {
+     let repo = git2::Repository::open_bare(bare).ok()?;
+     let tip = repo.refname_to_id(refname).ok()?;
+     read_commit_data(&repo, tip)
+ }
