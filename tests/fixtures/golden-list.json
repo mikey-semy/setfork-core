@@ -1,0 +1,49 @@
+{
+  "title": "Golden List",
+  "desc": "Fixed dataset for golden tests",
+  "tags": [
+    "redis",
+    "cache"
+  ],
+  "ordered": true,
+  "version": 2,
+  "steps": [
+    {
+      "n": 1,
+      "title": "Install Redis",
+      "desc": "Grab the binary",
+      "command": "apt install redis",
+      "level": "required",
+      "why": "speed",
+      "section": "Setup",
+      "subtasks": [],
+      "refs": []
+    },
+    {
+      "n": 2,
+      "type": "text",
+      "content": {
+        "md": "Intro **context**"
+      },
+      "title": "",
+      "desc": "",
+      "command": "",
+      "level": "required",
+      "why": "",
+      "section": "",
+      "subtasks": [],
+      "refs": []
+    },
+    {
+      "n": 3,
+      "title": "Configure",
+      "desc": "",
+      "command": "redis-cli config set",
+      "level": "recommended",
+      "why": "",
+      "section": "Setup",
+      "subtasks": [],
+      "refs": []
+    }
+  ]
+}

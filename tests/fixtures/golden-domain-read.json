@@ -1,0 +1,125 @@
+{
+  "found": true,
+  "list": {
+    "id": "11111111-2222-3333-4444-555555555555",
+    "ownerId": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    "slug": "golden-list",
+    "title": {
+      "en": "Golden List"
+    },
+    "desc": {
+      "en": "Fixed dataset for golden tests"
+    },
+    "tags": [
+      "redis",
+      "cache"
+    ],
+    "ordered": true,
+    "status": "published",
+    "visibility": "public",
+    "moderation": "active",
+    "moderationReason": null,
+    "verified": false,
+    "pinned": false,
+    "origin": "authored",
+    "forkedFromId": null,
+    "currentVersion": 2,
+    "starsCount": 0,
+    "forksCount": 0,
+    "runsCount": 0,
+    "repositoryId": "11111111-2222-3333-4444-555555555555",
+    "createdAtMs": 1767323045000,
+    "updatedAtMs": 1767413106000
+  },
+  "versions": [
+    {
+      "id": "20000000-0000-0000-0000-000000000002",
+      "listId": "11111111-2222-3333-4444-555555555555",
+      "version": 2,
+      "note": "add config",
+      "commitSha": null,
+      "createdAtMs": 1767349230000
+    },
+    {
+      "id": "10000000-0000-0000-0000-000000000001",
+      "listId": "11111111-2222-3333-4444-555555555555",
+      "version": 1,
+      "note": "initial",
+      "commitSha": null,
+      "createdAtMs": 1767323045000
+    }
+  ],
+  "current": {
+    "version": {
+      "id": "20000000-0000-0000-0000-000000000002",
+      "listId": "11111111-2222-3333-4444-555555555555",
+      "version": 2,
+      "note": "add config",
+      "commitSha": null,
+      "createdAtMs": 1767349230000
+    },
+    "steps": [
+      {
+        "id": "30000000-0000-0000-0000-000000000002",
+        "versionId": "20000000-0000-0000-0000-000000000002",
+        "n": 1,
+        "title": {
+          "en": "Install Redis"
+        },
+        "desc": {
+          "en": "Grab the binary"
+        },
+        "command": "apt install redis",
+        "level": "required",
+        "why": {
+          "en": "speed"
+        },
+        "section": {
+          "en": "Setup"
+        },
+        "subtasks": [],
+        "refs": [],
+        "imageRef": null
+      },
+      {
+        "id": "30000000-0000-0000-0000-000000000003",
+        "versionId": "20000000-0000-0000-0000-000000000002",
+        "n": 2,
+        "title": {},
+        "desc": {},
+        "command": "",
+        "level": "required",
+        "why": {},
+        "section": {},
+        "subtasks": [],
+        "refs": [],
+        "imageRef": null
+      },
+      {
+        "id": "30000000-0000-0000-0000-000000000004",
+        "versionId": "20000000-0000-0000-0000-000000000002",
+        "n": 3,
+        "title": {
+          "en": "Configure"
+        },
+        "desc": {},
+        "command": "redis-cli config set",
+        "level": "recommended",
+        "why": {},
+        "section": {
+          "en": "Setup"
+        },
+        "subtasks": [],
+        "refs": [],
+        "imageRef": null
+      }
+    ]
+  },
+  "contributors": [
+    {
+      "handle": "golden",
+      "avatarRef": null,
+      "accepted": 0
+    }
+  ]
+}
