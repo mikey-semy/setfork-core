@@ -6,11 +6,16 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use super::util::internal;
-use crate::git::bundle::VersionData;
-use crate::git::{bundle, project, repo, smart_http, MAIN_REF};
-use crate::pb::git_core_server::GitCore;
-use crate::pb::{Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse};
 use crate::db;
+use crate::git::bundle::VersionData;
+use crate::git::{MAIN_REF, bundle, project, repo, smart_http};
+use crate::pb::git_core_server::GitCore;
+use crate::pb::{
+    Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
+    CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest,
+    MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest,
+    ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse,
+};
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
 fn valid_branch(name: &str) -> bool {
@@ -32,9 +37,7 @@ impl GitCoreSvc {
             .await
             .map_err(internal)?
             .ok_or_else(|| Status::not_found("list not found"))?;
-        db::load_bundle_data(&self.pool, id)
-            .await
-            .map_err(internal)
+        db::load_bundle_data(&self.pool, id).await.map_err(internal)
     }
 
     // Общая реализация bundle: загрузка версий → материализация → git bundle.
@@ -78,11 +81,7 @@ fn merge_sig() -> Result<git2::Signature<'static>, Status> {
 
 /// Текущий oid main (или None, если ветки ещё нет) — для проверки «push сдвинул main».
 fn main_oid(bare: &std::path::Path) -> Option<String> {
-    git2::Repository::open_bare(bare)
-        .ok()?
-        .refname_to_id(MAIN_REF)
-        .ok()
-        .map(|o| o.to_string())
+    git2::Repository::open_bare(bare).ok()?.refname_to_id(MAIN_REF).ok().map(|o| o.to_string())
 }
 
 // Пустая proto-строка → None (proto3 не отличает '' от отсутствия поля).
@@ -112,7 +111,11 @@ fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
                 why: st.why.clone(),
                 section: st.section.clone(),
                 subtasks: st.subtasks.clone(),
-                refs: st.refs.iter().map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() }).collect(),
+                refs: st
+                    .refs
+                    .iter()
+                    .map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() })
+                    .collect(),
                 r#type: st.block_type.clone(),
                 content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
             })
@@ -122,34 +125,45 @@ fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
 
 #[tonic::async_trait]
 impl GitCore for GitCoreSvc {
-    async fn info_refs_upload_pack(&self, req: Request<InfoRefsRequest>) -> Result<Response<BytesResponse>, Status> {
+    async fn info_refs_upload_pack(
+        &self,
+        req: Request<InfoRefsRequest>,
+    ) -> Result<Response<BytesResponse>, Status> {
         let InfoRefsRequest { repo, git_protocol } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
-        let data = tokio::task::spawn_blocking(move || smart_http::upload_pack_advertise(&bare, opt(&git_protocol)))
-            .await
-            .map_err(internal)?
-            .map_err(internal)?;
+        let data =
+            tokio::task::spawn_blocking(move || smart_http::upload_pack_advertise(&bare, opt(&git_protocol)))
+                .await
+                .map_err(internal)?
+                .map_err(internal)?;
         Ok(Response::new(BytesResponse { data }))
     }
-    async fn info_refs_receive_pack(&self, req: Request<InfoRefsRequest>) -> Result<Response<BytesResponse>, Status> {
+    async fn info_refs_receive_pack(
+        &self,
+        req: Request<InfoRefsRequest>,
+    ) -> Result<Response<BytesResponse>, Status> {
         let InfoRefsRequest { repo, git_protocol } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
-        let data = tokio::task::spawn_blocking(move || smart_http::receive_pack_advertise(&bare, opt(&git_protocol)))
-            .await
-            .map_err(internal)?
-            .map_err(internal)?;
+        let data = tokio::task::spawn_blocking(move || {
+            smart_http::receive_pack_advertise(&bare, opt(&git_protocol))
+        })
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
         Ok(Response::new(BytesResponse { data }))
     }
     async fn upload_pack(&self, req: Request<PostRequest>) -> Result<Response<BytesResponse>, Status> {
         let PostRequest { repo, body, git_protocol } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
-        let data = tokio::task::spawn_blocking(move || smart_http::upload_pack_rpc(&bare, &body, opt(&git_protocol)))
-            .await
-            .map_err(internal)?
-            .map_err(internal)?;
+        let data = tokio::task::spawn_blocking(move || {
+            smart_http::upload_pack_rpc(&bare, &body, opt(&git_protocol))
+        })
+        .await
+        .map_err(internal)?
+        .map_err(internal)?;
         Ok(Response::new(BytesResponse { data }))
     }
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
@@ -158,9 +172,7 @@ impl GitCore for GitCoreSvc {
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Критическая секция: receive-pack + проекция под одним локом репо
         // (ленивый append не вклинивается между приёмом и проекцией).
-        let _guard = repo::repo_guard(&self.pool, id)
-            .await
-            .map_err(internal)?;
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(internal)?;
         let bare_recv = bare.clone();
         // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
@@ -262,7 +274,10 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(to_snapshot_pb(sn)))
     }
 
-    async fn create_branch(&self, req: Request<CreateBranchRequest>) -> Result<Response<BranchOpResponse>, Status> {
+    async fn create_branch(
+        &self,
+        req: Request<CreateBranchRequest>,
+    ) -> Result<Response<BranchOpResponse>, Status> {
         let CreateBranchRequest { repo, name, from } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         let from = if from.is_empty() { "main".to_string() } else { from };
@@ -287,7 +302,10 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BranchOpResponse { tip_sha: tip }))
     }
 
-    async fn delete_branch(&self, req: Request<DeleteBranchRequest>) -> Result<Response<BranchOpResponse>, Status> {
+    async fn delete_branch(
+        &self,
+        req: Request<DeleteBranchRequest>,
+    ) -> Result<Response<BranchOpResponse>, Status> {
         let DeleteBranchRequest { repo, name } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&name) {
@@ -307,7 +325,10 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BranchOpResponse { tip_sha: String::new() }))
     }
 
-    async fn merge_branch(&self, req: Request<MergeBranchRequest>) -> Result<Response<MergeBranchResponse>, Status> {
+    async fn merge_branch(
+        &self,
+        req: Request<MergeBranchRequest>,
+    ) -> Result<Response<MergeBranchResponse>, Status> {
         let MergeBranchRequest { repo, name } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&name) || name == "main" {
@@ -315,19 +336,13 @@ impl GitCore for GitCoreSvc {
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Merge двигает main → критическая секция с проекцией (как receive_pack).
-        let _guard = repo::repo_guard(&self.pool, id)
-            .await
-            .map_err(internal)?;
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(internal)?;
         let (tip, ff) = with_repo(bare.clone(), move |repo| {
             let branch_tip = repo
                 .refname_to_id(&format!("refs/heads/{name}"))
                 .map_err(|_| Status::not_found("branch not found"))?;
-            let main_tip = repo
-                .refname_to_id(MAIN_REF)
-                .map_err(internal)?;
-            let (ahead, _behind) = repo
-                .graph_ahead_behind(branch_tip, main_tip)
-                .map_err(internal)?;
+            let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
+            let (ahead, _behind) = repo.graph_ahead_behind(branch_tip, main_tip).map_err(internal)?;
             if ahead == 0 {
                 return Err(Status::failed_precondition("nothing-to-merge"));
             }
@@ -340,9 +355,7 @@ impl GitCore for GitCoreSvc {
             // Расхождение → merge-commit; конфликт индекса = failed_precondition.
             let ours = repo.find_commit(main_tip).map_err(internal)?;
             let theirs = repo.find_commit(branch_tip).map_err(internal)?;
-            let mut idx = repo
-                .merge_commits(&ours, &theirs, None)
-                .map_err(internal)?;
+            let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
             if idx.has_conflicts() {
                 return Err(Status::failed_precondition("conflict"));
             }
@@ -350,9 +363,8 @@ impl GitCore for GitCoreSvc {
             let tree = repo.find_tree(tree_id).map_err(internal)?;
             let sig = merge_sig()?;
             let msg = format!("Merge branch '{name}'");
-            let merged = repo
-                .commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs])
-                .map_err(internal)?;
+            let merged =
+                repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
             Ok((merged.to_string(), false))
         })
         .await?;
@@ -372,7 +384,10 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: ff }))
     }
 
-    async fn get_merge_state(&self, req: Request<MergeStateRequest>) -> Result<Response<MergeStateResponse>, Status> {
+    async fn get_merge_state(
+        &self,
+        req: Request<MergeStateRequest>,
+    ) -> Result<Response<MergeStateResponse>, Status> {
         let MergeStateRequest { repo, branch } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) || branch == "main" {
@@ -412,7 +427,10 @@ impl GitCore for GitCoreSvc {
         }))
     }
 
-    async fn merge_resolved(&self, req: Request<MergeResolvedRequest>) -> Result<Response<MergeBranchResponse>, Status> {
+    async fn merge_resolved(
+        &self,
+        req: Request<MergeResolvedRequest>,
+    ) -> Result<Response<MergeBranchResponse>, Status> {
         let MergeResolvedRequest { repo, branch, list_json } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) || branch == "main" {
@@ -423,16 +441,12 @@ impl GitCore for GitCoreSvc {
             return Err(Status::invalid_argument("list_json is not a JSON object"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
-        let _guard = repo::repo_guard(&self.pool, id)
-            .await
-            .map_err(internal)?;
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(internal)?;
         let tip = with_repo(bare.clone(), move |repo| {
             let branch_tip = repo
                 .refname_to_id(&format!("refs/heads/{branch}"))
                 .map_err(|_| Status::not_found("branch not found"))?;
-            let main_tip = repo
-                .refname_to_id(MAIN_REF)
-                .map_err(internal)?;
+            let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
             if main_tip == branch_tip {
                 return Err(Status::failed_precondition("nothing-to-merge"));
             }
@@ -440,9 +454,7 @@ impl GitCore for GitCoreSvc {
             let ours = repo.find_commit(main_tip).map_err(internal)?;
             let theirs = repo.find_commit(branch_tip).map_err(internal)?;
             let blob = repo.blob(&list_json).map_err(internal)?;
-            let mut tb = repo
-                .treebuilder(Some(&ours.tree().map_err(internal)?))
-                .map_err(internal)?;
+            let mut tb = repo.treebuilder(Some(&ours.tree().map_err(internal)?)).map_err(internal)?;
             tb.insert("list.json", blob, 0o100644).map_err(internal)?;
             if tb.get("steps").map_err(internal)?.is_some() {
                 tb.remove("steps").map_err(internal)?;
@@ -451,9 +463,8 @@ impl GitCore for GitCoreSvc {
             let tree = repo.find_tree(tree_id).map_err(internal)?;
             let sig = merge_sig()?;
             let msg = format!("Merge branch '{branch}' (resolved)");
-            let merged = repo
-                .commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs])
-                .map_err(internal)?;
+            let merged =
+                repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
             Ok(merged.to_string())
         })
         .await?;

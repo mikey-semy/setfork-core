@@ -56,10 +56,7 @@ pub struct RepoGuard {
 pub async fn repo_guard(pool: &PgPool, id: Uuid) -> Result<RepoGuard, sqlx::Error> {
     let proc = repo_lock(id).await; // сначала выстраиваемся внутри процесса
     let mut tx = pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1)")
-        .bind(advisory_key(id))
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(advisory_key(id)).execute(&mut *tx).await?;
     Ok(RepoGuard { _proc: proc, _tx: tx })
 }
 
@@ -70,7 +67,11 @@ pub(crate) fn join_err<E: std::fmt::Display>(e: E) -> sqlx::Error {
 /// Гарантирует персистентный bare-репозиторий, синхронный с историей версий (порт store.ts ensureRepo).
 /// git-объекты — источник правды (пуш сохраняется), веб-версии дописываются лениво поверх.
 /// Возвращает (путь, template_id) или None (списка нет).
-pub async fn ensure_repo(pool: &PgPool, owner: &str, slug: &str) -> Result<Option<(PathBuf, Uuid)>, sqlx::Error> {
+pub async fn ensure_repo(
+    pool: &PgPool,
+    owner: &str,
+    slug: &str,
+) -> Result<Option<(PathBuf, Uuid)>, sqlx::Error> {
     let Some((id, current_version)) = db::resolve_list(pool, owner, slug).await? else {
         return Ok(None);
     };
@@ -99,15 +100,11 @@ pub async fn ensure_repo(pool: &PgPool, owner: &str, slug: &str) -> Result<Optio
         .map_err(join_err)?
         .map_err(join_err)?;
     let bare_tag = bare.clone();
-    let have = tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag))
-        .await
-        .map_err(join_err)?;
+    let have =
+        tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag)).await.map_err(join_err)?;
     if current_version > have {
-        let versions: Vec<_> = db::load_bundle_data(pool, id)
-            .await?
-            .into_iter()
-            .filter(|v| v.version > have)
-            .collect();
+        let versions: Vec<_> =
+            db::load_bundle_data(pool, id).await?.into_iter().filter(|v| v.version > have).collect();
         if !versions.is_empty() {
             let bare2 = bare.clone();
             tokio::task::spawn_blocking(move || bundle::append_versions(&bare2, &versions))
@@ -124,10 +121,8 @@ pub async fn bundle_repo(pool: &PgPool, owner: &str, slug: &str) -> Result<Optio
     let Some((bare, _id)) = ensure_repo(pool, owner, slug).await? else {
         return Ok(None);
     };
-    let data = tokio::task::spawn_blocking(move || bundle_all(&bare))
-        .await
-        .map_err(join_err)?
-        .map_err(join_err)?;
+    let data =
+        tokio::task::spawn_blocking(move || bundle_all(&bare)).await.map_err(join_err)?.map_err(join_err)?;
     Ok(Some(data))
 }
 
@@ -139,9 +134,7 @@ fn bundle_all(bare: &Path) -> std::io::Result<Vec<u8>> {
         .args(["-C", &bare_s, "bundle", "create", &out_s, "--all"])
         .output()?;
     if !status.status.success() {
-        return Err(std::io::Error::other(
-            String::from_utf8_lossy(&status.stderr).to_string(),
-        ));
+        return Err(std::io::Error::other(String::from_utf8_lossy(&status.stderr).to_string()));
     }
     let data = std::fs::read(&out);
     let _ = std::fs::remove_file(&out);

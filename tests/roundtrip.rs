@@ -60,11 +60,7 @@ fn git(cwd: &Path, args: &[&str]) -> String {
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("spawn git {args:?}: {e}"));
-    assert!(
-        out.status.success(),
-        "git {args:?} failed:\n{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "git {args:?} failed:\n{}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -77,12 +73,7 @@ fn git_as(cwd: &Path, args: &[&str]) -> String {
 
 /// Возвращает true, если git завершился с кодом 0 (для проверок-предикатов).
 fn git_ok(cwd: &Path, args: &[&str]) -> bool {
-    Command::new("git")
-        .current_dir(cwd)
-        .args(args)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    Command::new("git").current_dir(cwd).args(args).output().map(|o| o.status.success()).unwrap_or(false)
 }
 
 #[test]
@@ -103,10 +94,7 @@ fn clone_push_pull_roundtrip() {
     assert!(up.contains("refs/heads/main"), "advertises main");
     assert!(up.contains("refs/tags/v1"), "advertises v1 tag");
     let rp = smart_http::receive_pack_advertise(&bare, None).expect("receive advertise");
-    assert!(
-        String::from_utf8_lossy(&rp).contains("# service=git-receive-pack"),
-        "receive service header"
-    );
+    assert!(String::from_utf8_lossy(&rp).contains("# service=git-receive-pack"), "receive service header");
 
     // 3. Клонируем как обычный git-клиент.
     git(&root.0, &["clone", bare.to_str().unwrap(), work.to_str().unwrap()]);

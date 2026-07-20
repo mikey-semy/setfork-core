@@ -1,12 +1,12 @@
 //! Точка входа: конфиг/env, CLI-режимы golden-сверки, wiring gRPC-сервисов.
 //! Вся логика — в services/ (транспорт по доменам), git/ (git-подсистема), db.
-use tonic::{transport::Server, Request, Status};
+use tonic::{Request, Status, transport::Server};
 
 use setfork_core::{db, git, pb_domain, ratelimit, services, telemetry};
 
 use git::{bundle, bundle::VersionData, smart_http};
-use setfork_core::pb::git_core_server::GitCoreServer;
 use services::git_core::GitCoreSvc;
+use setfork_core::pb::git_core_server::GitCoreServer;
 
 /// Сериализованные proto-дескрипторы (build.rs) — для gRPC server reflection.
 const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/descriptor.bin"));
@@ -66,7 +66,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Golden-сверка READ-портов: канонический JSON (см. services::list::golden_json)
             //   domain-read <owner> <slug> <out.json>
             "domain-read" => {
-                let v = services::list::golden_json(&pool, &cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
+                let v =
+                    services::list::golden_json(&pool, &cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
                 std::fs::write(cli(4), serde_json::to_string_pretty(&v)?)?;
                 println!("wrote domain-read json → {}", cli(4));
                 return Ok(());
@@ -94,7 +95,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match git::project::project_pushed_commit(&pool, id, &bare).await? {
                     Some(v) => println!("reproject {owner}/{slug}: создана версия v{v}"),
-                    None => println!("reproject {owner}/{slug}: проецировать нечего (нет валидного list.json/steps)"),
+                    None => println!(
+                        "reproject {owner}/{slug}: проецировать нечего (нет валидного list.json/steps)"
+                    ),
                 }
                 return Ok(());
             }
@@ -119,9 +122,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Метрики Prometheus на отдельном HTTP-порту (/metrics). '0'/'off' — выключить.
     let maddr = std::env::var("SETFORK_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9464".to_string());
     if maddr != "0" && !maddr.eq_ignore_ascii_case("off") {
-        let sock: std::net::SocketAddr = maddr
-            .parse()
-            .map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr}' некорректен ({e})"))?;
+        let sock: std::net::SocketAddr =
+            maddr.parse().map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr}' некорректен ({e})"))?;
         metrics_exporter_prometheus::PrometheusBuilder::new()
             .with_http_listener(sock)
             .set_buckets(&[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0])?
@@ -215,19 +217,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         std::process::exit(1);
     }
-    let token: Option<&'static str> =
-        raw_token.map(|t| &*format!("Bearer {t}").leak());
+    let token: Option<&'static str> = raw_token.map(|t| &*format!("Bearer {t}").leak());
     match token {
         Some(_) => tracing::info!("канал защищён Bearer-токеном"),
         None => tracing::warn!("SETFORK_ALLOW_INSECURE=1 — канал БЕЗ авторизации (только локальный dev)"),
     }
     let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
         let got = req.metadata().get("authorization").and_then(|v| v.to_str().ok());
-        if auth_ok(token, got) {
-            Ok(req)
-        } else {
-            Err(Status::unauthenticated("invalid core token"))
-        }
+        if auth_ok(token, got) { Ok(req) } else { Err(Status::unauthenticated("invalid core token")) }
     };
 
     Server::builder()

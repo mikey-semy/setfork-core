@@ -8,8 +8,9 @@ use super::util::{internal, loc_json, loc_map, parse_id, refs_json};
 use crate::blocks::is_step_type;
 use crate::pb_domain::collab_write_server::CollabWrite;
 use crate::pb_domain::{
-    AddIssueCommentRequest, AddSuggestionCommentRequest, BoolResponse, CreateSuggestionRequest, Issue, IssueComment,
-    LocaleText, NewStep, OpenIssueRequest, SetIssueStatusRequest, StepRef, Suggestion, SuggestionComment,
+    AddIssueCommentRequest, AddSuggestionCommentRequest, BoolResponse, CreateSuggestionRequest, Issue,
+    IssueComment, LocaleText, NewStep, OpenIssueRequest, SetIssueStatusRequest, StepRef, Suggestion,
+    SuggestionComment,
 };
 
 // LocaleText-обёртка из jsonb-объекта {lang: str}; не-объект → None.
@@ -102,7 +103,8 @@ impl CollabWrite for CollabWriteSvc {
         use sqlx::Row;
         let OpenIssueRequest { list_id, author_id, title, body, labels } = req.into_inner();
         let (tid, uid) = (parse_id(&list_id)?, parse_id(&author_id)?);
-        let labels_json = serde_json::Value::Array(labels.iter().map(|l| serde_json::Value::String(l.clone())).collect());
+        let labels_json =
+            serde_json::Value::Array(labels.iter().map(|l| serde_json::Value::String(l.clone())).collect());
         let r = sqlx::query(
             "insert into issues (template_id, author_id, title, body, labels, number) \
              values ($1, $2, $3, $4, $5::jsonb, \
@@ -134,7 +136,10 @@ impl CollabWrite for CollabWriteSvc {
         }))
     }
 
-    async fn add_issue_comment(&self, req: Request<AddIssueCommentRequest>) -> Result<Response<IssueComment>, Status> {
+    async fn add_issue_comment(
+        &self,
+        req: Request<AddIssueCommentRequest>,
+    ) -> Result<Response<IssueComment>, Status> {
         use sqlx::Row;
         let AddIssueCommentRequest { issue_id, author_id, body } = req.into_inner();
         let (iid, uid) = (parse_id(&issue_id)?, parse_id(&author_id)?);
@@ -157,7 +162,10 @@ impl CollabWrite for CollabWriteSvc {
         }))
     }
 
-    async fn set_issue_status(&self, req: Request<SetIssueStatusRequest>) -> Result<Response<BoolResponse>, Status> {
+    async fn set_issue_status(
+        &self,
+        req: Request<SetIssueStatusRequest>,
+    ) -> Result<Response<BoolResponse>, Status> {
         let SetIssueStatusRequest { issue_id, status } = req.into_inner();
         let iid = parse_id(&issue_id)?;
         sqlx::query(
@@ -173,7 +181,10 @@ impl CollabWrite for CollabWriteSvc {
         Ok(Response::new(BoolResponse { value: true }))
     }
 
-    async fn create_suggestion(&self, req: Request<CreateSuggestionRequest>) -> Result<Response<Suggestion>, Status> {
+    async fn create_suggestion(
+        &self,
+        req: Request<CreateSuggestionRequest>,
+    ) -> Result<Response<Suggestion>, Status> {
         use sqlx::Row;
         let CreateSuggestionRequest { list_id, author_id, note, steps } = req.into_inner();
         let (tid, uid) = (parse_id(&list_id)?, parse_id(&author_id)?);
@@ -192,7 +203,8 @@ impl CollabWrite for CollabWriteSvc {
         .await
         .map_err(internal)?;
         let items_back: serde_json::Value = r.get("items");
-        let out_steps = items_back.as_array().map(|a| a.iter().map(json_to_step).collect()).unwrap_or_default();
+        let out_steps =
+            items_back.as_array().map(|a| a.iter().map(json_to_step).collect()).unwrap_or_default();
         Ok(Response::new(Suggestion {
             id: r.get::<Uuid, _>("id").to_string(),
             list_id,
@@ -206,7 +218,10 @@ impl CollabWrite for CollabWriteSvc {
         }))
     }
 
-    async fn add_suggestion_comment(&self, req: Request<AddSuggestionCommentRequest>) -> Result<Response<SuggestionComment>, Status> {
+    async fn add_suggestion_comment(
+        &self,
+        req: Request<AddSuggestionCommentRequest>,
+    ) -> Result<Response<SuggestionComment>, Status> {
         use sqlx::Row;
         let AddSuggestionCommentRequest { suggestion_id, author_id, body } = req.into_inner();
         let (sid, uid) = (parse_id(&suggestion_id)?, parse_id(&author_id)?);

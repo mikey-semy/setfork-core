@@ -143,11 +143,12 @@ fn readme(v: &VersionData) -> String {
             match s.block_type.as_deref() {
                 Some("text") => {
                     if let Some(md) = s.content.get("md").and_then(|v| v.as_str())
-                        && !md.is_empty() {
-                            lines.push(String::new());
-                            lines.push(md.to_string());
-                            lines.push(String::new());
-                        }
+                        && !md.is_empty()
+                    {
+                        lines.push(String::new());
+                        lines.push(md.to_string());
+                        lines.push(String::new());
+                    }
                 }
                 Some("image") => {
                     let r = s.content.get("ref").and_then(|v| v.as_str()).unwrap_or("");
@@ -224,20 +225,13 @@ fn slugify_step(s: &str) -> String {
         }
     }
     let sliced: String = out.trim_matches('-').chars().take(40).collect();
-    if sliced.is_empty() {
-        "step".to_string()
-    } else {
-        sliced
-    }
+    if sliced.is_empty() { "step".to_string() } else { sliced }
 }
 
 /// steps/NN-slug.md — точный порт serialize.ts stepFile().
 fn step_file(s: &SerStep, width: usize) -> (String, String) {
-    let mut front: Vec<String> = vec![
-        "---".to_string(),
-        format!("title: {}", json_str(&s.title)),
-        format!("level: {}", s.level),
-    ];
+    let mut front: Vec<String> =
+        vec!["---".to_string(), format!("title: {}", json_str(&s.title)), format!("level: {}", s.level)];
     if !s.section.is_empty() {
         front.push(format!("section: {}", json_str(&s.section)));
     }
@@ -278,10 +272,7 @@ fn step_file(s: &SerStep, width: usize) -> (String, String) {
 /// (то, что кладётся в дерево коммита vN).
 pub fn version_files(v: &VersionData) -> Vec<(String, String)> {
     let width = std::cmp::max(2, v.steps.len().to_string().len());
-    let mut files = vec![
-        ("README.md".to_string(), readme(v)),
-        ("list.json".to_string(), list_json(v)),
-    ];
+    let mut files = vec![("README.md".to_string(), readme(v)), ("list.json".to_string(), list_json(v))];
     // .md пишем ТОЛЬКО шаг-блокам; text/image живут в README + list.json.
     for s in &v.steps {
         if is_step_block(s) {
@@ -354,7 +345,11 @@ fn commit_version(repo: &Repository, parent: Option<Oid>, v: &VersionData) -> Re
 }
 
 // Строит историю версий: коммиты + теги vN + refs/heads/main + HEAD→main. Возвращает tip.
-fn build_history(repo: &Repository, versions: &[VersionData], mut parent: Option<Oid>) -> Result<Option<Oid>, git2::Error> {
+fn build_history(
+    repo: &Repository,
+    versions: &[VersionData],
+    mut parent: Option<Oid>,
+) -> Result<Option<Oid>, git2::Error> {
     for v in versions {
         let oid = commit_version(repo, parent, v)?;
         let obj = repo.find_object(oid, Some(ObjectType::Commit))?;
@@ -469,9 +464,10 @@ pub fn max_tag_version(bare: &Path) -> i32 {
     // git2 0.21: iter() отдаёт Result (не-UTF8 имена больше не глотаются молча).
     for name in names.iter().flatten().flatten() {
         if let Some(num) = name.strip_prefix('v')
-            && let Ok(n) = num.parse::<i32>() {
-                max = max.max(n);
-            }
+            && let Ok(n) = num.parse::<i32>()
+        {
+            max = max.max(n);
+        }
     }
     max
 }
@@ -533,7 +529,10 @@ mod tests {
     fn version_files_paths() {
         let files = version_files(&ver(vec![step(1, "Install Redis"), step(2, "Configure")]));
         let paths: Vec<_> = files.iter().map(|(p, _)| p.as_str()).collect();
-        assert_eq!(paths, vec!["README.md", "list.json", "steps/01-install-redis.md", "steps/02-configure.md"]);
+        assert_eq!(
+            paths,
+            vec!["README.md", "list.json", "steps/01-install-redis.md", "steps/02-configure.md"]
+        );
     }
 
     #[test]
@@ -578,7 +577,8 @@ mod tests {
         ]);
         let files = version_files(&v);
         // .md только у 2 шагов
-        let md_paths: Vec<_> = files.iter().map(|(p, _)| p.as_str()).filter(|p| p.starts_with("steps/")).collect();
+        let md_paths: Vec<_> =
+            files.iter().map(|(p, _)| p.as_str()).filter(|p| p.starts_with("steps/")).collect();
         assert_eq!(md_paths, vec!["steps/01-first.md", "steps/04-second.md"]);
         // README: text инлайн, image как ![], счётчик и нумерация только по шагам
         let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
