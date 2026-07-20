@@ -182,9 +182,9 @@ async fn create_duplicate_slug_errors() {
         .create(Request::new(create_req(&owner.to_string(), "dup")))
         .await
         .expect_err("дубль slug должен падать");
-    // Сейчас constraint-violation уходит generic internal — Фаза 4 (таксономия
-    // ошибок) сузит до AlreadyExists; тест обновится вместе с ней.
-    assert_eq!(err.code(), tonic::Code::Internal);
+    // Таксономия Фазы 4: unique violation (23505) → ALREADY_EXISTS, без утечки SQL.
+    assert_eq!(err.code(), tonic::Code::AlreadyExists);
+    assert!(!err.message().contains("duplicate key"), "детали Postgres не текут клиенту");
 }
 
 #[tokio::test]

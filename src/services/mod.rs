@@ -6,5 +6,6 @@
 pub mod collab;
 pub mod curation;
 pub mod git_core;
+pub mod golden;
 pub mod list;
 mod util;

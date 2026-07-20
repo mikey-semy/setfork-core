@@ -1,5 +1,6 @@
 //! Git-подсистема: всё, что работает с git2/bare-репо, ниже уровня gRPC.
-//! bundle     — сериализация версий в git-дерево (зеркало serialize.ts) и материализация;
+//! serialize  — версия списка → файлы git-дерева (зеркало serialize.ts);
+//! bundle     — материализация репо из истории версий (типы serialize ре-экспортирует);
 //! project    — обратное чтение состояния списка из git-дерева (проекция в БД);
 //! repo       — персистентные bare-репо (GIT_DATA_DIR), пер-репо локи;
 //! smart_http — git smart-HTTP поверх материализованного репо (порт smart-http.ts).
@@ -9,4 +10,5 @@ pub const MAIN_REF: &str = "refs/heads/main";
 pub mod bundle;
 pub mod project;
 pub mod repo;
+pub mod serialize;
 pub mod smart_http;

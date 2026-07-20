@@ -9,22 +9,28 @@ read/write-порты для Next-BFF по gRPC. Контракты — `proto/g
 
 ```
 src/
-├─ main.rs             точка входа: env/CLI golden-режимы, auth-интерсептор, wiring сервисов
+├─ main.rs             точка входа (bin): CLI-режимы, auth-интерсептор, wiring сервисов
+├─ lib.rs              крейт-библиотека (модули видны tests/)
+├─ config.rs           вся конфигурация из env, один раз на старте, с валидацией
 ├─ pb.rs, pb_domain.rs сгенерённые tonic-модули (setfork.git.v1 / setfork.domain.v1)
+├─ blocks.rs           блочная модель: is_step/нормализация type/content (одно место)
 ├─ services/           gRPC-сервисы по доменам (транспортный слой)
 │  ├─ git_core.rs      GitCore: smart-HTTP, ветки/теги/merge/bundle
-│  ├─ list.rs          ListRead + ListWrite (зеркало list-store.adapter.ts, golden-сверка)
+│  ├─ list.rs          ListRead + ListWrite (зеркало list-store.adapter.ts)
 │  ├─ curation.rs      CurationRead + CurationWrite (звёзды/watch)
 │  ├─ collab.rs        CollabWrite (issues/suggestions/комментарии)
-│  └─ util.rs          общие хелперы (ошибки, uuid, LocaleText/refs ↔ jsonb)
+│  ├─ golden.rs        канонический JSON для golden-сверки с TS (CLI domain-read)
+│  └─ util.rs          общие хелперы (таксономия ошибок db_status, uuid, jsonb)
 ├─ git/                git-подсистема (git2, ниже уровня gRPC)
-│  ├─ bundle.rs        сериализация версий в git-дерево (зеркало serialize.ts), материализация
+│  ├─ serialize.rs     версия → файлы git-дерева (зеркало serialize.ts)
+│  ├─ bundle.rs        материализация репо из истории версий, bundle, pre-receive hook
 │  ├─ project.rs       обратное чтение состояния списка из git-дерева (проекция в БД)
-│  ├─ repo.rs          персистентные bare-репо (GIT_DATA_DIR), пер-репо локи
-│  └─ smart_http.rs    git smart-HTTP (порт smart-http.ts)
-├─ db.rs               sqlx/Postgres: пул, запросы под git-проекцию
+│  ├─ repo.rs          персистентные bare-репо (GIT_DATA_DIR), пер-репо локи + lock-пул
+│  └─ smart_http.rs    git smart-HTTP (порт smart-http.ts; стриминговый stdin)
+├─ db.rs               sqlx/Postgres: пулы (основной + lock), запросы под git-проекцию
 ├─ ratelimit.rs        tower-layer: скользящее окно per-метод (heavy/обычный бюджеты)
-└─ roundtrip_tests.rs  интеграционный тест: bootstrap → clone → push → append → pull
+└─ telemetry.rs        tower-layer: метрики Prometheus + per-RPC логи
+tests/                 roundtrip (настоящий git), domain (Postgres), golden (фикстуры)
 ```
 
 Правило слоёв: `services → { git, db }`; `git` и `db` про gRPC не знают.

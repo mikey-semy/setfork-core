@@ -4,8 +4,29 @@ use uuid::Uuid;
 
 use crate::pb_domain::{LocaleText, StepRef};
 
+/// Внутренняя ошибка: детали — ТОЛЬКО в лог (SQL/пути/git не текут клиенту),
+/// наружу generic INTERNAL. Аудит 2026-07-20, P1-6.
 pub fn internal<E: std::fmt::Display>(e: E) -> Status {
-    Status::internal(e.to_string())
+    tracing::error!(error = %e, "internal error");
+    Status::internal("internal error")
+}
+
+/// Ошибка Postgres → осмысленный gRPC-код (таксономия вместо тотального
+/// internal): 23505 unique → ALREADY_EXISTS, 23503 fk → FAILED_PRECONDITION,
+/// 22P02/22007 bad cast (enum/uuid/дата) → INVALID_ARGUMENT. Остальное —
+/// internal (лог с деталями, клиенту generic).
+pub fn db_status(e: sqlx::Error) -> Status {
+    if let sqlx::Error::Database(db) = &e
+        && let Some(code) = db.code()
+    {
+        match code.as_ref() {
+            "23505" => return Status::already_exists("already exists"),
+            "23503" => return Status::failed_precondition("referenced row missing"),
+            "22P02" | "22007" => return Status::invalid_argument("invalid value"),
+            _ => {}
+        }
+    }
+    internal(e)
 }
 
 pub fn parse_id(s: &str) -> Result<Uuid, Status> {
