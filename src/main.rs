@@ -2,7 +2,7 @@
 //! Вся логика — в services/ (транспорт по доменам), git/ (git-подсистема), db.
 use tonic::{Request, Status, transport::Server};
 
-use setfork_core::{db, git, pb_domain, ratelimit, services, telemetry};
+use setfork_core::{config, db, git, pb_domain, ratelimit, services, telemetry};
 
 use git::{bundle, bundle::VersionData, smart_http};
 use services::git_core::GitCoreSvc;
@@ -26,8 +26,9 @@ where
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
-    init_tracing();
-    let pool = db::connect().await?;
+    init_tracing(); // до Config::from_env — иначе warn'ы валидации конфига пропадут
+    let cfg = config::Config::from_env()?;
+    let pool = db::connect(&cfg.database_url, cfg.pgpool_max).await?;
 
     // CLI-режимы для golden-проверки (тот же код-пас, что и RPC, без gRPC-транспорта):
     //   bundle           <owner> <slug> <out>
@@ -63,11 +64,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("wrote {} bytes → {}", data.len(), cli(4));
                 return Ok(());
             }
-            // Golden-сверка READ-портов: канонический JSON (см. services::list::golden_json)
+            // Golden-сверка READ-портов: канонический JSON (см. services::golden)
             //   domain-read <owner> <slug> <out.json>
             "domain-read" => {
-                let v =
-                    services::list::golden_json(&pool, &cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
+                let v = services::golden::golden_json(&pool, &cli(2), &cli(3))
+                    .await
+                    .map_err(|e| e.to_string())?;
                 std::fs::write(cli(4), serde_json::to_string_pretty(&v)?)?;
                 println!("wrote domain-read json → {}", cli(4));
                 return Ok(());
@@ -111,24 +113,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // GIT_DATA_DIR (материализация во временные каталоги) — их не ужесточаем.
     require_git_data_dir()?;
 
+    // Отдельный мини-пул под advisory-локи: RepoGuard держит соединение на всё
+    // время git-операции — не выедаем основной пул (аудит 2026-07-20, P1-5).
+    git::repo::set_lock_pool(db::connect_lock_pool(&cfg.database_url).await?);
+
     let n = db::published_count(&pool).await?;
     tracing::info!(published_lists = n, "подключились к Postgres");
 
-    let addr_raw = std::env::var("SETFORK_CORE_ADDR").unwrap_or_else(|_| "127.0.0.1:50051".to_string());
-    let addr = addr_raw
-        .parse()
-        .map_err(|e| format!("SETFORK_CORE_ADDR '{addr_raw}' некорректен ({e}) — ожидается host:port"))?;
+    let addr = cfg.addr;
 
     // Метрики Prometheus на отдельном HTTP-порту (/metrics). '0'/'off' — выключить.
-    let maddr = std::env::var("SETFORK_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9464".to_string());
-    if maddr != "0" && !maddr.eq_ignore_ascii_case("off") {
-        let sock: std::net::SocketAddr =
-            maddr.parse().map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr}' некорректен ({e})"))?;
+    if let Some(sock) = cfg.metrics_addr {
         metrics_exporter_prometheus::PrometheusBuilder::new()
             .with_http_listener(sock)
             .set_buckets(&[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0])?
             .install()?;
-        tracing::info!("метрики Prometheus: http://{maddr}/metrics");
+        tracing::info!("метрики Prometheus: http://{sock}/metrics");
     }
 
     // gRPC health-check (grpc.health.v1) — для проб оркестратора/LB.
@@ -205,11 +205,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fail-closed: без токена сервер не стартует — иначе любой, кто дотянулся до порта,
     // получает суперправа над всем контентом всех пользователей. Явный локальный dev без
     // токена — только с SETFORK_ALLOW_INSECURE=1. Health без авторизации (docker/k8s-пробы).
-    let raw_token = std::env::var("SETFORK_CORE_TOKEN").ok().filter(|t| !t.is_empty());
-    let allow_insecure = std::env::var("SETFORK_ALLOW_INSECURE")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-    if raw_token.is_none() && !allow_insecure {
+    if cfg.token.is_none() && !cfg.allow_insecure {
         eprintln!(
             "setfork-core: ОСТАНОВКА — SETFORK_CORE_TOKEN не задан. Без него канал открыт кому \
              угодно в сети (полный обход владения и модерации). Задайте токен (тот же — фронту), \
@@ -217,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         std::process::exit(1);
     }
-    let token: Option<&'static str> = raw_token.map(|t| &*format!("Bearer {t}").leak());
+    let token: Option<&'static str> = cfg.token.clone().map(|t| &*format!("Bearer {t}").leak());
     match token {
         Some(_) => tracing::info!("канал защищён Bearer-токеном"),
         None => tracing::warn!("SETFORK_ALLOW_INSECURE=1 — канал БЕЗ авторизации (только локальный dev)"),
@@ -230,7 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::builder()
         // telemetry — СНАРУЖИ rate-limit: отказы 8/16 тоже попадают в метрики.
         .layer(telemetry::TelemetryLayer)
-        .layer(ratelimit::RateLimitLayer::from_env())
+        .layer(ratelimit::RateLimitLayer::new(cfg.rpm, cfg.rpm_heavy, cfg.token.as_deref()))
         .add_service(health_service)
         .add_service(reflection_v1)
         .add_service(reflection_v1a)

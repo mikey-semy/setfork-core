@@ -48,30 +48,30 @@ fn loc(v: &serde_json::Value) -> String {
     String::new()
 }
 
-// Подключение к той же Postgres, что у Next (DATABASE_URL). Runtime-запросы
-// (без compile-time проверки), чтобы сборка не требовала живой БД.
-pub async fn connect() -> Result<PgPool, sqlx::Error> {
-    let url = std::env::var("DATABASE_URL")
-        .map_err(|_| sqlx::Error::Configuration("DATABASE_URL не задан (см. .env)".into()))?;
-    // Размер пула — под нагрузку/лимиты Postgres (PGPOOL_MAX, по умолч. 10).
-    // acquire_timeout — быстрый отказ вместо зависания, если пул исчерпан;
-    // test_before_acquire — не отдаём мёртвое соединение после рестарта БД.
-    let max = match std::env::var("PGPOOL_MAX") {
-        Ok(s) => match s.trim().parse::<u32>() {
-            Ok(v) if v > 0 => v,
-            // Опечатка в конфиге не должна МОЛЧА откатывать пул на дефолт.
-            _ => {
-                tracing::warn!(value = %s, "PGPOOL_MAX не число > 0 — использую 10");
-                10
-            }
-        },
-        Err(_) => 10,
-    };
+// Подключение к той же Postgres, что у Next. Runtime-запросы (без compile-time
+// проверки), чтобы сборка не требовала живой БД. Параметры — из config::Config
+// (env читается один раз на старте).
+// acquire_timeout — быстрый отказ вместо зависания, если пул исчерпан;
+// test_before_acquire — не отдаём мёртвое соединение после рестарта БД.
+pub async fn connect(url: &str, max: u32) -> Result<PgPool, sqlx::Error> {
     PgPoolOptions::new()
         .max_connections(max)
         .acquire_timeout(std::time::Duration::from_secs(10))
         .test_before_acquire(true)
-        .connect(&url)
+        .connect(url)
+        .await
+}
+
+/// Мини-пул ТОЛЬКО под advisory-локи репо (git::repo::set_lock_pool): RepoGuard
+/// держит соединение на всё время git-операции, из общего пула это выедало по
+/// соединению на push (аудит 2026-07-20, P1-5). acquire_timeout выше обычного —
+/// очередь тяжёлых git-операций легитимна, быстрый отказ тут вреден.
+pub async fn connect_lock_pool(url: &str) -> Result<PgPool, sqlx::Error> {
+    PgPoolOptions::new()
+        .max_connections(4)
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .test_before_acquire(true)
+        .connect(url)
         .await
 }
 
@@ -317,7 +317,7 @@ fn proj_step_row(s: &ProjStep) -> StepRow {
     // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
     let is_step = is_step_type(&s.block_type);
     StepRow {
-        block_type: if is_step { "step".into() } else { s.block_type.clone() },
+        block_type: crate::blocks::storage_type(&s.block_type),
         content: if is_step { serde_json::json!({}) } else { s.content.clone() },
         title: loc_val(&s.title),
         desc: loc_val(&s.desc),

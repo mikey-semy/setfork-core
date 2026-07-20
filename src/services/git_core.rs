@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use super::util::internal;
+use super::util::{db_status, internal};
 use crate::db;
 use crate::git::bundle::VersionData;
 use crate::git::{MAIN_REF, bundle, project, repo, smart_http};
@@ -35,9 +35,9 @@ impl GitCoreSvc {
     pub async fn load(&self, owner: &str, slug: &str) -> Result<Vec<VersionData>, Status> {
         let (id, _v) = db::resolve_list(&self.pool, owner, slug)
             .await
-            .map_err(internal)?
+            .map_err(db_status)?
             .ok_or_else(|| Status::not_found("list not found"))?;
-        db::load_bundle_data(&self.pool, id).await.map_err(internal)
+        db::load_bundle_data(&self.pool, id).await.map_err(db_status)
     }
 
     // Общая реализация bundle: загрузка версий → материализация → git bundle.
@@ -54,7 +54,7 @@ impl GitCoreSvc {
     async fn ensure(&self, owner: &str, slug: &str) -> Result<(PathBuf, Uuid), Status> {
         repo::ensure_repo(&self.pool, owner, slug)
             .await
-            .map_err(internal)?
+            .map_err(db_status)?
             .ok_or_else(|| Status::not_found("list not found"))
     }
 }
@@ -172,7 +172,7 @@ impl GitCore for GitCoreSvc {
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Критическая секция: receive-pack + проекция под одним локом репо
         // (ленивый append не вклинивается между приёмом и проекцией).
-        let _guard = repo::repo_guard(&self.pool, id).await.map_err(internal)?;
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let bare_recv = bare.clone();
         // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
@@ -211,7 +211,7 @@ impl GitCore for GitCoreSvc {
         // Персистентный репо (как TS bundleRepo) — bundle включает запушенные коммиты.
         let data = repo::bundle_repo(&self.pool, &owner, &slug)
             .await
-            .map_err(internal)?
+            .map_err(db_status)?
             .ok_or_else(|| Status::not_found("list not found"))?;
         Ok(Response::new(BytesResponse { data }))
     }
@@ -336,7 +336,7 @@ impl GitCore for GitCoreSvc {
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Merge двигает main → критическая секция с проекцией (как receive_pack).
-        let _guard = repo::repo_guard(&self.pool, id).await.map_err(internal)?;
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let (tip, ff) = with_repo(bare.clone(), move |repo| {
             let branch_tip = repo
                 .refname_to_id(&format!("refs/heads/{name}"))
@@ -441,7 +441,7 @@ impl GitCore for GitCoreSvc {
             return Err(Status::invalid_argument("list_json is not a JSON object"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
-        let _guard = repo::repo_guard(&self.pool, id).await.map_err(internal)?;
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let tip = with_repo(bare.clone(), move |repo| {
             let branch_tip = repo
                 .refname_to_id(&format!("refs/heads/{branch}"))

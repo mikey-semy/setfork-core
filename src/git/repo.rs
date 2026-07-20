@@ -53,9 +53,20 @@ pub struct RepoGuard {
     _tx: Transaction<'static, Postgres>,
 }
 
+// Мини-пул под advisory-локи (db::connect_lock_pool, ставит main на старте
+// сервера): гард держит соединение на всё время git-операции — из ОБЩЕГО пула
+// это выедало по соединению на push (аудит 2026-07-20, P1-5: ~5 одновременных
+// пушей при PGPOOL_MAX=10 исчерпывали пул). Не задан (CLI/тесты) → основной пул.
+static LOCK_POOL: OnceLock<PgPool> = OnceLock::new();
+
+pub fn set_lock_pool(pool: PgPool) {
+    let _ = LOCK_POOL.set(pool);
+}
+
 pub async fn repo_guard(pool: &PgPool, id: Uuid) -> Result<RepoGuard, sqlx::Error> {
     let proc = repo_lock(id).await; // сначала выстраиваемся внутри процесса
-    let mut tx = pool.begin().await?;
+    let lock_pool = LOCK_POOL.get().unwrap_or(pool);
+    let mut tx = lock_pool.begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock($1)").bind(advisory_key(id)).execute(&mut *tx).await?;
     Ok(RepoGuard { _proc: proc, _tx: tx })
 }
