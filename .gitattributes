@@ -1,0 +1,3 @@
+# bash-скрипты обязаны быть LF: CRLF после autocrlf-чекаута ломает их на Windows
+# (bash: syntax error near unexpected token $'do') — поймано 2026-07-20.
+*.sh text eol=lf
