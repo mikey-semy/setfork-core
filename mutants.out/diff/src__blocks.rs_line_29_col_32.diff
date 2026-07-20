@@ -1,0 +1,21 @@
+--- src/blocks.rs
++++ replace || with && in content_value
+@@ -21,17 +21,17 @@
+         Some(t) if !is_step_type(t) => t.to_string(),
+         _ => String::new(),
+     }
+ }
+ 
+ /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}
+ /// (мягкость к клиентскому вводу, как в TS-адаптерах).
+ pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {
+-    if is_step_type(step_type) || content_json.is_empty() {
++    if is_step_type(step_type) && /* ~ changed by cargo-mutants ~ */ content_json.is_empty() {
+         serde_json::json!({})
+     } else {
+         serde_json::from_str(content_json).unwrap_or_else(|_| serde_json::json!({}))
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tests {

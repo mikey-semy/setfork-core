@@ -1,0 +1,21 @@
+--- src/ratelimit.rs
++++ replace != with == in RateLimited<S>::allow
+@@ -80,17 +80,17 @@
+         // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).
+         if path.starts_with("/grpc.health") || path.starts_with("/grpc.reflection") {
+             return true;
+         }
+         // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже
+         // всё равно вернёт unauthenticated. Так лимит защищает только реальный
+         // (авторизованный) трафик, а не служит вектором DoS.
+         if let Some(expected) = &self.state.expected_auth
+-            && auth != Some(expected.as_str())
++            && auth == /* ~ changed by cargo-mutants ~ */ Some(expected.as_str())
+         {
+             return true;
+         }
+         let method = path.rsplit('/').next().unwrap_or(path);
+         let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };
+         if limit == 0 {
+             return true;
+         }

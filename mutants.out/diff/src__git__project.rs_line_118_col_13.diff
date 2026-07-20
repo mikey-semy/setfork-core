@@ -1,0 +1,21 @@
+--- src/git/project.rs
++++ replace && with || in read_step_files
+@@ -110,17 +110,17 @@
+         }
+         // NN — цифры до первого '-' (или до '.md', если slug пуст).
+         let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();
+         let n: i32 = match digits.parse() {
+             Ok(n) => n,
+             Err(_) => continue,
+         };
+         if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())
+-            && let Ok(s) = String::from_utf8(blob.content().to_vec())
++            || /* ~ changed by cargo-mutants ~ */ let Ok(s) = String::from_utf8(blob.content().to_vec())
+         {
+             out.insert(n, s);
+         }
+     }
+     out
+ }
+ 
+ /// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),

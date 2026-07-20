@@ -1,0 +1,21 @@
+--- src/git/project.rs
++++ replace += with -= in strip_v_prefix
+@@ -208,17 +208,17 @@
+     if b.first() == Some(&b'v') {
+         let mut i = 1;
+         while i < b.len() && b[i].is_ascii_digit() {
+             i += 1;
+         }
+         if i > 1 && i < b.len() && b[i] == b':' {
+             i += 1;
+             while i < b.len() && b[i] == b' ' {
+-                i += 1;
++                i -= /* ~ changed by cargo-mutants ~ */ 1;
+             }
+             return s[i..].to_string();
+         }
+     }
+     s.to_string()
+ }
+ 
+ // Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).

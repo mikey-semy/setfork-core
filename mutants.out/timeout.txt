@@ -1,0 +1,2 @@
+src/git/project.rs:211:15: replace += with *= in strip_v_prefix
+src/git/project.rs:216:19: replace += with *= in strip_v_prefix

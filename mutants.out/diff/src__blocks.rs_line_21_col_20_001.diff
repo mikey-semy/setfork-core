@@ -1,0 +1,21 @@
+--- src/blocks.rs
++++ replace match guard !is_step_type(t) with false in wire_type
+@@ -13,17 +13,17 @@
+ /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.
+ pub fn storage_type(t: &str) -> String {
+     if is_step_type(t) { "step".to_string() } else { t.to_string() }
+ }
+ 
+ /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.
+ pub fn wire_type(t: Option<&str>) -> String {
+     match t {
+-        Some(t) if !is_step_type(t) => t.to_string(),
++        Some(t) if false /* ~ changed by cargo-mutants ~ */ => t.to_string(),
+         _ => String::new(),
+     }
+ }
+ 
+ /// content_json провода → jsonb payload: у шага и при пустом/битом JSON — {}
+ /// (мягкость к клиентскому вводу, как в TS-адаптерах).
+ pub fn content_value(step_type: &str, content_json: &str) -> serde_json::Value {
+     if is_step_type(step_type) || content_json.is_empty() {

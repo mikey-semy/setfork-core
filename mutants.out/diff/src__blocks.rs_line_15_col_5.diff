@@ -1,0 +1,21 @@
+--- src/blocks.rs
++++ replace storage_type -> String with String::new()
+@@ -7,17 +7,17 @@
+ 
+ /// Шаг ли это (все прочие типы — блоки с type/content).
+ pub fn is_step_type(t: &str) -> bool {
+     t.is_empty() || t == "step"
+ }
+ 
+ /// type для ХРАНЕНИЯ (БД): шаг — всегда явный 'step', блок — как есть.
+ pub fn storage_type(t: &str) -> String {
+-    if is_step_type(t) { "step".to_string() } else { t.to_string() }
++    String::new() /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// type для ПРОВОДА (proto): шаг — '', блок — как есть. None (NULL из БД) = шаг.
+ pub fn wire_type(t: Option<&str>) -> String {
+     match t {
+         Some(t) if !is_step_type(t) => t.to_string(),
+         _ => String::new(),
+     }

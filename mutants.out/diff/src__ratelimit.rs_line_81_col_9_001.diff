@@ -1,0 +1,50 @@
+--- src/ratelimit.rs
++++ replace RateLimited<S>::allow -> bool with false
+@@ -73,46 +73,17 @@
+     inner: S,
+     state: Arc<State>,
+ }
+ 
+ impl<S> RateLimited<S> {
+     /// true = запрос пропускаем. Путь вида /setfork.git.v1.GitCore/ReceivePack.
+     fn allow(&self, path: &str, auth: Option<&str>) -> bool {
+         // health и рефлексия — без лимита (docker/k8s-пробы, grpcurl).
+-        if path.starts_with("/grpc.health") || path.starts_with("/grpc.reflection") {
+-            return true;
+-        }
+-        // Неавторизованные не расходуют окно: пропускаем сюда, интерцептор ниже
+-        // всё равно вернёт unauthenticated. Так лимит защищает только реальный
+-        // (авторизованный) трафик, а не служит вектором DoS.
+-        if let Some(expected) = &self.state.expected_auth
+-            && auth != Some(expected.as_str())
+-        {
+-            return true;
+-        }
+-        let method = path.rsplit('/').next().unwrap_or(path);
+-        let limit = if HEAVY.contains(&method) { self.state.rpm_heavy } else { self.state.rpm };
+-        if limit == 0 {
+-            return true;
+-        }
+-        let now = Instant::now();
+-        // Отравление мьютекса (паника держателя) не должно ронять весь трафик:
+-        // окна внутри валидны как данные — забираем их как есть.
+-        let mut windows = self.state.windows.lock().unwrap_or_else(|p| p.into_inner());
+-        let q = windows.entry(method.to_string()).or_default();
+-        while q.front().is_some_and(|t| now.duration_since(*t) > WINDOW) {
+-            q.pop_front();
+-        }
+-        if q.len() as u32 >= limit {
+-            metrics::counter!("rpc_rate_limited_total", "method" => method.to_string()).increment(1);
+-            return false;
+-        }
+-        q.push_back(now);
+-        true
++        false /* ~ changed by cargo-mutants ~ */
+     }
+ }
+ 
+ impl<S, ReqBody> Service<Request<ReqBody>> for RateLimited<S>
+ where
+     S: Service<Request<ReqBody>, Response = Response<Body>> + Send,
+     S::Future: Send + 'static,
+ {

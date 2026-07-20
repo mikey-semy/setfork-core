@@ -38,14 +38,14 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 # Порог покрытия (Фаза 2 плана): при установленном cargo-llvm-cov интеграционные
-# гоняются С инструментацией и fail-under; замер 2026-07-20 — 50.7% строк,
-# порог чуть ниже (растить, не опускать). Слепые зоны замера: services/git_core.rs
-# (gRPC-обвязка GitCore), telemetry.rs, main.rs — см. tracks/core.md.
+# гоняются С инструментацией и fail-under; замер 2026-07-20 после проекционного
+# теста — 61.4% строк, порог чуть ниже (растить, не опускать). Слепые зоны:
+# services/git_core.rs (gRPC-обвязка GitCore), telemetry.rs, main.rs — tracks/core.md.
 # Без cargo-llvm-cov — обычный прогон + подсказка (гейт не роняем на dev-машинах).
 if command -v cargo-llvm-cov >/dev/null 2>&1; then
   echo "== интеграционные + golden + coverage-порог (cargo-llvm-cov) =="
   TEST_DATABASE_URL="postgresql://t:t@localhost:${PORT}/t" \
-    cargo llvm-cov --summary-only --fail-under-lines 48 -- --include-ignored
+    cargo llvm-cov --summary-only --fail-under-lines 58 -- --include-ignored
 else
   echo "== интеграционные + golden (cargo-llvm-cov не установлен — без порога покрытия) =="
   echo "   установка: cargo install cargo-llvm-cov && rustup component add llvm-tools-preview"

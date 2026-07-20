@@ -390,8 +390,9 @@ pub async fn project_pushed_commit(
 
 #[cfg(test)]
 mod tests {
-    use super::{ParsedStepMd, parse_step_md, strip_v_prefix};
+    use super::{ParsedStepMd, RawStep, parse_step_md, parse_steps, strip_v_prefix};
     use crate::git::bundle::{SerStep, StepRef};
+    use std::collections::HashMap;
 
     #[test]
     fn strips_vn_prefix() {
@@ -401,6 +402,78 @@ mod tests {
         assert_eq!(strip_v_prefix("hello world"), "hello world");
         assert_eq!(strip_v_prefix("version 2"), "version 2"); // не vN:
         assert_eq!(strip_v_prefix("v7: "), "");
+        assert_eq!(strip_v_prefix("v: x"), "v: x"); // «v» без цифр — не префикс версии
+    }
+
+    // ── parse_steps: правила набора/фильтрации/оверрайдов (cargo-mutants 2026-07-20
+    // показал, что они не были покрыты напрямую) ──────────────────────────────
+
+    fn raw(n: Option<i32>, ty: Option<&str>, title: &str) -> RawStep {
+        RawStep {
+            n,
+            block_type: ty.map(str::to_string),
+            content: ty.map(|_| serde_json::json!({"md": "x"})),
+            title: Some(title.to_string()),
+            desc: Some(String::new()),
+            command: Some(String::new()),
+            level: Some("required".into()),
+            why: None,
+            section: None,
+            subtasks: None,
+            refs: None,
+        }
+    }
+
+    #[test]
+    fn parse_steps_filters_untitled_steps_but_keeps_blocks() {
+        // Шаг без title — мусор, выбрасывается; text-блок без title валиден.
+        let steps = parse_steps(
+            &[raw(Some(1), None, ""), raw(Some(2), Some("text"), ""), raw(Some(3), None, "Kept")],
+            &HashMap::new(),
+        );
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].block_type, "text");
+        assert_eq!(steps[1].title, "Kept");
+    }
+
+    #[test]
+    fn parse_steps_md_override_keyed_by_orig_n_and_steps_only() {
+        // Ключ оверрайда — номер шага из list.json (n, при отсутствии — позиция+1),
+        // НЕ позиция после фильтрации; на не-step блоки оверрайд не действует.
+        let md = HashMap::from([
+            (3, "---\ntitle: \"Overridden\"\nlevel: required\n---\n\nnew desc\n".to_string()),
+            (2, "---\ntitle: \"Block override must be ignored\"\nlevel: required\n---\n".to_string()),
+        ]);
+        let steps = parse_steps(
+            &[raw(Some(1), None, ""), raw(Some(2), Some("text"), ""), raw(Some(3), None, "Orig")],
+            &md,
+        );
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].block_type, "text", "блок не тронут оверрайдом");
+        assert_eq!(steps[1].title, "Overridden", "оверрайд нашёл шаг по orig_n=3");
+        assert_eq!(steps[1].desc, "new desc");
+    }
+
+    #[test]
+    fn parse_steps_ignores_empty_md_title_and_missing_fields() {
+        // Пустой title в .md не перекрывает list.json; отсутствующие в .md поля
+        // (command без front-matter-строки) остаются из list.json.
+        let md = HashMap::from([(1, "---\ntitle: \"\"\nlevel: required\n---\n\nonly desc\n".to_string())]);
+        let mut base = raw(Some(1), None, "Keep me");
+        base.command = Some("keep-cmd".into());
+        let steps = parse_steps(&[base], &md);
+        assert_eq!(steps[0].title, "Keep me", "пустой md-title игнорируется");
+        assert_eq!(steps[0].desc, "only desc", "desc из md применён");
+        assert_eq!(steps[0].command, "keep-cmd", "command не тронут (нет в md)");
+    }
+
+    #[test]
+    fn parse_steps_positional_n_when_absent() {
+        // Без поля n ключ оверрайда — позиция в list.json (idx+1).
+        let md =
+            HashMap::from([(2, "---\ntitle: \"Second overridden\"\nlevel: required\n---\n".to_string())]);
+        let steps = parse_steps(&[raw(None, None, "One"), raw(None, None, "Two")], &md);
+        assert_eq!(steps[1].title, "Second overridden");
     }
 
     fn ser(title: &str, desc: &str, command: &str) -> SerStep {
