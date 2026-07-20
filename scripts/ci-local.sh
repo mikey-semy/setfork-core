@@ -10,6 +10,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+echo "== cargo fmt --check =="
+cargo fmt --check
+
+echo "== proto-sync с фронтом =="
+bash scripts/check-proto-sync.sh
+
 echo "== cargo clippy (--all-targets, -D warnings) =="
 cargo clippy --all-targets -- -D warnings
 

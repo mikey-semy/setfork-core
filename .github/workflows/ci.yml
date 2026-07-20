@@ -1,5 +1,8 @@
 name: CI
 
+# ВАЖНО: основной гейт перед мержем — ЛОКАЛЬНЫЙ scripts/ci-local.sh (решение
+# владельца 2026-07-14: Actions-минуты). Эти workflow — дублирующий барьер,
+# когда GitHub-hosted раннеры доступны.
 on:
   push:
     branches: [master]
@@ -7,12 +10,65 @@ on:
     branches: [master]
 
 jobs:
-  build:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       # protoc не нужен (protobuf компилирует protox в build.rs); libgit2 собирается через cc.
-      - run: cargo build --verbose
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --verbose
+
+  # Интеграционные + golden против настоящего Postgres — те же тесты,
+  # что гоняет scripts/ci-local.sh на эфемерном контейнере.
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: t
+          POSTGRES_PASSWORD: t
+          POSTGRES_DB: t
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U t -d t"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -- --include-ignored
+        env:
+          TEST_DATABASE_URL: postgresql://t:t@localhost:5432/t
+
+  # Публикация образа в GHCR (только push в master): ghcr.io/<repo>:latest + :sha.
+  # Деплой в Dokploy пока собирает образ сам из репо; переключение на pull из
+  # GHCR — открытый вопрос трека (tracks/core.md), образ публикуем заранее.
+  image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
