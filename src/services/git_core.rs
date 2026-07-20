@@ -173,8 +173,19 @@ impl GitCore for GitCoreSvc {
         .map_err(internal)?
         .map_err(internal)?;
         // Проекция list.json нового main tip → новая версия (0 = не спроецировано).
+        // Сбой проекции НЕ отменяет push (git-объекты целы), но обязан быть громким:
+        // тихая потеря версии — худший исход (аудит 2026-07-20, P0-1).
         let new_version = if moved {
-            project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0)
+            match project::project_pushed_commit(&self.pool, id, &bare).await {
+                Ok(v) => v.unwrap_or(0),
+                Err(e) => {
+                    eprintln!(
+                        "setfork-core: ОШИБКА проекции push {}/{} ({id}): {e} — git принят, версия НЕ создана; восстановление: reproject",
+                        repo.owner, repo.slug
+                    );
+                    0
+                }
+            }
         } else {
             0
         };
@@ -343,7 +354,17 @@ impl GitCore for GitCoreSvc {
         })
         .await?;
         // main сдвинулся → проекция новой версии (0 = list.json не изменился).
-        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        // Сбой проекции не отменяет merge, но громко логируется (см. receive_pack).
+        let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
+            Ok(v) => v.unwrap_or(0),
+            Err(e) => {
+                eprintln!(
+                    "setfork-core: ОШИБКА проекции merge {}/{} ({id}): {e} — merge выполнен, версия НЕ создана; восстановление: reproject",
+                    repo.owner, repo.slug
+                );
+                0
+            }
+        };
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: ff }))
     }
 
@@ -432,7 +453,16 @@ impl GitCore for GitCoreSvc {
             Ok(merged.to_string())
         })
         .await?;
-        let new_version = project::project_pushed_commit(&self.pool, id, &bare).await.unwrap_or(0);
+        let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
+            Ok(v) => v.unwrap_or(0),
+            Err(e) => {
+                eprintln!(
+                    "setfork-core: ОШИБКА проекции merge-resolved {}/{} ({id}): {e} — merge выполнен, версия НЕ создана; восстановление: reproject",
+                    repo.owner, repo.slug
+                );
+                0
+            }
+        };
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: false }))
     }
 

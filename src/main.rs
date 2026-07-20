@@ -86,17 +86,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("wrote {} bytes → {}", data.len(), cli(5));
                 return Ok(());
             }
+            // Ручное восстановление после сбоя проекции (см. services::git_core):
+            // принудительно проецирует текущий main-tip в НОВУЮ версию списка.
+            // Не проверяет, была ли версия уже создана — инструмент оператора.
+            //   reproject <owner> <slug>
+            "reproject" => {
+                require_git_data_dir()?;
+                let (owner, slug) = (cli(2), cli(3));
+                let Some((bare, id)) = git::repo::ensure_repo(&pool, &owner, &slug).await? else {
+                    return Err(format!("список {owner}/{slug} не найден").into());
+                };
+                match git::project::project_pushed_commit(&pool, id, &bare).await? {
+                    Some(v) => println!("reproject {owner}/{slug}: создана версия v{v}"),
+                    None => println!("reproject {owner}/{slug}: проецировать нечего (нет валидного list.json/steps)"),
+                }
+                return Ok(());
+            }
             // не CLI-команда → падём в режим сервера ниже
             _ => {}
         }
     }
 
+    // Fail-fast: обязательное окружение сервера проверяем на старте, а не паникой
+    // при первом запросе (аудит 2026-07-20, P1-7). Golden-CLI выше работают без
+    // GIT_DATA_DIR (материализация во временные каталоги) — их не ужесточаем.
+    require_git_data_dir()?;
+
     let n = db::published_count(&pool).await?;
     println!("setfork-core: connected to Postgres — {n} published public lists");
 
-    let addr = std::env::var("SETFORK_CORE_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:50051".to_string())
-        .parse()?;
+    let addr_raw = std::env::var("SETFORK_CORE_ADDR").unwrap_or_else(|_| "127.0.0.1:50051".to_string());
+    let addr = addr_raw
+        .parse()
+        .map_err(|e| format!("SETFORK_CORE_ADDR '{addr_raw}' некорректен ({e}) — ожидается host:port"))?;
 
     // gRPC health-check (grpc.health.v1) — для проб оркестратора/LB.
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
@@ -173,6 +195,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .serve_with_shutdown(addr, shutdown)
         .await?;
     println!("setfork-core: остановлен чисто");
+    Ok(())
+}
+
+/// Fail-fast проверка GIT_DATA_DIR: задан и доступен на запись (создаём при отсутствии).
+/// Нужен серверу и reproject; golden-CLI-режимы работают без него.
+fn require_git_data_dir() -> Result<(), Box<dyn std::error::Error>> {
+    let root = std::env::var("GIT_DATA_DIR").unwrap_or_default();
+    if root.trim().is_empty() {
+        return Err("GIT_DATA_DIR не задан (общий с фронтом том git-объектов, см. README)".into());
+    }
+    std::fs::create_dir_all(&root).map_err(|e| format!("GIT_DATA_DIR '{root}' недоступен: {e}"))?;
     Ok(())
 }
 

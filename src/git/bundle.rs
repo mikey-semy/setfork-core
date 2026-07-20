@@ -476,6 +476,24 @@ pub fn max_tag_version(bare: &Path) -> i32 {
     max
 }
 
+/// Материализует репо (git2) и возвращает bundle всех рефов.
+/// `git bundle` — через шелл (libgit2 не умеет формат bundle). Синхронно — через spawn_blocking.
+pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
+    let work = materialize_repo(versions)?;
+    let work_s = work.to_string_lossy().to_string();
+    let bundle_path = std::env::temp_dir().join(format!("setfork-{}.bundle", uuid::Uuid::new_v4()));
+    let bundle_s = bundle_path.to_string_lossy().to_string();
+
+    let result = (|| -> io::Result<Vec<u8>> {
+        run_git(&["-C", &work_s, "bundle", "create", &bundle_s, "--all"])?;
+        fs::read(&bundle_path)
+    })();
+
+    let _ = fs::remove_dir_all(&work);
+    let _ = fs::remove_file(&bundle_path);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,22 +603,4 @@ mod tests {
         v.note = String::new();
         assert_eq!(commit_message(&v), "v3\n");
     }
-}
-
-/// Материализует репо (git2) и возвращает bundle всех рефов.
-/// `git bundle` — через шелл (libgit2 не умеет формат bundle). Синхронно — через spawn_blocking.
-pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
-    let work = materialize_repo(versions)?;
-    let work_s = work.to_string_lossy().to_string();
-    let bundle_path = std::env::temp_dir().join(format!("setfork-{}.bundle", uuid::Uuid::new_v4()));
-    let bundle_s = bundle_path.to_string_lossy().to_string();
-
-    let result = (|| -> io::Result<Vec<u8>> {
-        run_git(&["-C", &work_s, "bundle", "create", &bundle_s, "--all"])?;
-        fs::read(&bundle_path)
-    })();
-
-    let _ = fs::remove_dir_all(&work);
-    let _ = fs::remove_file(&bundle_path);
-    result
 }

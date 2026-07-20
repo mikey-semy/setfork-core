@@ -55,3 +55,13 @@ cargo run -- advertise-receive <owner> <slug> <out>
 cargo run -- upload-pack       <owner> <slug> <body> <out>
 cargo run -- domain-read       <owner> <slug> <out.json>
 ```
+
+## Восстановление после сбоя проекции
+
+Push/merge принимаются, даже если проекция версии в БД упала (git-объекты целы) —
+такая ошибка пишется в лог с пометкой «ОШИБКА проекции». Восстановление вручную
+(создаёт новую версию из текущего main-tip; требует `GIT_DATA_DIR`):
+
+```sh
+cargo run -- reproject <owner> <slug>
+```

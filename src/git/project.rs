@@ -1,6 +1,7 @@
 //! Обратная проекция git → БД: чтение состояния списка из дерева коммита
 //! (list.json + steps/*.md, порт project.ts) и запись новой версии после
 //! push/merge, когда сдвинулся main.
+use super::repo::join_err;
 use super::MAIN_REF;
 use crate::blocks::is_step_type;
 use crate::db;
@@ -323,12 +324,35 @@ fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -
 }
 
 /// Проецирует запушенный tip main → новая версия списка (порт project.ts projectPushedCommit).
-/// Источник контента — list.json в корне дерева. Возвращает номер версии или None.
-pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Option<i32> {
-    // git2-объекты не Send → читаем всё owned до await.
-    let (tip, raw, subject, step_md) = read_tip(bare)?;
-    let parsed: RawList = serde_json::from_slice(&raw).ok()?;
-    let steps_raw = parsed.steps.as_ref()?;
+/// Источник контента — list.json в корне дерева.
+///
+/// Семантика результата (важно для вызывающих):
+/// - `Ok(Some(v))` — создана версия v;
+/// - `Ok(None)` — проецировать нечего (нет валидного list.json/steps) — НЕ ошибка;
+/// - `Err(_)` — реальный сбой записи в БД: git-данные целы, версия НЕ создана.
+///   Вызывающий обязан громко залогировать; восстановление — `reproject <owner> <slug>`
+///   (CLI-режим в main.rs).
+pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path) -> Result<Option<i32>, sqlx::Error> {
+    // git2-объекты не Send и блокируют поток → всё git-чтение в spawn_blocking,
+    // наружу только owned-данные.
+    let bare_read = bare.to_path_buf();
+    let Some((tip, raw, subject, step_md)) = tokio::task::spawn_blocking(move || read_tip(&bare_read))
+        .await
+        .map_err(join_err)?
+    else {
+        return Ok(None);
+    };
+    let parsed: RawList = match serde_json::from_slice(&raw) {
+        Ok(p) => p,
+        Err(e) => {
+            // Пользовательский вход: битый list.json — не сбой сервиса, но след оставляем.
+            eprintln!("setfork-core: проекция {template_id}: list.json не парсится ({e}) — версия не создана");
+            return Ok(None);
+        }
+    };
+    let Some(steps_raw) = parsed.steps.as_ref() else {
+        return Ok(None);
+    };
 
     let note: String = {
         let stripped: String = strip_v_prefix(&subject).chars().take(200).collect();
@@ -341,11 +365,20 @@ pub async fn project_pushed_commit(pool: &PgPool, template_id: Uuid, bare: &Path
 
     let steps = parse_steps(steps_raw, &step_md);
 
-    let ver = db::add_version(pool, template_id, &note, &steps).await.ok()?;
-    let _ = db::update_meta(pool, template_id, parsed.title.clone(), parsed.desc.clone(), parsed.tags.clone(), parsed.ordered).await;
-    // Тег vN на запушенный коммит (для maxTagVersion/истории).
-    let _ = tag_version(bare, ver, &tip);
-    Some(ver)
+    let ver = db::add_version(pool, template_id, &note, &steps).await?;
+    // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.
+    if let Err(e) = db::update_meta(pool, template_id, parsed.title.clone(), parsed.desc.clone(), parsed.tags.clone(), parsed.ordered).await {
+        eprintln!("setfork-core: проекция {template_id}: v{ver} создана, но мета не обновлена: {e}");
+    }
+    // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo
+    // может повторно досыпать версию поверх (шум истории, не потеря данных).
+    let bare_tag = bare.to_path_buf();
+    match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("setfork-core: проекция {template_id}: тег v{ver} не поставлен: {e}"),
+        Err(e) => eprintln!("setfork-core: проекция {template_id}: тег v{ver} не поставлен (задача прервана): {e}"),
+    }
+    Ok(Some(ver))
 }
 
 #[cfg(test)]
