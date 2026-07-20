@@ -3,6 +3,8 @@ name = "setfork-core"
 version = "0.1.0"
 edition = "2024"
 description = "SetFork git-core service (Gitaly-style): serves proto/git.proto over gRPC/Connect."
+# Проприетарный код SetFork — не публикуется в crates.io (cargo-deny: private ignore).
+publish = false
 
 [[bin]]
 name = "setfork-core"

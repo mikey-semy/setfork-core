@@ -1,0 +1,31 @@
+# cargo-deny: лицензии, дубли версий, источники зависимостей.
+# Advisories (RustSec) — отдельный job rustsec/audit-check в audit.yml, здесь не дублируем.
+# Локальный прогон: cargo deny check licenses bans sources
+
+[licenses]
+# Разрешённые лицензии графа зависимостей (все permissive; копилефта в графе нет).
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "Unicode-3.0",
+  "MPL-2.0",
+]
+confidence-threshold = 0.9
+# Свои непубликуемые крейты (publish = false) — проприетарные, license-поле не требуем.
+private = { ignore = true }
+
+[bans]
+# Дубли версий неизбежны в большом графе (rand 0.9/0.10 и т.п.) — предупреждаем,
+# не валим: контроль без шума. Ужесточить после чистки графа.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
