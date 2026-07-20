@@ -71,7 +71,7 @@ async fn golden_domain_read_and_materialization() {
     seed_fixed(&pool).await;
 
     // 1. Канонический domain-read JSON (тот же код-пас, что CLI `domain-read`).
-    let json = services::list::golden_json(&pool, "golden", "golden-list").await.expect("golden_json");
+    let json = services::golden::golden_json(&pool, "golden", "golden-list").await.expect("golden_json");
     compare_or_update(
         "tests/fixtures/golden-domain-read.json",
         &format!("{}\n", serde_json::to_string_pretty(&json).unwrap()),

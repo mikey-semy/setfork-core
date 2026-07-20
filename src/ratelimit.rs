@@ -32,10 +32,6 @@ const HEAVY: &[&str] = &[
     "AddVersion", // ListWrite.AddVersion — новая версия + шаги
 ];
 
-fn env_limit(name: &str, default: u32) -> u32 {
-    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
-}
-
 #[derive(Clone)]
 pub struct RateLimitLayer {
     inner: Arc<State>,
@@ -52,16 +48,14 @@ struct State {
 }
 
 impl RateLimitLayer {
-    pub fn from_env() -> Self {
-        let rpm = env_limit("SETFORK_RPC_RPM", 600);
-        let rpm_heavy = env_limit("SETFORK_RPC_RPM_HEAVY", 60);
-        let expected_auth =
-            std::env::var("SETFORK_CORE_TOKEN").ok().filter(|t| !t.is_empty()).map(|t| format!("Bearer {t}"));
+    /// Параметры — из config::Config: env здесь больше не читаем (токен
+    /// читался дважды — main и этот модуль; аудит 2026-07-20, P2-14).
+    pub fn new(rpm: u32, rpm_heavy: u32, token: Option<&str>) -> Self {
         tracing::info!(rpm, rpm_heavy, "rate-limit per-метод (0 = выкл)");
-        Self::with(rpm, rpm_heavy, expected_auth)
+        Self::with(rpm, rpm_heavy, token.map(|t| format!("Bearer {t}")))
     }
 
-    // Явные параметры — общий конструктор from_env и юнит-тестов.
+    // Явные параметры — общий конструктор new и юнит-тестов.
     fn with(rpm: u32, rpm_heavy: u32, expected_auth: Option<String>) -> Self {
         Self { inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }) }
     }

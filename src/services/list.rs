@@ -18,15 +18,15 @@ use sqlx::postgres::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use super::util::{internal, loc_json, loc_map, parse_id, refs_json};
-use crate::blocks::is_step_type;
+use super::util::{db_status, loc_json, loc_map, parse_id, refs_json};
+use crate::blocks::{content_value, storage_type, wire_type};
 use crate::db;
 use crate::pb_domain::list_read_server::ListRead;
 use crate::pb_domain::list_write_server::ListWrite;
 use crate::pb_domain::{
     AddVersionRequest, Contributor, ContributorsResponse, CreateListRequest, GetListResponse,
-    GetVersionRequest, GetVersionResponse, List, ListId, ListRef, LocaleText, NewStep, Step, StepRef,
-    Version, VersionsResponse,
+    GetVersionRequest, GetVersionResponse, List, ListId, ListRef, NewStep, Step, StepRef, Version,
+    VersionsResponse,
 };
 
 /// ListRead: чтение списков/версий/шагов (зеркало list-store.adapter.ts).
@@ -34,92 +34,7 @@ pub struct ListReadSvc {
     pub pool: PgPool,
 }
 
-// ── Golden-сверка с TS ────────────────────────────────────────────────
-// Канонический JSON (camelCase, '' → null) — сравнивается со скриптом
-// scripts/golden-domain-read.ts на TS-стороне. avatarRef нормализуется в null
-// на ОБЕИХ сторонах (TS подписывает imgproxy-URL — недетерминированно).
-
-fn jloc(l: &Option<LocaleText>) -> serde_json::Value {
-    let mut m = serde_json::Map::new();
-    if let Some(lt) = l {
-        let mut keys: Vec<_> = lt.v.keys().collect();
-        keys.sort();
-        for k in keys {
-            m.insert(k.clone(), serde_json::Value::String(lt.v[k].clone()));
-        }
-    }
-    serde_json::Value::Object(m)
-}
-
-fn jnull(s: &str) -> serde_json::Value {
-    if s.is_empty() { serde_json::Value::Null } else { serde_json::Value::String(s.to_string()) }
-}
-
-fn jver(v: &Version) -> serde_json::Value {
-    serde_json::json!({
-        "id": v.id, "listId": v.list_id, "version": v.version, "note": v.note,
-        "commitSha": serde_json::Value::Null, "createdAtMs": v.created_at_ms,
-    })
-}
-
-pub async fn golden_json(
-    pool: &PgPool,
-    owner: &str,
-    slug: &str,
-) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
-    let svc = ListReadSvc { pool: pool.clone() };
-    let gl =
-        svc.get_list(Request::new(ListRef { owner: owner.into(), slug: slug.into() })).await?.into_inner();
-    if !gl.found {
-        return Ok(serde_json::json!({ "found": false }));
-    }
-    let l = gl.list.unwrap();
-    let versions = svc.list_versions(Request::new(ListId { id: l.id.clone() })).await?.into_inner().versions;
-    let cur = svc
-        .get_version(Request::new(GetVersionRequest { list_id: l.id.clone(), version: l.current_version }))
-        .await?
-        .into_inner();
-    let contributors =
-        svc.get_contributors(Request::new(ListId { id: l.id.clone() })).await?.into_inner().contributors;
-
-    let steps: Vec<serde_json::Value> = cur
-        .steps
-        .iter()
-        .map(|s| {
-            serde_json::json!({
-                "id": s.id, "versionId": s.version_id, "n": s.n,
-                "title": jloc(&s.title), "desc": jloc(&s.desc), "command": s.command,
-                "level": s.level, "why": jloc(&s.why), "section": jloc(&s.section),
-                "subtasks": s.subtasks.iter().map(|t| jloc(&Some(t.clone()))).collect::<Vec<_>>(),
-                "refs": s.refs.iter().map(|r| serde_json::json!({ "label": jloc(&r.label), "url": jnull(&r.url) })).collect::<Vec<_>>(),
-                "imageRef": jnull(&s.image_ref),
-            })
-        })
-        .collect();
-
-    Ok(serde_json::json!({
-        "found": true,
-        "list": {
-            "id": l.id, "ownerId": l.owner_id, "slug": l.slug,
-            "title": jloc(&l.title), "desc": jloc(&l.desc), "tags": l.tags,
-            "ordered": l.ordered, "status": l.status, "visibility": l.visibility,
-            "moderation": l.moderation, "moderationReason": jnull(&l.moderation_reason),
-            "verified": l.verified, "pinned": l.pinned, "origin": l.origin,
-            "forkedFromId": jnull(&l.forked_from_id), "currentVersion": l.current_version,
-            "starsCount": l.stars_count, "forksCount": l.forks_count, "runsCount": l.runs_count,
-            "repositoryId": l.repository_id,
-            "createdAtMs": l.created_at_ms, "updatedAtMs": l.updated_at_ms,
-        },
-        "versions": versions.iter().map(jver).collect::<Vec<_>>(),
-        "current": {
-            "version": cur.version.as_ref().map(jver).unwrap_or(serde_json::Value::Null),
-            "steps": steps,
-        },
-        "contributors": contributors.iter().map(|c| serde_json::json!({
-            "handle": c.handle, "avatarRef": serde_json::Value::Null, "accepted": c.accepted,
-        })).collect::<Vec<_>>(),
-    }))
-}
+// Golden-сверка с TS вынесена в services::golden (инструмент CLI, не RPC).
 
 #[tonic::async_trait]
 impl ListRead for ListReadSvc {
@@ -138,7 +53,7 @@ impl ListRead for ListReadSvc {
         .bind(&slug)
         .fetch_optional(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
 
         let Some(r) = row else {
             return Ok(Response::new(GetListResponse { found: false, list: None }));
@@ -185,7 +100,7 @@ impl ListRead for ListReadSvc {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         let versions = rows
             .iter()
             .map(|r| Version {
@@ -215,7 +130,7 @@ impl ListRead for ListReadSvc {
         .bind(version)
         .fetch_optional(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         let Some(v) = vrow else {
             return Ok(Response::new(GetVersionResponse { found: false, version: None, steps: vec![] }));
         };
@@ -237,7 +152,7 @@ impl ListRead for ListReadSvc {
         .bind(vid)
         .fetch_all(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         let steps = srows
             .iter()
             .map(|s| {
@@ -259,10 +174,7 @@ impl ListRead for ListReadSvc {
                     })
                     .unwrap_or_default();
                 // '' у шага (в т.ч. NULL/'step'); тип несём только у text/image.
-                let block_ty = {
-                    let t = s.get::<Option<String>, _>("type").unwrap_or_default();
-                    if is_step_type(&t) { String::new() } else { t }
-                };
+                let block_ty = wire_type(s.get::<Option<String>, _>("type").as_deref());
                 Step {
                     id: s.get::<Uuid, _>("id").to_string(),
                     version_id: s.get::<Uuid, _>("version_id").to_string(),
@@ -297,7 +209,7 @@ impl ListRead for ListReadSvc {
             .bind(id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(internal)?;
+            .map_err(db_status)?;
         let Some(tpl) = tpl else {
             return Ok(Response::new(ContributorsResponse { contributors: vec![] }));
         };
@@ -308,7 +220,7 @@ impl ListRead for ListReadSvc {
             .bind(owner_id)
             .fetch_optional(&self.pool)
             .await
-            .map_err(internal)?;
+            .map_err(db_status)?;
         if let Some(o) = owner {
             out.push(Contributor {
                 handle: o.get("handle"),
@@ -328,7 +240,7 @@ impl ListRead for ListReadSvc {
         .bind(id)
         .fetch_all(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         for r in rows {
             let author: Uuid = r.get("author_id");
             if author == owner_id {
@@ -354,15 +266,10 @@ pub struct ListWriteSvc {
 // NewStep → db::StepRow: семантика TS-адаптера как есть — LocaleText без trim
 // и фильтрации, imageRef → image_key, пустой level = required.
 fn step_row(s: &NewStep) -> db::StepRow {
-    // Блочная модель: не-step блоки несут type/content; у шага — 'step'/{}.
-    let is_step = is_step_type(&s.r#type);
+    // Блочная модель: правила нормализации type/content — в blocks (одно место).
     db::StepRow {
-        block_type: if is_step { "step".into() } else { s.r#type.clone() },
-        content: if is_step || s.content_json.is_empty() {
-            serde_json::json!({})
-        } else {
-            serde_json::from_str(&s.content_json).unwrap_or_else(|_| serde_json::json!({}))
-        },
+        block_type: storage_type(&s.r#type),
+        content: content_value(&s.r#type, &s.content_json),
         title: loc_json(&s.title),
         desc: loc_json(&s.desc),
         command: s.command.clone(),
@@ -383,7 +290,7 @@ impl ListWrite for ListWriteSvc {
         let rows: Vec<db::StepRow> = steps.iter().map(step_row).collect();
         // Транзакция «новая версия» общая с git-проекцией — db::add_version_rows.
         let Some((ver_id, new_version, created_ms)) =
-            db::add_version_rows(&self.pool, tid, &note, &rows).await.map_err(internal)?
+            db::add_version_rows(&self.pool, tid, &note, &rows).await.map_err(db_status)?
         else {
             return Err(Status::not_found("list not found"));
         };
@@ -406,7 +313,7 @@ impl ListWrite for ListWriteSvc {
             Some(Uuid::parse_str(&r.forked_from_id).map_err(|_| Status::invalid_argument("bad fork uuid"))?)
         };
 
-        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let mut tx = self.pool.begin().await.map_err(db_status)?;
         let row: (Uuid, i64, i64) = sqlx::query_as(
             "insert into templates (owner_id, slug, title, \"desc\", tags, ordered, visibility, status,                                     origin, forked_from_id, current_version)              values ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::list_visibility, $8::list_status,                      $9::template_origin, $10, 1)              returning id, floor(extract(epoch from created_at) * 1000)::bigint,                        floor(extract(epoch from updated_at) * 1000)::bigint",
         )
@@ -422,7 +329,7 @@ impl ListWrite for ListWriteSvc {
         .bind(forked_from)
         .fetch_one(&mut *tx)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         let (tid, created_ms, updated_ms) = row;
 
         let ver_id: Uuid = sqlx::query_scalar(
@@ -432,10 +339,10 @@ impl ListWrite for ListWriteSvc {
         .bind(&r.note)
         .fetch_one(&mut *tx)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         let rows: Vec<db::StepRow> = r.steps.iter().map(step_row).collect();
-        db::insert_step_rows(&mut tx, ver_id, &rows).await.map_err(internal)?;
-        tx.commit().await.map_err(internal)?;
+        db::insert_step_rows(&mut tx, ver_id, &rows).await.map_err(db_status)?;
+        tx.commit().await.map_err(db_status)?;
 
         Ok(Response::new(List {
             id: tid.to_string(),

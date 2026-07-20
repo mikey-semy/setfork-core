@@ -4,8 +4,8 @@ use sqlx::postgres::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use super::util::{internal, loc_json, loc_map, parse_id, refs_json};
-use crate::blocks::is_step_type;
+use super::util::{db_status, loc_json, loc_map, parse_id, refs_json};
+use crate::blocks::{content_value, is_step_type, wire_type};
 use crate::pb_domain::collab_write_server::CollabWrite;
 use crate::pb_domain::{
     AddIssueCommentRequest, AddSuggestionCommentRequest, BoolResponse, CreateSuggestionRequest, Issue,
@@ -41,12 +41,7 @@ fn proposed_json(s: &NewStep) -> serde_json::Value {
     // Блочная модель: type/content — только у не-step блоков (как toProposedItems в TS).
     if !is_step_type(&s.r#type) {
         m.insert("type".into(), serde_json::Value::String(s.r#type.clone()));
-        let content = if s.content_json.is_empty() {
-            serde_json::json!({})
-        } else {
-            serde_json::from_str(&s.content_json).unwrap_or_else(|_| serde_json::json!({}))
-        };
-        m.insert("content".into(), content);
+        m.insert("content".into(), content_value(&s.r#type, &s.content_json));
     }
     serde_json::Value::Object(m)
 }
@@ -83,7 +78,7 @@ fn json_to_step(v: &serde_json::Value) -> NewStep {
         refs,
         image_ref: v.get("imageKey").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         // type/content_json — только у не-step блоков.
-        r#type: if is_step_type(ty) { String::new() } else { ty.to_string() },
+        r#type: wire_type(Some(ty)),
         content_json: if is_step_type(ty) {
             String::new()
         } else {
@@ -120,7 +115,7 @@ impl CollabWrite for CollabWriteSvc {
         .bind(&labels_json)
         .fetch_one(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         Ok(Response::new(Issue {
             id: r.get::<Uuid, _>("id").to_string(),
             list_id,
@@ -152,7 +147,7 @@ impl CollabWrite for CollabWriteSvc {
         .bind(&body)
         .fetch_one(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         Ok(Response::new(IssueComment {
             id: r.get::<Uuid, _>("id").to_string(),
             issue_id,
@@ -177,7 +172,7 @@ impl CollabWrite for CollabWriteSvc {
         .bind(&status)
         .execute(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         Ok(Response::new(BoolResponse { value: true }))
     }
 
@@ -201,7 +196,7 @@ impl CollabWrite for CollabWriteSvc {
         .bind(&items)
         .fetch_one(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         let items_back: serde_json::Value = r.get("items");
         let out_steps =
             items_back.as_array().map(|a| a.iter().map(json_to_step).collect()).unwrap_or_default();
@@ -234,7 +229,7 @@ impl CollabWrite for CollabWriteSvc {
         .bind(&body)
         .fetch_one(&self.pool)
         .await
-        .map_err(internal)?;
+        .map_err(db_status)?;
         Ok(Response::new(SuggestionComment {
             id: r.get::<Uuid, _>("id").to_string(),
             suggestion_id,

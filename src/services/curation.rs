@@ -6,7 +6,7 @@ use sqlx::postgres::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use super::util::{internal, parse_id};
+use super::util::{db_status, parse_id};
 use crate::pb_domain::curation_read_server::CurationRead;
 use crate::pb_domain::curation_write_server::CurationWrite;
 use crate::pb_domain::{BoolResponse, CountResponse, IdsResponse, ListId, UserList};
@@ -27,7 +27,7 @@ impl CurationRead for CurationReadSvc {
                 .bind(uid)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
         Ok(Response::new(BoolResponse { value: row.is_some() }))
     }
 
@@ -40,7 +40,7 @@ impl CurationRead for CurationReadSvc {
                 .bind(uid)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
         Ok(Response::new(BoolResponse { value: row.is_some() }))
     }
 
@@ -50,7 +50,7 @@ impl CurationRead for CurationReadSvc {
             .bind(tid)
             .fetch_one(&self.pool)
             .await
-            .map_err(internal)?;
+            .map_err(db_status)?;
         Ok(Response::new(CountResponse { value: n as i32 }))
     }
 
@@ -61,7 +61,7 @@ impl CurationRead for CurationReadSvc {
                 .bind(tid)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
         Ok(Response::new(IdsResponse { ids: rows.iter().map(|r| r.0.to_string()).collect() }))
     }
 }
@@ -76,26 +76,26 @@ impl CurationWrite for CurationWriteSvc {
     async fn toggle_star(&self, req: Request<UserList>) -> Result<Response<BoolResponse>, Status> {
         let UserList { list_id, user_id } = req.into_inner();
         let (tid, uid) = (parse_id(&list_id)?, parse_id(&user_id)?);
-        let mut tx = self.pool.begin().await.map_err(internal)?;
+        let mut tx = self.pool.begin().await.map_err(db_status)?;
         let existed: Option<(i32,)> =
             sqlx::query_as("select 1 from stars where user_id = $1 and template_id = $2 limit 1")
                 .bind(uid)
                 .bind(tid)
                 .fetch_optional(&mut *tx)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
         let now_starred = if existed.is_some() {
             sqlx::query("delete from stars where user_id = $1 and template_id = $2")
                 .bind(uid)
                 .bind(tid)
                 .execute(&mut *tx)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
             sqlx::query("update templates set stars_count = GREATEST(stars_count - 1, 0) where id = $1")
                 .bind(tid)
                 .execute(&mut *tx)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
             false
         } else {
             sqlx::query("insert into stars (user_id, template_id) values ($1, $2) on conflict do nothing")
@@ -103,15 +103,15 @@ impl CurationWrite for CurationWriteSvc {
                 .bind(tid)
                 .execute(&mut *tx)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
             sqlx::query("update templates set stars_count = stars_count + 1 where id = $1")
                 .bind(tid)
                 .execute(&mut *tx)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
             true
         };
-        tx.commit().await.map_err(internal)?;
+        tx.commit().await.map_err(db_status)?;
         Ok(Response::new(BoolResponse { value: now_starred }))
     }
 
@@ -124,14 +124,14 @@ impl CurationWrite for CurationWriteSvc {
                 .bind(tid)
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
         let now_watching = if existed.is_some() {
             sqlx::query("delete from watches where user_id = $1 and template_id = $2")
                 .bind(uid)
                 .bind(tid)
                 .execute(&self.pool)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
             false
         } else {
             sqlx::query("insert into watches (user_id, template_id) values ($1, $2) on conflict do nothing")
@@ -139,7 +139,7 @@ impl CurationWrite for CurationWriteSvc {
                 .bind(tid)
                 .execute(&self.pool)
                 .await
-                .map_err(internal)?;
+                .map_err(db_status)?;
             true
         };
         Ok(Response::new(BoolResponse { value: now_watching }))
@@ -153,7 +153,7 @@ impl CurationWrite for CurationWriteSvc {
             .bind(tid)
             .execute(&self.pool)
             .await
-            .map_err(internal)?;
+            .map_err(db_status)?;
         Ok(Response::new(BoolResponse { value: true }))
     }
 }

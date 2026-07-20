@@ -14,8 +14,10 @@ fn pkt_line(s: &str) -> Vec<u8> {
 }
 
 /// Запуск git с опциональным stdin и GIT_PROTOCOL; возвращает stdout.
-/// Тело negotiation мало и умещается в буфер пайпа, поэтому пишем целиком
-/// до чтения stdout (для больших тел позже перейдём на gix без шелла).
+/// Тело пишется в stdin ПАРАЛЛЕЛЬНО чтению stdout (scoped-поток): раньше
+/// запись шла целиком до чтения, и большой push дедлочил оба конца пайпа —
+/// git блокировался на записи sideband-прогресса при полном stdout-пайпе,
+/// мы — на записи пака (аудит 2026-07-20, P1-4; регрессионный тест внизу).
 fn run_git_io(args: &[&str], input: Option<&[u8]>, git_protocol: Option<&str>) -> io::Result<Vec<u8>> {
     let mut cmd = Command::new("git");
     cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -25,14 +27,25 @@ fn run_git_io(args: &[&str], input: Option<&[u8]>, git_protocol: Option<&str>) -
         cmd.env("GIT_PROTOCOL", p);
     }
     let mut child = cmd.spawn()?;
-    {
-        // take() + drop в конце блока закрывает stdin (EOF), даже если input=None.
-        let mut stdin = child.stdin.take().expect("stdin piped");
-        if let Some(data) = input {
-            stdin.write_all(data)?;
+    let mut stdin = child.stdin.take().expect("stdin piped");
+    let out = std::thread::scope(|s| -> io::Result<std::process::Output> {
+        let writer = s.spawn(move || -> io::Result<()> {
+            if let Some(data) = input {
+                stdin.write_all(data)?;
+            }
+            Ok(()) // drop stdin → EOF
+        });
+        let out = child.wait_with_output()?;
+        match writer.join() {
+            Ok(Ok(())) => {}
+            // git мог завершиться, не дочитав вход (ошибка протокола) — EPIPE
+            // не маскирует причину: ниже отдадим stderr по exit-коду.
+            Ok(Err(e)) if e.kind() == io::ErrorKind::BrokenPipe => {}
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(io::Error::other("git stdin writer panicked")),
         }
-    }
-    let out = child.wait_with_output()?;
+        Ok(out)
+    })?;
     if !out.status.success() {
         return Err(io::Error::other(format!(
             "git {:?} failed: {}",
@@ -74,4 +87,32 @@ pub fn receive_pack_advertise(repo_dir: &Path, git_protocol: Option<&str>) -> io
 pub fn receive_pack_rpc(repo_dir: &Path, body: &[u8], git_protocol: Option<&str>) -> io::Result<Vec<u8>> {
     let dir = repo_dir.to_string_lossy().to_string();
     run_git_io(&["receive-pack", "--stateless-rpc", &dir], Some(body), git_protocol)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_git_io;
+    use std::process::Command;
+
+    // Регрессия дедлока (аудит P1-4): git пишет вывод, ПОКА мы пишем ввод.
+    // `cat-file --batch` отвечает строкой на строку: >64КБ в обе стороны
+    // забивали оба OS-пайпа при последовательной записи. До фикса тест ВИСНЕТ
+    // (не падает!), после — проходит мгновенно.
+    #[test]
+    fn large_bidirectional_io_does_not_deadlock() {
+        let dir = std::env::temp_dir().join(format!("setfork-sh-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(
+            Command::new("git").args(["init", "-q", "--bare"]).arg(&dir).status().unwrap().success(),
+            "git init"
+        );
+        // ~1.2 МБ запросов; каждый даёт в ответ строку "<oid> missing".
+        let line = "0123456789012345678901234567890123456789\n";
+        let input = line.repeat(30_000);
+        let dir_s = dir.to_string_lossy().to_string();
+        let out = run_git_io(&["-C", &dir_s, "cat-file", "--batch"], Some(input.as_bytes()), None)
+            .expect("cat-file --batch");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.len() > 30_000 * 8, "ответ построчный и не пуст ({} байт)", out.len());
+    }
 }
