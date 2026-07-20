@@ -28,16 +28,25 @@ jobs:
 
   # Лицензии/дубли/источники графа зависимостей (deny.toml). Advisories не
   # дублируем — их закрывает job cargo-audit выше.
+  # НЕ cargo-deny-action: это docker-экшен (не работает с sibling-демоном), а его
+  # скачивание релиз-бинаря с release-assets.githubusercontent.com из контейнера
+  # рвётся сетью (DPI/шейпинг у провайдера). crates.io доступен → собираем сами.
   cargo-deny:
     runs-on: [self-hosted, setfork-core]
     steps:
       - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check licenses bans sources
+      - name: toolchain + cargo-deny из crates.io
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends build-essential pkg-config
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/cargo" install --locked cargo-deny
+      - run: cargo deny check licenses bans sources
 
-  # Скан секретов в истории коммитов (git-режим). Нативный бинарь, не docker:
-  # маунт $PWD из sibling-демона монтирует НЕ рабочую копию (см. ci.yml).
+  # Скан секретов в истории коммитов (git-режим). Образ — с Docker Hub (доступен);
+  # рабочая копия заносится через `docker cp` — bind-mount $PWD из sibling-демона
+  # монтировал бы пустоту, а релиз-бинарь gitleaks не скачивается (см. выше).
   secrets:
     runs-on: [self-hosted, setfork-core]
     steps:
@@ -46,7 +55,11 @@ jobs:
           fetch-depth: 0
       - name: gitleaks (secret scan)
         run: |
-          curl -fsSL -o /tmp/gitleaks.tar.gz \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
-          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-          /tmp/gitleaks detect --source=. --redact --exit-code 1
+          docker rm -f "gl-${GITHUB_RUN_ID}" >/dev/null 2>&1 || true
+          docker create --name "gl-${GITHUB_RUN_ID}" zricethezav/gitleaks:latest \
+            detect --source=/repo --redact --exit-code 1
+          docker cp . "gl-${GITHUB_RUN_ID}:/repo"
+          docker start -a "gl-${GITHUB_RUN_ID}"
+      - name: cleanup
+        if: always()
+        run: docker rm -f "gl-${GITHUB_RUN_ID}" >/dev/null 2>&1 || true
