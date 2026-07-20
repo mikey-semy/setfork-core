@@ -60,6 +60,11 @@ impl RateLimitLayer {
             .filter(|t| !t.is_empty())
             .map(|t| format!("Bearer {t}"));
         tracing::info!(rpm, rpm_heavy, "rate-limit per-метод (0 = выкл)");
+        Self::with(rpm, rpm_heavy, expected_auth)
+    }
+
+    // Явные параметры — общий конструктор from_env и юнит-тестов.
+    fn with(rpm: u32, rpm_heavy: u32, expected_auth: Option<String>) -> Self {
         Self {
             inner: Arc::new(State { rpm, rpm_heavy, expected_auth, windows: Mutex::new(HashMap::new()) }),
         }
@@ -146,5 +151,67 @@ where
                 .expect("static response");
             futures_util::future::Either::Right(futures_util::future::ready(Ok(resp)))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn limited(rpm: u32, rpm_heavy: u32, auth: Option<&str>) -> RateLimited<()> {
+        let layer = RateLimitLayer::with(rpm, rpm_heavy, auth.map(str::to_string));
+        RateLimited { inner: (), state: layer.inner }
+    }
+
+    const M: &str = "/setfork.domain.v1.ListRead/GetList"; // обычный метод
+    const H: &str = "/setfork.git.v1.GitCore/ReceivePack"; // тяжёлый метод
+
+    #[test]
+    fn allows_under_limit_blocks_over() {
+        let rl = limited(2, 60, None);
+        assert!(rl.allow(M, None));
+        assert!(rl.allow(M, None));
+        assert!(!rl.allow(M, None), "третий запрос сверх rpm=2 в одном окне");
+    }
+
+    #[test]
+    fn heavy_has_separate_budget() {
+        let rl = limited(10, 1, None);
+        assert!(rl.allow(H, None));
+        assert!(!rl.allow(H, None), "второй тяжёлый сверх heavy=1");
+        assert!(rl.allow(M, None), "обычный бюджет не задет тяжёлым");
+    }
+
+    #[test]
+    fn zero_limit_disables() {
+        let rl = limited(0, 0, None);
+        for _ in 0..100 {
+            assert!(rl.allow(M, None));
+            assert!(rl.allow(H, None));
+        }
+    }
+
+    #[test]
+    fn health_and_reflection_bypass() {
+        let rl = limited(1, 1, None);
+        assert!(rl.allow(M, None));
+        assert!(!rl.allow(M, None));
+        for _ in 0..10 {
+            assert!(rl.allow("/grpc.health.v1.Health/Check", None));
+            assert!(rl.allow("/grpc.reflection.v1.ServerReflection/ServerReflectionInfo", None));
+        }
+    }
+
+    #[test]
+    fn unauthorized_do_not_consume_window() {
+        let rl = limited(1, 1, Some("Bearer secret"));
+        // Без/с чужим токеном — пропускаем (auth-интерцептор ниже вернёт 16),
+        // окно НЕ расходуется: иначе любой с доступом к порту DoS-ит бюджет метода.
+        for _ in 0..10 {
+            assert!(rl.allow(M, None));
+            assert!(rl.allow(M, Some("Bearer wrong")));
+        }
+        assert!(rl.allow(M, Some("Bearer secret")), "первый авторизованный проходит");
+        assert!(!rl.allow(M, Some("Bearer secret")), "второй авторизованный сверх rpm=1");
     }
 }

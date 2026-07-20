@@ -25,8 +25,9 @@ pub struct GitCoreSvc {
 }
 
 impl GitCoreSvc {
-    // Резолв списка + загрузка всей истории версий (общее для всех RPC).
-    pub(crate) async fn load(&self, owner: &str, slug: &str) -> Result<Vec<VersionData>, Status> {
+    // Резолв списка + загрузка всей истории версий (общее для всех RPC;
+    // pub — используется golden-CLI в бинаре, см. main.rs).
+    pub async fn load(&self, owner: &str, slug: &str) -> Result<Vec<VersionData>, Status> {
         let (id, _v) = db::resolve_list(&self.pool, owner, slug)
             .await
             .map_err(internal)?
@@ -37,7 +38,8 @@ impl GitCoreSvc {
     }
 
     // Общая реализация bundle: загрузка версий → материализация → git bundle.
-    pub(crate) async fn build(&self, owner: &str, slug: &str) -> Result<Vec<u8>, Status> {
+    // pub — используется golden-CLI в бинаре (main.rs).
+    pub async fn build(&self, owner: &str, slug: &str) -> Result<Vec<u8>, Status> {
         let versions = self.load(owner, slug).await?;
         tokio::task::spawn_blocking(move || bundle::build_bundle(&versions))
             .await
