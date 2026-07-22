@@ -257,6 +257,7 @@ pub async fn add_version_rows(
     pool: &PgPool,
     template_id: Uuid,
     note: &str,
+    author_id: Option<Uuid>,
     rows: &[StepRow],
 ) -> Result<Option<(Uuid, i32, i64)>, sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -270,12 +271,13 @@ pub async fn add_version_rows(
     };
     let new_version = current + 1;
     let (ver_id, created_ms): (Uuid, i64) = sqlx::query_as(
-        "insert into template_versions (template_id, version, note) values ($1, $2, $3) \
+        "insert into template_versions (template_id, version, note, author_id) values ($1, $2, $3, $4) \
          returning id, floor(extract(epoch from created_at) * 1000)::bigint",
     )
     .bind(template_id)
     .bind(new_version)
     .bind(note)
+    .bind(author_id)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -340,7 +342,7 @@ pub async fn add_version(
     steps: &[ProjStep],
 ) -> Result<i32, sqlx::Error> {
     let rows: Vec<StepRow> = steps.iter().map(proj_step_row).collect();
-    match add_version_rows(pool, template_id, note, &rows).await? {
+    match add_version_rows(pool, template_id, note, None, &rows).await? {
         Some((_ver_id, version, _ms)) => Ok(version),
         None => Err(sqlx::Error::RowNotFound),
     }

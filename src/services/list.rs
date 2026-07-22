@@ -93,7 +93,7 @@ impl ListRead for ListReadSvc {
     async fn list_versions(&self, req: Request<ListId>) -> Result<Response<VersionsResponse>, Status> {
         let id = parse_id(&req.into_inner().id)?;
         let rows = sqlx::query(
-            "select id, template_id, version, note, \
+            "select id, template_id, version, note, author_id::text as author_id, \
                     floor(extract(epoch from created_at) * 1000)::bigint as created_at_ms \
              from template_versions where template_id = $1 order by version desc",
         )
@@ -110,6 +110,7 @@ impl ListRead for ListReadSvc {
                 note: r.get("note"),
                 commit_sha: String::new(), // TS: всегда null
                 created_at_ms: r.get("created_at_ms"),
+                author_id: r.get::<Option<String>, _>("author_id").unwrap_or_default(),
             })
             .collect();
         Ok(Response::new(VersionsResponse { versions }))
@@ -122,7 +123,7 @@ impl ListRead for ListReadSvc {
         let GetVersionRequest { list_id, version } = req.into_inner();
         let id = parse_id(&list_id)?;
         let vrow = sqlx::query(
-            "select id, template_id, version, note, \
+            "select id, template_id, version, note, author_id::text as author_id, \
                     floor(extract(epoch from created_at) * 1000)::bigint as created_at_ms \
              from template_versions where template_id = $1 and version = $2 limit 1",
         )
@@ -142,6 +143,7 @@ impl ListRead for ListReadSvc {
             note: v.get("note"),
             commit_sha: String::new(),
             created_at_ms: v.get("created_at_ms"),
+            author_id: v.get::<Option<String>, _>("author_id").unwrap_or_default(),
         };
 
         let srows = sqlx::query(
@@ -285,12 +287,14 @@ fn step_row(s: &NewStep) -> db::StepRow {
 #[tonic::async_trait]
 impl ListWrite for ListWriteSvc {
     async fn add_version(&self, req: Request<AddVersionRequest>) -> Result<Response<Version>, Status> {
-        let AddVersionRequest { list_id, note, steps } = req.into_inner();
+        let AddVersionRequest { list_id, note, steps, author_id } = req.into_inner();
         let tid = parse_id(&list_id)?;
+        // author_id: '' = null (фоновые/git-пути автора не знают).
+        let author = if author_id.is_empty() { None } else { Some(parse_id(&author_id)?) };
         let rows: Vec<db::StepRow> = steps.iter().map(step_row).collect();
         // Транзакция «новая версия» общая с git-проекцией — db::add_version_rows.
         let Some((ver_id, new_version, created_ms)) =
-            db::add_version_rows(&self.pool, tid, &note, &rows).await.map_err(db_status)?
+            db::add_version_rows(&self.pool, tid, &note, author, &rows).await.map_err(db_status)?
         else {
             return Err(Status::not_found("list not found"));
         };
@@ -302,6 +306,7 @@ impl ListWrite for ListWriteSvc {
             note,
             commit_sha: String::new(),
             created_at_ms: created_ms,
+            author_id,
         }))
     }
     async fn create(&self, req: Request<CreateListRequest>) -> Result<Response<List>, Status> {
@@ -333,10 +338,11 @@ impl ListWrite for ListWriteSvc {
         let (tid, created_ms, updated_ms) = row;
 
         let ver_id: Uuid = sqlx::query_scalar(
-            "insert into template_versions (template_id, version, note) values ($1, 1, $2) returning id",
+            "insert into template_versions (template_id, version, note, author_id) values ($1, 1, $2, $3) returning id",
         )
         .bind(tid)
         .bind(&r.note)
+        .bind(owner)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_status)?;
