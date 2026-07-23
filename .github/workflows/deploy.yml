@@ -26,7 +26,16 @@ env:
 
 jobs:
   deploy:
-    if: github.event.workflow_run.conclusion == 'success'
+    # Деплоим ТОЛЬКО реальный push в наш master, не форк-PR. head_branch
+    # подделывается именем форк-ветки (назвал ветку форка `master` — фильтр
+    # branches:[master] выше матчится), поэтому дополнительно требуем: событие
+    # CI-прогона = push (не pull_request) И прогон из САМОГО репозитория
+    # (head_repository == этот репо, не форк). См. security-скан 2026-07-23, F2 (CWE-829).
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'master'
     runs-on: [self-hosted, setfork-core]
     steps:
       - uses: actions/checkout@v4
@@ -53,3 +62,10 @@ jobs:
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
           sleep 5
           $SSH "docker ps --filter name=setfork-core --format '{{.Names}} {{.Status}}' | grep -q 'Up' " || { echo "::error::контейнер ядра не поднялся"; $SSH "docker logs --tail 50 setfork-core"; exit 1; }
+
+      # Копию ключа не оставляем на общем раннере (там же гоняется PR-код из ci.yml).
+      # Корневой mount /ssh/setfork — забота инфры (setfork-ci-runner), но лишнюю
+      # копию в /tmp затираем всегда. См. security-скан 2026-07-23, F3 (CWE-522).
+      - name: Очистка ключа деплоя
+        if: always()
+        run: shred -u /tmp/deploy_key 2>/dev/null || rm -f /tmp/deploy_key

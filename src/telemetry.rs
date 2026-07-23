@@ -52,7 +52,15 @@ where
             if path.starts_with("/grpc.health") || path.starts_with("/grpc.reflection") {
                 return res;
             }
-            let method = path.rsplit('/').next().unwrap_or(&path).to_string();
+            // Сырой последний сегмент пути НЕ идёт в лейбл метрики напрямую:
+            // атакующий шлёт бесконечно много несуществующих путей (/svc/AAAA…),
+            // каждый плодил бы новую серию Prometheus (в памяти навсегда) → OOM.
+            // Незнакомый путь роутер tonic отдаёт как UNIMPLEMENTED (код 12) —
+            // такие сворачиваем в фиксированный лейбл, а auth-интерцептор для них
+            // не запускается (per-service, после роутинга), так что код 12 их
+            // однозначно ловит. Реальные методы (конечный набор из proto) остаются
+            // под своими именами. См. security-скан 2026-07-23, F4 (CWE-770).
+            let raw_method = path.rsplit('/').next().unwrap_or(&path);
             let ms = start.elapsed().as_secs_f64() * 1000.0;
             match &res {
                 Ok(resp) => {
@@ -62,6 +70,8 @@ where
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("0")
                         .to_string();
+                    let method =
+                        if code == "12" { "unimplemented".to_string() } else { raw_method.to_string() };
                     metrics::counter!("rpc_requests_total", "method" => method.clone(), "code" => code.clone())
                         .increment(1);
                     metrics::histogram!("rpc_duration_seconds", "method" => method.clone())
@@ -76,9 +86,11 @@ where
                     }
                 }
                 Err(_) => {
-                    metrics::counter!("rpc_requests_total", "method" => method.clone(), "code" => "transport")
+                    // Транспортная ошибка: путь мог не дойти до роутинга — тоже не
+                    // пускаем сырой сегмент в лейбл (тот же вектор кардинальности).
+                    metrics::counter!("rpc_requests_total", "method" => "transport", "code" => "transport")
                         .increment(1);
-                    tracing::error!(method, ms = format!("{ms:.1}"), "rpc transport error");
+                    tracing::error!(method = raw_method, ms = format!("{ms:.1}"), "rpc transport error");
                 }
             }
             res
