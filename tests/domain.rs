@@ -132,6 +132,7 @@ async fn add_version_bumps_current_and_orders_desc() {
             list_id: created.id.clone(),
             note: "second".into(),
             steps: vec![step("Only")],
+            author_id: String::new(), // '' = null (автор версии; тест не про авторство)
         }))
         .await
         .expect("add_version")
@@ -165,6 +166,7 @@ async fn add_version_unknown_list_is_not_found() {
             list_id: uuid::Uuid::new_v4().to_string(),
             note: String::new(),
             steps: vec![],
+            author_id: String::new(),
         }))
         .await
         .expect_err("несуществующий список");

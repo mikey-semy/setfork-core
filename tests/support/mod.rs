@@ -57,6 +57,7 @@ create table template_versions (
   template_id uuid not null references templates(id),
   version integer not null,
   note text not null default '',
+  author_id uuid references users(id),
   created_at timestamptz not null default now(),
   unique (template_id, version)
 );
