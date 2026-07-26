@@ -25,6 +25,7 @@ fn lt(pairs: &[(&str, &str)]) -> Option<LocaleText> {
 
 fn step(title_en: &str) -> NewStep {
     NewStep {
+        block_id: String::new(),
         title: lt(&[("en", title_en)]),
         desc: lt(&[("en", "step desc")]),
         command: "echo hi".into(),

@@ -21,6 +21,10 @@ pub struct ProjStep {
     // payload не-step блока (Null у шага).
     pub block_type: String,
     pub content: serde_json::Value,
+    // Стабильная идентичность блока сквозь версии, как её принёс list.json.
+    // Раньше пуш её ТЕРЯЛ (в git не сериализовалась) — проекция создавала версию
+    // с новыми id, и дифф после пуша откатывался на сопоставление по заголовку.
+    pub block_id: Option<String>,
     pub title: String,
     pub desc: String,
     pub command: String,
@@ -40,6 +44,8 @@ struct RawRef {
 #[derive(Deserialize)]
 struct RawStep {
     n: Option<i32>,
+    #[serde(rename = "blockId")]
+    block_id: Option<String>,
     #[serde(rename = "type")]
     block_type: Option<String>,
     content: Option<serde_json::Value>,
@@ -234,6 +240,7 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
         }
         let step = ProjStep {
             block_type: if is_step { String::new() } else { bt },
+            block_id: s.block_id.clone().filter(|v| !v.trim().is_empty()),
             content: if is_step {
                 serde_json::Value::Null
             } else {
@@ -411,6 +418,7 @@ mod tests {
     fn raw(n: Option<i32>, ty: Option<&str>, title: &str) -> RawStep {
         RawStep {
             n,
+            block_id: None,
             block_type: ty.map(str::to_string),
             content: ty.map(|_| serde_json::json!({"md": "x"})),
             title: Some(title.to_string()),
@@ -481,6 +489,7 @@ mod tests {
             n: 1,
             block_type: None,
             content: serde_json::Value::Null,
+            block_id: None,
             title: title.into(),
             desc: desc.into(),
             command: command.into(),
@@ -506,6 +515,7 @@ mod tests {
                 n: s.n,
                 block_type: None,
                 content: serde_json::Value::Null,
+                block_id: None,
                 title: s.title.clone(),
                 desc: s.desc.clone(),
                 command: s.command.clone(),

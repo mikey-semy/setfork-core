@@ -272,6 +272,8 @@ fn step_row(s: &NewStep) -> db::StepRow {
     db::StepRow {
         block_type: storage_type(&s.r#type),
         content: content_value(&s.r#type, &s.content_json),
+        // Идентичность блока сквозь версии; '' или мусор → None (фолбэк диффа).
+        block_id: uuid::Uuid::parse_str(&s.block_id).ok(),
         title: loc_json(&s.title),
         desc: loc_json(&s.desc),
         command: s.command.clone(),

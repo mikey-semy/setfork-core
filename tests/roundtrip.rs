@@ -30,6 +30,7 @@ fn step(n: i32, title: &str) -> SerStep {
         n,
         block_type: None,
         content: serde_json::Value::Null,
+        block_id: None,
         title: title.into(),
         desc: String::new(),
         command: String::new(),

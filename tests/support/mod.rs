@@ -66,6 +66,8 @@ create table steps (
   id uuid primary key default gen_random_uuid(),
   version_id uuid not null references template_versions(id),
   n integer not null,
+  -- Стабильная идентичность блока сквозь версии (nullable — старые строки).
+  block_id uuid,
   "type" text,
   content jsonb,
   title jsonb not null default '{}'::jsonb,

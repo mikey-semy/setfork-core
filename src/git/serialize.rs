@@ -16,6 +16,10 @@ pub struct SerStep {
     // старые step-only списки дают байт-в-байт тот же list.json (golden с TS).
     pub block_type: Option<String>,
     pub content: serde_json::Value,
+    // Стабильная идентичность блока сквозь версии. В list.json пишется ТОЛЬКО
+    // когда есть: строки без block_id дают байт-в-байт прежний файл, поэтому
+    // golden-фикстуры и паритет с TS не ломаются.
+    pub block_id: Option<String>,
     pub title: String,
     pub desc: String,
     pub command: String,
@@ -63,6 +67,10 @@ fn list_json(v: &VersionData) -> String {
             // блоков type/content идут сразу после n; у шага их нет вовсе.
             let mut m = serde_json::Map::new();
             m.insert("n".into(), serde_json::json!(s.n));
+            // Идентичность — сразу после n и только при наличии (порядок ключей = TS bundle.ts).
+            if let Some(bid) = &s.block_id {
+                m.insert("blockId".into(), serde_json::Value::String(bid.clone()));
+            }
             if !is_step_block(s) {
                 m.insert("type".into(), serde_json::Value::String(s.block_type.clone().unwrap_or_default()));
                 m.insert("content".into(), s.content.clone());
@@ -290,6 +298,7 @@ mod tests {
             n,
             block_type: None,
             content: serde_json::Value::Null,
+            block_id: None,
             title: title.into(),
             desc: String::new(),
             command: String::new(),
@@ -314,6 +323,30 @@ mod tests {
             ordered: true,
             steps,
         }
+    }
+
+    // Идентичность блока в list.json: пишется только когда есть, и стоит сразу
+    // после n. Условная запись — то, что сохраняет байт-в-байт паритет с TS на
+    // старых данных (у них block_id пуст) и не ломает golden-фикстуры.
+    #[test]
+    fn list_json_carries_block_id_only_when_present() {
+        let without = version_files(&ver(vec![step(1, "Install Redis")]));
+        let json_without = &without.iter().find(|(p, _)| p == "list.json").unwrap().1;
+        assert!(!json_without.contains("blockId"), "у шага без идентичности поля быть не должно");
+
+        let mut s = step(1, "Install Redis");
+        s.block_id = Some("11111111-2222-3333-4444-555555555555".into());
+        let with = version_files(&ver(vec![s]));
+        let json_with = &with.iter().find(|(p, _)| p == "list.json").unwrap().1;
+        assert!(json_with.contains("\"blockId\": \"11111111-2222-3333-4444-555555555555\""));
+        // Порядок ключей = TS: n, затем blockId, затем title — сравниваем ВНУТРИ
+        // массива шагов (на верхнем уровне list.json свой "title", он идёт раньше).
+        let steps_at = json_with.find("\"steps\"").unwrap();
+        let in_steps = &json_with[steps_at..];
+        let n_at = in_steps.find("\"n\"").unwrap();
+        let bid_at = in_steps.find("\"blockId\"").unwrap();
+        let title_at = in_steps.find("\"title\"").unwrap();
+        assert!(n_at < bid_at && bid_at < title_at, "blockId должен идти между n и title");
     }
 
     #[test]
