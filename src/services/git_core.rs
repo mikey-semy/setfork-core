@@ -8,13 +8,14 @@ use uuid::Uuid;
 use super::util::{db_status, internal};
 use crate::db;
 use crate::git::bundle::VersionData;
-use crate::git::{MAIN_REF, bundle, project, repo, smart_http};
+use crate::git::{MAIN_REF, bundle, history, project, repo, smart_http};
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
-    CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, MergeBranchRequest,
-    MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest,
-    ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse,
+    Commit, CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
+    ListCommitsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest,
+    MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag,
+    TagsResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -527,5 +528,37 @@ impl GitCore for GitCoreSvc {
         })
         .await?;
         Ok(Response::new(TagsResponse { tags }))
+    }
+
+    /// Коммиты рефа (свежие первыми). `not_in` скрывает достижимое из базы —
+    /// так вкладка «Коммиты» показывает ровно вклад ветки, а не всю историю.
+    async fn list_commits(
+        &self,
+        req: Request<ListCommitsRequest>,
+    ) -> Result<Response<CommitsResponse>, Status> {
+        let ListCommitsRequest { repo, rev, not_in, limit } = req.into_inner();
+        let RepoRef { owner, slug } = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if rev.is_empty() {
+            return Err(Status::invalid_argument("rev required"));
+        }
+        let (bare, _id) = self.ensure(&owner, &slug).await?;
+        let take = if limit <= 0 { 100 } else { limit.min(500) } as usize;
+        let found =
+            with_repo(bare, move |repo| history::commits(repo, &rev, &not_in, take).map_err(internal))
+                .await?;
+        // Несуществующий реф — не ошибка: ветку могли удалить, UI покажет пусто.
+        let commits = found
+            .iter()
+            .flatten()
+            .map(|c| Commit {
+                sha: c.sha.clone(),
+                message: c.message.clone(),
+                author_name: c.author_name.clone(),
+                author_email: c.author_email.clone(),
+                at_unix: c.at_unix,
+                parents: c.parents,
+            })
+            .collect();
+        Ok(Response::new(CommitsResponse { found: found.is_some(), commits }))
     }
 }
