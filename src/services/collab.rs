@@ -68,6 +68,9 @@ fn json_to_step(v: &serde_json::Value) -> NewStep {
         })
         .unwrap_or_default();
     NewStep {
+        // Идентичность блока из ProposedItem: принятие предложения СОХРАНЯЕТ её,
+        // иначе принятая правка выглядела бы как «пункт удалён и добавлен заново».
+        block_id: v.get("blockId").and_then(|x| x.as_str()).unwrap_or("").to_string(),
         title: loc_from_obj(v.get("title")),
         desc: loc_from_obj(v.get("desc")),
         command: v.get("command").and_then(|x| x.as_str()).unwrap_or("").to_string(),

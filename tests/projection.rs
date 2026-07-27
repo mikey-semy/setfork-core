@@ -63,6 +63,7 @@ async fn pushed_commit_projects_new_version_and_tag() {
             n: 1,
             block_type: None,
             content: serde_json::Value::Null,
+            block_id: None,
             title: "First".into(),
             desc: String::new(),
             command: String::new(),

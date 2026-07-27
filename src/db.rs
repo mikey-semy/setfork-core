@@ -127,7 +127,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
     // Шаги ВСЕХ версий одним запросом (вместо запроса на версию — история
     // длинного списка давала N+1 round-trip'ов), группировка по version_id.
     let srows = sqlx::query(
-        "select s.version_id, s.n, s.\"type\", s.content, s.title, s.\"desc\", s.command, \
+        "select s.version_id, s.n, s.block_id, s.\"type\", s.content, s.title, s.\"desc\", s.command, \
                 s.level::text as level, s.why, s.section, s.subtasks, s.refs \
          from steps s join template_versions tv on tv.id = s.version_id \
          where tv.template_id = $1 order by s.version_id, s.n asc",
@@ -168,10 +168,15 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 serde_json::Value::Null
             };
             let vid: Uuid = sr.get("version_id");
+            // Идентичность блока сквозь версии. Колонка обязательна в схеме:
+            // деплой Rust идёт ПОСЛЕ применения схемы (db:push), как и раньше.
+            let block_id: Option<String> =
+                sr.try_get::<Option<Uuid>, _>("block_id").ok().flatten().map(|u| u.to_string());
             steps_by_ver.entry(vid).or_default().push(SerStep {
                 n: sr.get("n"),
                 block_type,
                 content,
+                block_id,
                 title: loc(&sr.get::<serde_json::Value, _>("title")),
                 desc: loc(&sr.get::<serde_json::Value, _>("desc")),
                 command: sr.get::<String, _>("command"),
@@ -207,7 +212,10 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
 pub struct StepRow {
     pub block_type: String,         // 'step' | 'text' | 'image' | …
     pub content: serde_json::Value, // {} у шага
-    pub title: serde_json::Value,   // LocaleText jsonb
+    // Стабильная идентичность блока сквозь версии. None — идентичность неизвестна
+    // (старые данные или запись мимо редактора): дифф падает на фолбэк по заголовку.
+    pub block_id: Option<Uuid>,
+    pub title: serde_json::Value, // LocaleText jsonb
     pub desc: serde_json::Value,
     pub command: String,
     pub image_key: Option<String>, // None → has_image = false
@@ -226,11 +234,12 @@ pub async fn insert_step_rows(
 ) -> Result<(), sqlx::Error> {
     for (i, r) in rows.iter().enumerate() {
         sqlx::query(
-            "insert into steps (version_id, n, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
-             values ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb)",
+            "insert into steps (version_id, n, block_id, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
+             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb)",
         )
         .bind(ver_id)
         .bind((i as i32) + 1)
+        .bind(r.block_id)
         .bind(&r.block_type)
         .bind(&r.content)
         .bind(&r.title)
@@ -321,6 +330,9 @@ fn proj_step_row(s: &ProjStep) -> StepRow {
     StepRow {
         block_type: crate::blocks::storage_type(&s.block_type),
         content: if is_step { serde_json::json!({}) } else { s.content.clone() },
+        // Идентичность из list.json. Невалидный uuid из чужого git-входа молча
+        // отбрасываем (санитизация проекции), а не роняем пуш.
+        block_id: s.block_id.as_deref().and_then(|v| Uuid::parse_str(v).ok()),
         title: loc_val(&s.title),
         desc: loc_val(&s.desc),
         command: s.command.trim().to_string(),
