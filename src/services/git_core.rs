@@ -119,6 +119,9 @@ fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
                     .collect(),
                 r#type: st.block_type.clone(),
                 content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
+                // Идентичность блока — сквозь провод: без неё дифф ветки читает
+                // переименование как «удалён + добавлен» (ADR-0013).
+                block_id: st.block_id.clone().unwrap_or_default(),
             })
             .collect(),
     }
