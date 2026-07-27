@@ -8,14 +8,15 @@ use uuid::Uuid;
 use super::util::{db_status, internal};
 use crate::db;
 use crate::git::bundle::VersionData;
-use crate::git::{MAIN_REF, bundle, history, project, repo, smart_http};
+use crate::git::{MAIN_REF, bundle, history, project, repo, smart_http, write};
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
-    Commit, CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
-    ListCommitsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest,
-    MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag,
-    TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
+    Commit, CommitToBranchRequest, CommitToBranchResponse, CommitsResponse, CreateBranchRequest,
+    CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListCommitsRequest, MergeBranchRequest,
+    MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest,
+    ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest,
+    UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -586,6 +587,50 @@ impl GitCore for GitCoreSvc {
         })
         .await?;
         Ok(Response::new(UpdateBranchResponse { tip_sha: tip, fast_forward: ff }))
+    }
+
+    /// Записать list.json в ветку одним коммитом («предложенные правки»).
+    ///
+    /// Отличие от merge_resolved: пишем в ВЕТКУ, main не двигается, родитель один
+    /// — а значит и проекции версии здесь нет (версии рождаются только из main).
+    async fn commit_to_branch(
+        &self,
+        req: Request<CommitToBranchRequest>,
+    ) -> Result<Response<CommitToBranchResponse>, Status> {
+        let CommitToBranchRequest {
+            repo,
+            branch,
+            list_json,
+            message,
+            expected_tip,
+            author_name,
+            author_email,
+        } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&branch) || branch == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        // Контент обязан быть валидным JSON-объектом — как в merge_resolved:
+        // list.json канон, и мусор в ветке сломал бы её снапшот и дифф.
+        if serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&list_json).is_err() {
+            return Err(Status::invalid_argument("list_json is not a JSON object"));
+        }
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Тот же лок, что у merge/push: tip читаем ПОСЛЕ захвата, иначе
+        // конкурентный пуш в ветку потерялся бы.
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
+        let (tip, changed) = with_repo(bare, move |repo| {
+            let author = opt(&author_name).zip(opt(&author_email));
+            match write::commit_list_json(repo, &branch, &list_json, &message, &expected_tip, author) {
+                Ok(write::WriteOutcome::Committed(sha)) => Ok((sha, true)),
+                Ok(write::WriteOutcome::Unchanged(sha)) => Ok((sha, false)),
+                Err(write::WriteError::NotFound) => Err(Status::not_found("branch not found")),
+                Err(write::WriteError::Stale) => Err(Status::failed_precondition("stale")),
+                Err(write::WriteError::Git(e)) => Err(Status::internal(e)),
+            }
+        })
+        .await?;
+        Ok(Response::new(CommitToBranchResponse { tip_sha: tip, changed }))
     }
 
     /// Коммиты рефа (свежие первыми). `not_in` скрывает достижимое из базы —
