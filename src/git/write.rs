@@ -1,0 +1,226 @@
+//! Запись list.json в ветку одним коммитом.
+//!
+//! Отдельный модуль, а не тело gRPC-метода — по той же причине, что и `history`:
+//! это git-логика, и проверять её надо на настоящем репо, а не через сервис с
+//! пулом БД. Служит «предложенным правкам»: рецензент даёт готовый текст пункта,
+//! автор жмёт «Применить», и правка ложится в ветку без локального клона.
+//!
+//! Отличие от слияния (`merge_resolved`): пишем в ВЕТКУ, main не двигается,
+//! родитель один — значит и проекции версии здесь нет. Версии рождаются только
+//! из main; ветка остаётся черновиком.
+
+/// Чем закончилась запись.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// Коммит создан; sha — новый tip ветки.
+    Committed(String),
+    /// Содержимое совпало с текущим — коммита нет, sha прежний.
+    Unchanged(String),
+}
+
+/// Почему записать не удалось. Отражается в gRPC-статусы вызывающим.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteError {
+    /// Ветки нет (могли удалить, пока человек смотрел на дифф).
+    NotFound,
+    /// Ветку подвинули с момента чтения — писать поверх нельзя.
+    Stale,
+    /// Ошибка git2 (текст для журнала, наружу не показываем).
+    Git(String),
+}
+
+impl From<git2::Error> for WriteError {
+    fn from(e: git2::Error) -> Self {
+        WriteError::Git(e.to_string())
+    }
+}
+
+/// Положить `list_json` в `branch` одним коммитом поверх её tip.
+///
+/// `expected_tip` — оптимистичная блокировка: вызывающий читал ветку, показал
+/// человеку дифф и вернулся с решением, а за это время в ветку мог прийти пуш.
+/// Без сверки мы бы молча его перезаписали. Пустая строка — не сверять.
+///
+/// Одинаковое содержимое коммитом НЕ становится: пустые коммиты замусоривают
+/// вкладку «Коммиты» и сбивают счётчик вклада ветки.
+pub fn commit_list_json(
+    repo: &git2::Repository,
+    branch: &str,
+    list_json: &[u8],
+    message: &str,
+    expected_tip: &str,
+    author: Option<(&str, &str)>,
+) -> Result<WriteOutcome, WriteError> {
+    let branch_ref = format!("refs/heads/{branch}");
+    let tip = repo.refname_to_id(&branch_ref).map_err(|_| WriteError::NotFound)?;
+    if !expected_tip.is_empty() && expected_tip != tip.to_string() {
+        return Err(WriteError::Stale);
+    }
+    let parent = repo.find_commit(tip)?;
+    let tree = parent.tree()?;
+    if let Ok(entry) = tree.get_path(std::path::Path::new("list.json"))
+        && let Ok(blob) = repo.find_blob(entry.id())
+        && blob.content() == list_json
+    {
+        return Ok(WriteOutcome::Unchanged(tip.to_string()));
+    }
+
+    let blob = repo.blob(list_json)?;
+    let mut tb = repo.treebuilder(Some(&tree))?;
+    tb.insert("list.json", blob, 0o100644)?;
+    // steps/ — материализация старой формы. Канон разрешённых шагов — list.json,
+    // и оставленный каталог разошёлся бы с ним (так же поступает merge_resolved).
+    if tb.get("steps")?.is_some() {
+        tb.remove("steps")?;
+    }
+    let tree = repo.find_tree(tb.write()?)?;
+    // Авторство человека, если его передали: иначе вкладка «Коммиты» показала бы
+    // служебного автора там, где правку применил пользователь.
+    let sig = match author {
+        Some((name, email)) => git2::Signature::now(name, email)?,
+        None => git2::Signature::now(super::bundle::AUTHOR_NAME, super::bundle::AUTHOR_EMAIL)?,
+    };
+    let msg = if message.trim().is_empty() { "Apply suggested edit" } else { message.trim() };
+    let oid = repo.commit(Some(&branch_ref), &sig, &sig, msg, &tree, &[&parent])?;
+    Ok(WriteOutcome::Committed(oid.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Каталог-однодневка: удаляется на Drop (в т.ч. при panic внутри теста).
+    struct Tmp(std::path::PathBuf);
+    impl Drop for Tmp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn bare() -> (Tmp, git2::Repository) {
+        let p = std::env::temp_dir().join(format!("setfork-write-{}", uuid::Uuid::new_v4()));
+        let repo = git2::Repository::init_bare(&p).expect("init bare");
+        (Tmp(p), repo)
+    }
+
+    fn sig() -> git2::Signature<'static> {
+        git2::Signature::new("Кто-то", "s@example.com", &git2::Time::new(1_700_000_000, 0)).expect("sig")
+    }
+
+    /// Ветка с list.json заданного содержимого (и, по желанию, каталогом steps/).
+    fn seed(repo: &git2::Repository, branch: &str, list: &[u8], with_steps: bool) -> git2::Oid {
+        let blob = repo.blob(list).expect("blob");
+        let mut tb = repo.treebuilder(None).expect("tb");
+        tb.insert("list.json", blob, 0o100644).expect("insert");
+        if with_steps {
+            let inner = repo.blob(b"# step").expect("blob");
+            let mut sub = repo.treebuilder(None).expect("sub");
+            sub.insert("1.md", inner, 0o100644).expect("insert md");
+            let sub = sub.write().expect("write sub");
+            tb.insert("steps", sub, 0o040000).expect("insert steps");
+        }
+        let tree = repo.find_tree(tb.write().expect("write tree")).expect("tree");
+        let s = sig();
+        repo.commit(Some(&format!("refs/heads/{branch}")), &s, &s, "seed", &tree, &[]).expect("commit")
+    }
+
+    fn list_json_at(repo: &git2::Repository, sha: &str) -> Vec<u8> {
+        let commit = repo.find_commit(git2::Oid::from_str(sha).expect("oid")).expect("commit");
+        let entry =
+            commit.tree().expect("tree").get_path(std::path::Path::new("list.json")).expect("list.json");
+        repo.find_blob(entry.id()).expect("blob").content().to_vec()
+    }
+
+    #[test]
+    fn пишет_коммит_и_двигает_ветку() {
+        let (_t, repo) = bare();
+        let before = seed(&repo, "pr-1", b"{\"steps\":[]}", false);
+
+        let out =
+            commit_list_json(&repo, "pr-1", b"{\"steps\":[1]}", "Применить правку", "", None).expect("write");
+
+        let WriteOutcome::Committed(sha) = out else { panic!("ожидался коммит: {out:?}") };
+        assert_ne!(sha, before.to_string(), "ветка должна сдвинуться");
+        assert_eq!(repo.refname_to_id("refs/heads/pr-1").expect("tip").to_string(), sha);
+        assert_eq!(list_json_at(&repo, &sha), b"{\"steps\":[1]}");
+        // Родитель один: это не слияние, main не участвует.
+        let commit = repo.find_commit(git2::Oid::from_str(&sha).expect("oid")).expect("commit");
+        assert_eq!(commit.parent_count(), 1);
+        assert_eq!(commit.message().unwrap_or_default(), "Применить правку");
+    }
+
+    #[test]
+    fn то_же_содержимое_не_создаёт_пустой_коммит() {
+        let (_t, repo) = bare();
+        let before = seed(&repo, "pr-1", b"{\"steps\":[]}", false);
+
+        let out = commit_list_json(&repo, "pr-1", b"{\"steps\":[]}", "ничего не менялось", "", None)
+            .expect("write");
+
+        assert_eq!(out, WriteOutcome::Unchanged(before.to_string()));
+        assert_eq!(repo.refname_to_id("refs/heads/pr-1").expect("tip"), before, "ветка не двигается");
+    }
+
+    #[test]
+    fn чужой_пуш_не_перезаписывается() {
+        let (_t, repo) = bare();
+        let tip = seed(&repo, "pr-1", b"{\"steps\":[]}", false);
+        let stale = "0".repeat(40);
+
+        let err = commit_list_json(&repo, "pr-1", b"{\"steps\":[9]}", "поверх чужого", &stale, None)
+            .expect_err("должно отказать");
+
+        assert_eq!(err, WriteError::Stale);
+        assert_eq!(repo.refname_to_id("refs/heads/pr-1").expect("tip"), tip, "ветка нетронута");
+    }
+
+    #[test]
+    fn совпавший_tip_пропускает_запись() {
+        let (_t, repo) = bare();
+        let tip = seed(&repo, "pr-1", b"{\"steps\":[]}", false).to_string();
+
+        let out = commit_list_json(&repo, "pr-1", b"{\"steps\":[7]}", "по актуальному tip", &tip, None)
+            .expect("write");
+
+        assert!(matches!(out, WriteOutcome::Committed(_)));
+    }
+
+    #[test]
+    fn каталог_steps_убирается_вслед_за_каноном() {
+        let (_t, repo) = bare();
+        seed(&repo, "pr-1", b"{\"steps\":[]}", true);
+
+        let out = commit_list_json(&repo, "pr-1", b"{\"steps\":[2]}", "", "", None).expect("write");
+
+        let WriteOutcome::Committed(sha) = out else { panic!("ожидался коммит") };
+        let tree = repo.find_commit(git2::Oid::from_str(&sha).expect("oid")).expect("c").tree().expect("t");
+        assert!(
+            tree.get_path(std::path::Path::new("steps")).is_err(),
+            "steps/ разошёлся бы с list.json — его быть не должно"
+        );
+    }
+
+    #[test]
+    fn авторство_человека_попадает_в_коммит() {
+        let (_t, repo) = bare();
+        seed(&repo, "pr-1", b"{\"steps\":[]}", false);
+
+        let out =
+            commit_list_json(&repo, "pr-1", b"{\"steps\":[3]}", "", "", Some(("Мика", "m@example.com")))
+                .expect("write");
+
+        let WriteOutcome::Committed(sha) = out else { panic!("ожидался коммит") };
+        let commit = repo.find_commit(git2::Oid::from_str(&sha).expect("oid")).expect("commit");
+        assert_eq!(commit.author().email().expect("email"), "m@example.com");
+    }
+
+    #[test]
+    fn несуществующая_ветка_это_not_found() {
+        let (_t, repo) = bare();
+        seed(&repo, "pr-1", b"{}", false);
+
+        let err = commit_list_json(&repo, "pr-нет", b"{\"a\":1}", "", "", None).expect_err("нет ветки");
+
+        assert_eq!(err, WriteError::NotFound);
+    }
+}
