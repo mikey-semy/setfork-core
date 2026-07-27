@@ -188,8 +188,12 @@ impl CollabWrite for CollabWriteSvc {
         let (tid, uid) = (parse_id(&list_id)?, parse_id(&author_id)?);
         let items = serde_json::Value::Array(steps.iter().map(proposed_json).collect());
         let r = sqlx::query(
-            "insert into suggestions (template_id, author_id, note, base_version, items) \
-             values ($1, $2, $3, coalesce((select current_version from templates where id = $1), 1), $4::jsonb) \
+            // number — как у задач: адресуемость правки (#12) и человеческие ссылки.
+            // Без него правка, созданная ЭТИМ путём, осталась бы без номера, и
+            // страница откатывалась бы на uuid в адресе.
+            "insert into suggestions (template_id, author_id, note, base_version, items, number) \
+             values ($1, $2, $3, coalesce((select current_version from templates where id = $1), 1), $4::jsonb, \
+               (select coalesce(max(number), 0) + 1 from suggestions where template_id = $1)) \
              returning id, status::text as status, base_version, items, \
                floor(extract(epoch from created_at) * 1000)::bigint as c",
         )

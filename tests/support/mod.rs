@@ -123,6 +123,8 @@ create table suggestions (
   template_id uuid not null references templates(id),
   author_id uuid not null references users(id),
   note text not null default '',
+  -- Номер правки в рамках списка (#12) — как у задач.
+  number integer,
   base_version integer not null,
   items jsonb not null default '[]'::jsonb,
   status suggestion_status not null default 'open',
