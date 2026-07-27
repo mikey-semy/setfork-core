@@ -15,7 +15,7 @@ use crate::pb::{
     Commit, CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
     ListCommitsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest,
     MergeStateResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag,
-    TagsResponse,
+    TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -531,6 +531,61 @@ impl GitCore for GitCoreSvc {
         })
         .await?;
         Ok(Response::new(TagsResponse { tags }))
+    }
+
+    /// Обновить ветку из main — обратное слияние. main НЕ двигается, поэтому
+    /// проекции версии нет: ветка это черновик, версии рождаются только из main.
+    async fn update_branch(
+        &self,
+        req: Request<UpdateBranchRequest>,
+    ) -> Result<Response<UpdateBranchResponse>, Status> {
+        let UpdateBranchRequest { repo, name } = req.into_inner();
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        if !valid_branch(&name) || name == "main" {
+            return Err(Status::invalid_argument("bad branch name"));
+        }
+        let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Под тем же локом, что merge/push: tip ветки нельзя читать до захвата —
+        // конкурентный пуш иначе потерялся бы (та же причина, что в merge_branch).
+        let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
+        let (tip, ff) = with_repo(bare, move |repo| {
+            let branch_ref = format!("refs/heads/{name}");
+            let branch_tip =
+                repo.refname_to_id(&branch_ref).map_err(|_| Status::not_found("branch not found"))?;
+            let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
+            // Ветка уже содержит main → обновлять нечего.
+            if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) || branch_tip == main_tip {
+                return Err(Status::failed_precondition("nothing-to-merge"));
+            }
+            // Ветка — предок main (в ней нет своих коммитов) → просто двигаем ref.
+            if repo.graph_descendant_of(main_tip, branch_tip).unwrap_or(false) {
+                repo.reference(
+                    &branch_ref,
+                    main_tip,
+                    true,
+                    &format!("update {name} from main: fast-forward"),
+                )
+                .map_err(internal)?;
+                return Ok((main_tip.to_string(), true));
+            }
+            // Расхождение → merge-commit В ВЕТКЕ: ours = ветка, theirs = main
+            // (порядок обратный merge_branch — сливаем main в ветку, а не наоборот).
+            let ours = repo.find_commit(branch_tip).map_err(internal)?;
+            let theirs = repo.find_commit(main_tip).map_err(internal)?;
+            let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
+            if idx.has_conflicts() {
+                return Err(Status::failed_precondition("conflict"));
+            }
+            let tree_id = idx.write_tree_to(repo).map_err(internal)?;
+            let tree = repo.find_tree(tree_id).map_err(internal)?;
+            let sig = merge_sig()?;
+            let merged = repo
+                .commit(Some(&branch_ref), &sig, &sig, "Merge branch 'main'", &tree, &[&ours, &theirs])
+                .map_err(internal)?;
+            Ok((merged.to_string(), false))
+        })
+        .await?;
+        Ok(Response::new(UpdateBranchResponse { tip_sha: tip, fast_forward: ff }))
     }
 
     /// Коммиты рефа (свежие первыми). `not_in` скрывает достижимое из базы —
