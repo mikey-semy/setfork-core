@@ -76,6 +76,59 @@ where
     .map_err(internal)?
 }
 
+/**
+ * Сообщение squash-коммита с трейлерами `Co-authored-by`.
+ *
+ * При squash история ветки в main не попадает, поэтому авторство её коммитов
+ * иначе исчезло бы совсем — а это единственная запись о том, кто на самом деле
+ * делал работу. GitHub решает ровно так же.
+ *
+ * Авторы берутся из коммитов ВКЛАДА ветки (то, чего нет в main), без дублей и в
+ * порядке появления. Ошибку обхода глушим: слияние не должно падать из-за
+ * украшения сообщения.
+ */
+pub fn with_coauthors(
+    repo: &git2::Repository,
+    branch_tip: git2::Oid,
+    main_tip: git2::Oid,
+    title: &str,
+) -> String {
+    let mut seen: Vec<String> = Vec::new();
+    if let Ok(mut walk) = repo.revwalk() {
+        let _ = walk.push(branch_tip);
+        let _ = walk.hide(main_tip);
+        for oid in walk.flatten() {
+            let Ok(c) = repo.find_commit(oid) else { continue };
+            let a = c.author();
+            // Подпись может быть не-UTF8 — такую пропускаем, а не падаем.
+            let (Ok(n), Ok(e)) = (a.name(), a.email()) else { continue };
+            let (n, e) = (n.to_string(), e.to_string());
+            // Служебная подпись самого сервиса соавторством не является.
+            if e == bundle::AUTHOR_EMAIL {
+                continue;
+            }
+            let line = format!("Co-authored-by: {n} <{e}>");
+            if !seen.contains(&line) {
+                seen.push(line);
+            }
+        }
+    }
+    if seen.is_empty() {
+        return title.to_string();
+    }
+    // Пустая строка перед трейлерами обязательна: иначе git не считает их
+    // трейлерами, и `git interpret-trailers` их не увидит.
+    format!(
+        "{title}
+
+{}",
+        seen.join(
+            "
+"
+        )
+    )
+}
+
 // Подпись merge-коммитов — та же идентичность, что у детерминированных коммитов bundle.
 fn merge_sig() -> Result<git2::Signature<'static>, Status> {
     git2::Signature::now(bundle::AUTHOR_NAME, bundle::AUTHOR_EMAIL).map_err(internal)
@@ -334,7 +387,8 @@ impl GitCore for GitCoreSvc {
         &self,
         req: Request<MergeBranchRequest>,
     ) -> Result<Response<MergeBranchResponse>, Status> {
-        let MergeBranchRequest { repo, name } = req.into_inner();
+        let MergeBranchRequest { repo, name, mode, message } = req.into_inner();
+        let squash = mode == "squash";
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&name) || name == "main" {
             return Err(Status::invalid_argument("bad branch name"));
@@ -350,6 +404,35 @@ impl GitCore for GitCoreSvc {
             let (ahead, _behind) = repo.graph_ahead_behind(branch_tip, main_tip).map_err(internal)?;
             if ahead == 0 {
                 return Err(Status::failed_precondition("nothing-to-merge"));
+            }
+            // SQUASH: один коммит с ОДНИМ родителем (main). История ветки в main
+            // не уезжает — это и есть смысл режима. Вклад авторов не теряется:
+            // он переносится трейлерами Co-authored-by, как это делает GitHub.
+            //
+            // Проверка идёт ДО fast-forward: при squash даже перематываемую ветку
+            // сплющиваем, иначе выбор режима работал бы через раз — в зависимости
+            // от того, ушёл ли main вперёд.
+            if squash {
+                let ours = repo.find_commit(main_tip).map_err(internal)?;
+                let theirs = repo.find_commit(branch_tip).map_err(internal)?;
+                // Дерево берём merge-ом, а не деревом ветки: main мог уйти вперёд,
+                // и дерево ветки откатило бы чужие изменения.
+                let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
+                if idx.has_conflicts() {
+                    return Err(Status::failed_precondition("conflict"));
+                }
+                let tree_id = idx.write_tree_to(repo).map_err(internal)?;
+                let tree = repo.find_tree(tree_id).map_err(internal)?;
+                let title = if message.trim().is_empty() {
+                    format!("Squashed branch '{name}'")
+                } else {
+                    message.trim().to_string()
+                };
+                let msg = with_coauthors(repo, branch_tip, main_tip, &title);
+                let sig = merge_sig()?;
+                let squashed =
+                    repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours]).map_err(internal)?;
+                return Ok((squashed.to_string(), false));
             }
             // main — предок ветки → fast-forward: просто двигаем ref.
             if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) {
@@ -663,5 +746,86 @@ impl GitCore for GitCoreSvc {
             })
             .collect();
         Ok(Response::new(CommitsResponse { found: found.is_some(), commits }))
+    }
+}
+
+#[cfg(test)]
+mod squash_tests {
+    use super::with_coauthors;
+
+    /// Каталог-однодневка: удаляется на Drop (в т.ч. при panic внутри теста).
+    struct Tmp(std::path::PathBuf);
+    impl Drop for Tmp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn bare() -> (Tmp, git2::Repository) {
+        let p = std::env::temp_dir().join(format!("setfork-squash-{}", uuid::Uuid::new_v4()));
+        let repo = git2::Repository::init_bare(&p).expect("init bare");
+        (Tmp(p), repo)
+    }
+
+    /// Пустой коммит от заданного автора на ref.
+    fn commit(
+        repo: &git2::Repository,
+        refname: &str,
+        msg: &str,
+        who: (&str, &str),
+        parents: &[git2::Oid],
+    ) -> git2::Oid {
+        let tree = repo.treebuilder(None).expect("tb").write().expect("tree");
+        let tree = repo.find_tree(tree).expect("find tree");
+        let sig = git2::Signature::new(who.0, who.1, &git2::Time::new(1_700_000_000, 0)).expect("sig");
+        let ps: Vec<git2::Commit> = parents.iter().map(|o| repo.find_commit(*o).expect("parent")).collect();
+        let refs: Vec<&git2::Commit> = ps.iter().collect();
+        repo.commit(Some(refname), &sig, &sig, msg, &tree, &refs).expect("commit")
+    }
+
+    /**
+     * При squash история ветки в main не попадает, поэтому Co-authored-by —
+     * ЕДИНСТВЕННАЯ запись о том, кто делал работу. Ошибка тут молча стирает
+     * авторство.
+     */
+    #[test]
+    fn трейлеры_собираются_из_вклада_ветки_без_дублей() {
+        let (_t, repo) = bare();
+        let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
+        let a = commit(&repo, "refs/heads/pr", "первый", ("Аня", "a@example.com"), &[base]);
+        let b = commit(&repo, "refs/heads/pr", "второй", ("Аня", "a@example.com"), &[a]);
+        let c = commit(&repo, "refs/heads/pr", "третий", ("Боря", "b@example.com"), &[b]);
+
+        let msg = with_coauthors(&repo, c, base, "Заголовок");
+
+        assert!(msg.starts_with("Заголовок\n\n"), "трейлеры отделены пустой строкой: {msg:?}");
+        assert_eq!(msg.matches("Co-authored-by: Аня <a@example.com>").count(), 1, "дубли схлопнуты");
+        assert!(msg.contains("Co-authored-by: Боря <b@example.com>"));
+        // Автор коммита ИЗ MAIN не соавтор этой правки.
+        assert!(!msg.contains("m@example.com"), "автор базы не должен попасть в соавторы");
+    }
+
+    #[test]
+    fn служебная_подпись_сервиса_соавторством_не_считается() {
+        let (_t, repo) = bare();
+        let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
+        let a = commit(
+            &repo,
+            "refs/heads/pr",
+            "авто",
+            (crate::git::bundle::AUTHOR_NAME, crate::git::bundle::AUTHOR_EMAIL),
+            &[base],
+        );
+
+        let msg = with_coauthors(&repo, a, base, "Заголовок");
+
+        assert_eq!(msg, "Заголовок", "нечего приписывать — заголовок остаётся как есть");
+    }
+
+    #[test]
+    fn ветка_без_своих_коммитов_не_добавляет_ничего() {
+        let (_t, repo) = bare();
+        let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
+        assert_eq!(with_coauthors(&repo, base, base, "Заголовок"), "Заголовок");
     }
 }
