@@ -80,6 +80,11 @@ fn json_to_step(v: &serde_json::Value) -> NewStep {
         subtasks,
         refs,
         image_ref: v.get("imageKey").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        // Пометка «здесь нужен человек» из ProposedItem: принятие предложения обязано её
+        // сохранять. Иначе принятая правка молча стирала бы честное «тут нужен опыт» —
+        // тот же класс потери, что чинили во фронте (набор шагов перезаписывается целиком).
+        needs_human: v.get("needsHuman").and_then(|x| x.as_bool()).unwrap_or(false),
+        needs_human_ask: loc_from_obj(v.get("needsHumanAsk")),
         // type/content_json — только у не-step блоков.
         r#type: wire_type(Some(ty)),
         content_json: if is_step_type(ty) {

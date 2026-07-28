@@ -224,6 +224,11 @@ pub struct StepRow {
     pub section: serde_json::Value,
     pub subtasks: serde_json::Value, // jsonb-массив LocaleText
     pub refs: serde_json::Value,     // jsonb-массив {label, url?}
+    /// «Здесь нужен человек»: место, где машина знать не может (цены, вкус, опыт).
+    /// Долг катовера закрыт 2026-07-28: без этих полей запись через домен стирала
+    /// бы пометку — набор шагов перезаписывается ЦЕЛИКОМ.
+    pub needs_human: bool,
+    pub needs_human_ask: serde_json::Value, // LocaleText jsonb; {} = общий текст
 }
 
 /// Вставка шагов версии — единственный INSERT в steps.
@@ -234,8 +239,8 @@ pub async fn insert_step_rows(
 ) -> Result<(), sqlx::Error> {
     for (i, r) in rows.iter().enumerate() {
         sqlx::query(
-            "insert into steps (version_id, n, block_id, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs) \
-             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb)",
+            "insert into steps (version_id, n, block_id, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs, needs_human, needs_human_ask) \
+             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17::jsonb)",
         )
         .bind(ver_id)
         .bind((i as i32) + 1)
@@ -252,6 +257,8 @@ pub async fn insert_step_rows(
         .bind(&r.section)
         .bind(&r.subtasks)
         .bind(&r.refs)
+        .bind(r.needs_human)
+        .bind(&r.needs_human_ask)
         .execute(&mut **tx)
         .await?;
     }
@@ -303,7 +310,7 @@ pub async fn add_version_rows(
 
 // ProjStep → StepRow: санитизация git-входа (порт project.ts): trim, пустые
 // subtasks/refs выбрасываются, LocaleText жмётся в {"en": …}, image не несём.
-fn proj_step_row(s: &ProjStep) -> StepRow {
+fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, serde_json::Value)>) -> StepRow {
     let subtasks = serde_json::Value::Array(
         s.subtasks
             .iter()
@@ -311,6 +318,13 @@ fn proj_step_row(s: &ProjStep) -> StepRow {
             .map(|x| serde_json::json!({ "en": x.trim() }))
             .collect(),
     );
+    // Пометка «здесь нужен человек» из ТЕКУЩЕЙ версии по идентичности блока (см. ниже).
+    let nh = s
+        .block_id
+        .as_deref()
+        .and_then(|v| Uuid::parse_str(v).ok())
+        .and_then(|id| keep.get(&id).cloned())
+        .unwrap_or((false, serde_json::json!({})));
     let refs = serde_json::Value::Array(
         s.refs
             .iter()
@@ -342,7 +356,41 @@ fn proj_step_row(s: &ProjStep) -> StepRow {
         section: loc_val(&s.section),
         subtasks,
         refs,
+        // ПОМЕТКА НЕ ТЕРЯЕТСЯ НА ПУШЕ. В list.json «здесь нужен человек» не пишется
+        // (golden-паритет с TS), поэтому из git она прийти не может. Если писать false,
+        // каждый push молча стирал бы честные пометки — ровно та потеря, что чинилась во
+        // фронте 2026-07-27. Переносим по block_id: идентичность блока git как раз несёт.
+        // Блок без block_id сопоставить не с чем — там пометка честно неизвестна.
+        needs_human: nh.0,
+        needs_human_ask: nh.1,
     }
+}
+
+/// Пометки «здесь нужен человек» текущей версии, по идентичности блока. Пустая карта —
+/// нормальный случай (список без пометок или без block_id у строк).
+async fn current_marks(
+    pool: &PgPool,
+    template_id: Uuid,
+) -> Result<std::collections::HashMap<Uuid, (bool, serde_json::Value)>, sqlx::Error> {
+    let rows = sqlx::query(
+        "select s.block_id, s.needs_human, s.needs_human_ask \
+         from steps s \
+         join template_versions tv on tv.id = s.version_id \
+         join templates t on t.id = tv.template_id and t.current_version = tv.version \
+         where tv.template_id = $1 and s.block_id is not null",
+    )
+    .bind(template_id)
+    .fetch_all(pool)
+    .await?;
+    let mut out = std::collections::HashMap::new();
+    for r in rows {
+        if let Ok(Some(id)) = r.try_get::<Option<Uuid>, _>("block_id") {
+            let flag = r.try_get::<bool, _>("needs_human").unwrap_or(false);
+            let ask = r.try_get::<serde_json::Value, _>("needs_human_ask").unwrap_or(serde_json::json!({}));
+            out.insert(id, (flag, ask));
+        }
+    }
+    Ok(out)
 }
 
 /// Новая версия списка из проекции push. Возвращает номер новой версии;
@@ -353,7 +401,9 @@ pub async fn add_version(
     note: &str,
     steps: &[ProjStep],
 ) -> Result<i32, sqlx::Error> {
-    let rows: Vec<StepRow> = steps.iter().map(proj_step_row).collect();
+    // Пометки ТЕКУЩЕЙ версии по block_id — чтобы push их не стёр (см. proj_step_row).
+    let keep = current_marks(pool, template_id).await?;
+    let rows: Vec<StepRow> = steps.iter().map(|s| proj_step_row(s, &keep)).collect();
     match add_version_rows(pool, template_id, note, None, &rows).await? {
         Some((_ver_id, version, _ms)) => Ok(version),
         None => Err(sqlx::Error::RowNotFound),

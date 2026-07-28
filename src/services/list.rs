@@ -148,7 +148,7 @@ impl ListRead for ListReadSvc {
 
         let srows = sqlx::query(
             "select id, version_id, n, \"type\", content, title, \"desc\", command, level::text as level, \
-                    why, section, subtasks, refs, image_key \
+                    why, section, subtasks, refs, image_key, needs_human, needs_human_ask \
              from steps where version_id = $1 order by n asc",
         )
         .bind(vid)
@@ -191,6 +191,13 @@ impl ListRead for ListReadSvc {
                     refs,
                     image_ref: s.get::<Option<String>, _>("image_key").unwrap_or_default(),
                     // type/content_json — только у не-step блоков ('' у шага).
+                    // Пометка «здесь нужен человек» — часть шага: читатель должен видеть,
+                    // где нужен живой опыт, независимо от того, кто отдаёт список.
+                    needs_human: s.try_get::<bool, _>("needs_human").unwrap_or(false),
+                    needs_human_ask: Some(loc_map(
+                        &s.try_get::<serde_json::Value, _>("needs_human_ask")
+                            .unwrap_or(serde_json::Value::Null),
+                    )),
                     r#type: block_ty.clone(),
                     content_json: if block_ty.is_empty() {
                         String::new()
@@ -283,6 +290,10 @@ fn step_row(s: &NewStep) -> db::StepRow {
         section: loc_json(&s.section),
         subtasks: serde_json::Value::Array(s.subtasks.iter().map(|t| loc_json(&Some(t.clone()))).collect()),
         refs: refs_json(&s.refs),
+        // Пометка «здесь нужен человек» доезжает до записи. Вопрос имеет смысл только
+        // при поднятой пометке: «что спросить» без «нужен человек» — висячий текст.
+        needs_human: s.needs_human,
+        needs_human_ask: if s.needs_human { loc_json(&s.needs_human_ask) } else { serde_json::json!({}) },
     }
 }
 

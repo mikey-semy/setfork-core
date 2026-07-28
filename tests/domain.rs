@@ -37,7 +37,14 @@ fn step(title_en: &str) -> NewStep {
         image_ref: String::new(),
         r#type: String::new(),
         content_json: String::new(),
+        needs_human: false,
+        needs_human_ask: None,
     }
+}
+
+/// Шаг с пометкой «здесь нужен человек»: место, где машина знать не может.
+fn step_needing_human(title_en: &str, ask_en: &str) -> NewStep {
+    NewStep { needs_human: true, needs_human_ask: lt(&[("en", ask_en)]), ..step(title_en) }
 }
 
 fn text_block(md: &str) -> NewStep {
@@ -59,6 +66,81 @@ fn create_req(owner_id: &str, slug: &str) -> CreateListRequest {
         note: "initial".into(),
         steps: vec![step("Install"), text_block("intro **md**"), step("Configure")],
     }
+}
+
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn needs_human_survives_domain_write() {
+    // ДОЛГ КАТОВЕРА (закрыт 2026-07-28). Набор шагов перезаписывается ЦЕЛИКОМ, поэтому поле,
+    // о котором путь записи не знает, не «остаётся прежним», а ИСЧЕЗАЕТ. Ровно так пометка
+    // «здесь нужен человек» терялась во фронте (починено там же), и ровно так она терялась бы
+    // здесь при SETFORK_DOMAIN_WRITES=1 — только тише, потому что доменная запись выключена.
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "alice").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+    let read = ListReadSvc { pool: pool.clone() };
+
+    let mut req = create_req(&owner.to_string(), "marked-list");
+    req.steps = vec![step_needing_human("Купить муку", "Сколько стоит у вас?"), step("Замесить")];
+    let created = write.create(Request::new(req)).await.expect("create").into_inner();
+
+    let ver = read
+        .get_version(Request::new(GetVersionRequest { list_id: created.id.clone(), version: 1 }))
+        .await
+        .expect("get_version")
+        .into_inner();
+    assert!(ver.found);
+    assert!(ver.steps[0].needs_human, "пометка обязана пережить запись через домен");
+    assert_eq!(ver.steps[0].needs_human_ask.as_ref().unwrap().v["en"], "Сколько стоит у вас?");
+    assert!(!ver.steps[1].needs_human, "непомеченный шаг остаётся непомеченным");
+    assert!(
+        ver.steps[1].needs_human_ask.as_ref().map(|a| a.v.is_empty()).unwrap_or(true),
+        "вопрос без пометки — висячий текст, его быть не должно",
+    );
+}
+
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn needs_human_survives_git_projection() {
+    // В list.json пометка НЕ пишется (golden-паритет), поэтому из git она прийти не может.
+    // Если бы проекция писала false, каждый push молча стирал бы честные пометки. Переносим
+    // по block_id: идентичность блока git как раз несёт.
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "alice").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+    let read = ListReadSvc { pool: pool.clone() };
+
+    let bid = uuid::Uuid::new_v4().to_string();
+    let mut req = create_req(&owner.to_string(), "pushed-list");
+    let mut marked = step_needing_human("Купить муку", "Сколько стоит у вас?");
+    marked.block_id = bid.clone();
+    req.steps = vec![marked];
+    let created = write.create(Request::new(req)).await.expect("create").into_inner();
+    let list_id = uuid::Uuid::parse_str(&created.id).expect("uuid");
+
+    // Проекция push: тот же блок по идентичности, но без пометки — как приходит из git.
+    let proj = vec![setfork_core::git::project::ProjStep {
+        block_type: "step".into(),
+        content: serde_json::Value::Null,
+        block_id: Some(bid.clone()),
+        title: "Купить муку".into(),
+        desc: "".into(),
+        command: "".into(),
+        level: "required".into(),
+        why: "".into(),
+        section: "".into(),
+        subtasks: vec![],
+        refs: vec![],
+    }];
+    let v2 = setfork_core::db::add_version(&pool, list_id, "push", &proj).await.expect("add_version");
+
+    let ver = read
+        .get_version(Request::new(GetVersionRequest { list_id: created.id.clone(), version: v2 }))
+        .await
+        .expect("get_version")
+        .into_inner();
+    assert!(ver.steps[0].needs_human, "push НЕ должен стирать пометку — переносится по block_id");
+    assert_eq!(ver.steps[0].needs_human_ask.as_ref().unwrap().v["en"], "Сколько стоит у вас?");
 }
 
 #[tokio::test]
