@@ -79,7 +79,11 @@ create table steps (
   why jsonb not null default '{}'::jsonb,
   section jsonb not null default '{}'::jsonb,
   subtasks jsonb not null default '[]'::jsonb,
-  refs jsonb not null default '[]'::jsonb
+  refs jsonb not null default '[]'::jsonb,
+  -- «Здесь нужен человек»: место, где машина знать не может (цены, вкус, опыт).
+  -- Зеркало фронт-схемы; расхождение тестовой копии с настоящей = ложно-зелёные тесты.
+  needs_human boolean not null default false,
+  needs_human_ask jsonb not null default '{}'::jsonb
 );
 
 create table stars (
