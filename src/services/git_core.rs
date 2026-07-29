@@ -20,9 +20,19 @@ use crate::pb::{
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
+//
+// Зеркало `badBranch` на фронте (features/git/core.inproc.ts): форма обязана быть
+// одной с обеих сторон контракта. Две прежние расхождения (линза 02, F5):
+//   * `is_alphanumeric()` юникодный — сюда проходили кириллица и прочие алфавиты,
+//     которые ASCII-регэксп фронта отвергает;
+//   * ведущий '-' не запрещался. Само ядро создаёт ветки через API git2, но имя,
+//     заведённое здесь, дальше попадает в `execFile('git', […])` на inproc-пути
+//     фронта, где '-D' — уже флаг, а не имя (security-скан 2026-07-23, F3).
+// Правило дублируется по обе стороны сознательно — значит и меняться обязано парой.
 fn valid_branch(name: &str) -> bool {
     !name.is_empty()
-        && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '.')
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
         && !name.contains("..")
 }
 
@@ -249,7 +259,18 @@ impl GitCore for GitCoreSvc {
         // тихая потеря версии — худший исход (аудит 2026-07-20, P0-1).
         let new_version = if moved {
             match project::project_pushed_commit(&self.pool, id, &bare).await {
-                Ok(v) => v.unwrap_or(0),
+                Ok(Some(v)) => v,
+                // «Спроецировать нечего» — тот же исход, что и сбой: git принят, а версии
+                // нет (битый или пустой list.json). Счётчик рос только в Err-ветке, поэтому
+                // этот случай проходил мимо алерта — молча (линза 02, F3, побочная находка).
+                Ok(None) => {
+                    metrics::counter!("projection_failures_total", "op" => "push_empty").increment(1);
+                    tracing::warn!(
+                        owner = %repo.owner, slug = %repo.slug, %id,
+                        "проекция push ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
+                    );
+                    0
+                }
                 Err(e) => {
                     metrics::counter!("projection_failures_total", "op" => "push").increment(1);
                     tracing::error!(
@@ -459,7 +480,18 @@ impl GitCore for GitCoreSvc {
         // main сдвинулся → проекция новой версии (0 = list.json не изменился).
         // Сбой проекции не отменяет merge, но громко логируется (см. receive_pack).
         let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
-            Ok(v) => v.unwrap_or(0),
+            Ok(Some(v)) => v,
+            // «Спроецировать нечего» — тот же исход, что и сбой: git принят, а версии
+            // нет (битый или пустой list.json). Счётчик рос только в Err-ветке, поэтому
+            // этот случай проходил мимо алерта — молча (линза 02, F3, побочная находка).
+            Ok(None) => {
+                metrics::counter!("projection_failures_total", "op" => "merge_empty").increment(1);
+                tracing::warn!(
+                    owner = %repo.owner, slug = %repo.slug, %id,
+                    "проекция merge ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
+                );
+                0
+            }
             Err(e) => {
                 metrics::counter!("projection_failures_total", "op" => "merge").increment(1);
                 tracing::error!(
@@ -557,7 +589,18 @@ impl GitCore for GitCoreSvc {
         })
         .await?;
         let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
-            Ok(v) => v.unwrap_or(0),
+            Ok(Some(v)) => v,
+            // «Спроецировать нечего» — тот же исход, что и сбой: git принят, а версии
+            // нет (битый или пустой list.json). Счётчик рос только в Err-ветке, поэтому
+            // этот случай проходил мимо алерта — молча (линза 02, F3, побочная находка).
+            Ok(None) => {
+                metrics::counter!("projection_failures_total", "op" => "merge_resolved_empty").increment(1);
+                tracing::warn!(
+                    owner = %repo.owner, slug = %repo.slug, %id,
+                    "проекция merge-resolved ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
+                );
+                0
+            }
             Err(e) => {
                 metrics::counter!("projection_failures_total", "op" => "merge_resolved").increment(1);
                 tracing::error!(
@@ -746,6 +789,35 @@ impl GitCore for GitCoreSvc {
             })
             .collect();
         Ok(Response::new(CommitsResponse { found: found.is_some(), commits }))
+    }
+}
+
+#[cfg(test)]
+mod branch_name_tests {
+    use super::valid_branch;
+
+    /// Список — дословное зеркало проверок `badBranch` на фронте
+    /// (features/git/core.inproc.ts). Расходиться этим двум копиям нельзя: имя,
+    /// заведённое через ядро, потом уходит в `execFile('git', […])` на inproc-пути.
+    #[test]
+    fn mirrors_frontend_rule() {
+        for ok in ["main", "feature-1", "fix_a.b", "PR-42", "v1.2.3"] {
+            assert!(valid_branch(ok), "должно быть валидно: {ok}");
+        }
+        for bad in [
+            "",        // пусто
+            "-D",      // ведущий '-' = флаг для git на inproc-пути
+            "-main",   //
+            "a..b",    // путь наверх
+            "feat/x",  // слэш — не простое имя
+            "ветка",   // не-ASCII: фронт такое отвергает, ядро пропускало
+            "ветка-1", //
+            "brànch",  // юникод-буква внутри ASCII-имени
+            "a b",     // пробел
+            "a\nb",    // перевод строки
+        ] {
+            assert!(!valid_branch(bad), "должно быть отвергнуто: {bad:?}");
+        }
     }
 }
 
