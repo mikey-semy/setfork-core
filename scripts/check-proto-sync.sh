@@ -15,7 +15,15 @@ cd "$(dirname "$0")/.."
 FRONT="${SETFORK_FRONTEND_DIR:-../setfork-frontend}"
 REF="${SETFORK_FRONTEND_REF:-origin/master}"
 if [[ ! -d "$FRONT/.git" && ! -f "$FRONT/.git" ]]; then
-  echo "proto-sync: фронт не найден ($FRONT) — пропуск (задай SETFORK_FRONTEND_DIR)"
+  # ГРОМКО, а не молча. Раньше здесь стоял тихий «пропуск», и в GitHub-CI гейт не
+  # работал вообще — а выглядел выполненным. За это время в master уехал разъезд
+  # block_id (реестр проверки 28.07, п.7): контракты разошлись, и никто не увидел.
+  #
+  # Кросс-репный чекаут требует токена с доступом на чтение обоих приватных репо;
+  # пока его нет, в GitHub-CI гейт остаётся невыполнимым — и говорит об этом вслух.
+  echo "::warning::proto-sync НЕ ВЫПОЛНЕН: клона фронта нет ($FRONT). Локально задай"
+  echo "::warning::SETFORK_FRONTEND_DIR; в GitHub-CI нужен токен на чтение setfork-frontend."
+  echo "proto-sync: НЕ ВЫПОЛНЕН (нет клона фронта) — это не «ок», это отсутствие проверки"
   exit 0
 fi
 
