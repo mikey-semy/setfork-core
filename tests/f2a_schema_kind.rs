@@ -32,7 +32,10 @@ fn ser_step(n: i32, title: &str) -> SerStep {
         title: title.into(),
         desc: "desc".into(),
         command: "echo hi".into(),
+        image_key: None,
         level: "recommended".into(),
+        needs_human: false,
+        needs_human_ask: None,
         why: "why".into(),
         section: "Setup".into(),
         subtasks: vec!["sub".into()],
@@ -66,7 +69,10 @@ fn ver(kind: Option<&str>) -> VersionData {
                 title: String::new(),
                 desc: String::new(),
                 command: String::new(),
+                image_key: None,
                 level: "required".into(),
+                needs_human: false,
+                needs_human_ask: None,
                 why: String::new(),
                 section: String::new(),
                 subtasks: vec![],
@@ -287,6 +293,87 @@ async fn мусорный_kind_отбрасывается_а_отсутстви�
         .await
         .expect("list_kind");
     assert_eq!(got.as_deref(), Some("checklist"), "push старого клона без kind не стирает тип");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Ф2a-довесок: картинка и пометка — содержимое канона. Файл — источник
+/// (проекция читает их у списка, где carry взять неоткуда), явный false
+/// снимает пометку пушем, recovery из канона возвращает картинку.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn картинка_и_пометка_переживают_полный_цикл() {
+    const BLOCK: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let pool = support::pool_with_schema().await;
+    let a_id = seed_list(&pool, "img-a", "img", None).await;
+    let b_id = seed_list(&pool, "img-b", "img", None).await;
+    // A: шаг с идентичностью, картинкой и пометкой.
+    sqlx::query(
+        "update steps set block_id = $1, image_key = 'steps/pan.png', has_image = true,                           needs_human = true, needs_human_ask = '{\"en\":\"how hot is your oven\"}'::jsonb          where version_id = (select id from template_versions where template_id = $2 and version = 1)",
+    )
+    .bind(Uuid::parse_str(BLOCK).unwrap())
+    .bind(a_id)
+    .execute(&pool)
+    .await
+    .expect("enrich A");
+
+    let tmp = std::env::temp_dir().join(format!("setfork-img-{}", Uuid::new_v4()));
+    let bare_a = tmp.join("a.git");
+    let bare_b = tmp.join("b.git");
+    bundle::bootstrap_bare(&setfork_core::db::load_bundle_data(&pool, a_id).await.expect("hist A"), &bare_a)
+        .expect("bootstrap A");
+    bundle::bootstrap_bare(&setfork_core::db::load_bundle_data(&pool, b_id).await.expect("hist B"), &bare_b)
+        .expect("bootstrap B");
+
+    // Канон A несёт новые поля прямо из bootstrap-истории.
+    let canon = tip_list_json(&bare_a);
+    let parsed: serde_json::Value = serde_json::from_slice(&canon).expect("json");
+    assert_eq!(parsed["steps"][0]["imageKey"], serde_json::json!("steps/pan.png"));
+    assert_eq!(parsed["steps"][0]["needsHuman"], serde_json::json!(true));
+    assert_eq!(parsed["steps"][0]["needsHumanAsk"], serde_json::json!("how hot is your oven"));
+    // И валиден по схеме.
+    let schema = schema();
+    jsonschema::draft7::validate(&schema, &parsed).expect("канон с новыми полями валиден");
+
+    // Push ровно этого канона на B: у B carry пуст — поля обязаны прийти ИЗ ФАЙЛА.
+    let mut v2 = parsed.clone();
+    v2["version"] = serde_json::json!(2);
+    push_canon(&bare_b, serde_json::to_string_pretty(&v2).unwrap().as_bytes());
+    let ver = setfork_core::git::project::project_pushed_commit(&pool, b_id, &bare_b)
+        .await
+        .expect("проекция")
+        .expect("проецируемо");
+    assert_eq!(ver, 2);
+    let (ik, nh, ask): (Option<String>, bool, serde_json::Value) = sqlx::query_as(
+        "select s.image_key, s.needs_human, s.needs_human_ask from steps s          join template_versions tv on tv.id = s.version_id          where tv.template_id = $1 and tv.version = 2 and s.n = 1",
+    )
+    .bind(b_id)
+    .fetch_one(&pool)
+    .await
+    .expect("B v2 step");
+    assert_eq!(ik.as_deref(), Some("steps/pan.png"), "картинка пришла из файла (recovery работает)");
+    assert!(nh, "пометка пришла из файла");
+    assert_eq!(ask["en"], "how hot is your oven");
+
+    // Явный false в файле СНИМАЕТ пометку (тристейт).
+    let mut v3 = parsed.clone();
+    v3["version"] = serde_json::json!(3);
+    v3["steps"][0]["needsHuman"] = serde_json::json!(false);
+    push_canon(&bare_b, serde_json::to_string_pretty(&v3).unwrap().as_bytes());
+    let ver = setfork_core::git::project::project_pushed_commit(&pool, b_id, &bare_b)
+        .await
+        .expect("проекция")
+        .expect("проецируемо");
+    assert_eq!(ver, 3);
+    let (nh, ask): (bool, serde_json::Value) = sqlx::query_as(
+        "select s.needs_human, s.needs_human_ask from steps s          join template_versions tv on tv.id = s.version_id          where tv.template_id = $1 and tv.version = 3 and s.n = 1",
+    )
+    .bind(b_id)
+    .fetch_one(&pool)
+    .await
+    .expect("B v3 step");
+    assert!(!nh, "явный false снял пометку пушем");
+    assert_eq!(ask, serde_json::json!({}), "вопрос погашен вместе с пометкой");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

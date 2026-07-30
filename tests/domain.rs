@@ -118,8 +118,12 @@ async fn needs_human_survives_git_projection() {
     let created = write.create(Request::new(req)).await.expect("create").into_inner();
     let list_id = uuid::Uuid::parse_str(&created.id).expect("uuid");
 
-    // Проекция push: тот же блок по идентичности, но без пометки — как приходит из git.
+    // Проекция push: тот же блок по идентичности, но БЕЗ полей пометки/картинки
+    // в файле (None — как из старого клона): значения переносятся по block_id.
     let proj = vec![setfork_core::git::project::ProjStep {
+        image_key: None,
+        needs_human: None,
+        needs_human_ask: None,
         block_type: "step".into(),
         content: serde_json::Value::Null,
         block_id: Some(bid.clone()),

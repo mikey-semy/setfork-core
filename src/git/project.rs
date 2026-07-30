@@ -17,6 +17,12 @@ pub struct ProjRef {
     pub url: Option<String>,
 }
 pub struct ProjStep {
+    // Ф2a-довесок: картинка (S3-ключ) и пометка «нужен человек» из list.json.
+    // needs_human: None = поля в файле не было (старый клон) → значение переносится
+    // из текущей версии по block_id; Some(false) — явное снятие пометки пушем.
+    pub image_key: Option<String>,
+    pub needs_human: Option<bool>,
+    pub needs_human_ask: Option<String>,
     // Блочная модель: '' = шаг; 'text'|'image' — презентационный блок. content —
     // payload не-step блока (Null у шага).
     pub block_type: String,
@@ -52,7 +58,16 @@ struct RawStep {
     title: Option<String>,
     desc: Option<String>,
     command: Option<String>,
+    // Ф2a-довесок: картинка (S3-ключ) и пометка «нужен человек» читаются из файла.
+    // needs_human — тристейт: None (нет поля) = «не знаем» → перенос из текущей
+    // версии по block_id (CarryOver); Some(false) — явное снятие пометки пушем.
+    #[serde(rename = "imageKey")]
+    image_key: Option<String>,
     level: Option<String>,
+    #[serde(rename = "needsHuman")]
+    needs_human: Option<bool>,
+    #[serde(rename = "needsHumanAsk")]
+    needs_human_ask: Option<String>,
     why: Option<String>,
     section: Option<String>,
     subtasks: Option<Vec<String>>,
@@ -241,6 +256,9 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
             continue;
         }
         let step = ProjStep {
+            image_key: s.image_key.clone().filter(|k| !k.trim().is_empty()),
+            needs_human: s.needs_human,
+            needs_human_ask: s.needs_human_ask.clone().filter(|a| !a.trim().is_empty()),
             block_type: if is_step { String::new() } else { bt },
             block_id: s.block_id.clone().filter(|v| !v.trim().is_empty()),
             content: if is_step {
@@ -427,7 +445,10 @@ mod tests {
             title: Some(title.to_string()),
             desc: Some(String::new()),
             command: Some(String::new()),
+            image_key: None,
             level: Some("required".into()),
+            needs_human: None,
+            needs_human_ask: None,
             why: None,
             section: None,
             subtasks: None,
@@ -496,7 +517,10 @@ mod tests {
             title: title.into(),
             desc: desc.into(),
             command: command.into(),
+            image_key: None,
             level: "required".into(),
+            needs_human: false,
+            needs_human_ask: None,
             why: "always".into(),
             section: "Setup".into(),
             subtasks: vec!["sub a".into(), "sub b".into()],
@@ -523,7 +547,10 @@ mod tests {
                 title: s.title.clone(),
                 desc: s.desc.clone(),
                 command: s.command.clone(),
+                image_key: None,
                 level: s.level.clone(),
+                needs_human: false,
+                needs_human_ask: None,
                 why: s.why.clone(),
                 section: s.section.clone(),
                 subtasks: s.subtasks.clone(),
