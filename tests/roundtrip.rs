@@ -50,6 +50,7 @@ fn ver(version: i32, note: &str, steps: Vec<SerStep>) -> VersionData {
         desc: "Set up Redis".into(),
         tags: vec!["redis".into()],
         ordered: true,
+        kind: None,
         steps,
     }
 }

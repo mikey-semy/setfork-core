@@ -64,6 +64,8 @@ struct RawList {
     desc: Option<String>,
     tags: Option<Vec<String>>,
     ordered: Option<bool>,
+    // Тип списка (Ф2a): до этого терялся на push — проекция его не читала.
+    kind: Option<String>,
     steps: Option<Vec<RawStep>>,
 }
 
@@ -377,6 +379,7 @@ pub async fn project_pushed_commit(
         parsed.desc.clone(),
         parsed.tags.clone(),
         parsed.ordered,
+        parsed.kind.clone(),
     )
     .await
     {
@@ -511,6 +514,7 @@ mod tests {
             desc: String::new(),
             tags: vec![],
             ordered: true,
+            kind: None,
             steps: vec![SerStep {
                 n: s.n,
                 block_type: None,
@@ -583,6 +587,7 @@ mod tests {
             desc: "D".into(),
             tags: vec!["t".into()],
             ordered: true,
+            kind: None,
             steps: vec![
                 ser("First", "do it", "echo hi"),
                 SerStep {

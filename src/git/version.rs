@@ -233,13 +233,15 @@ pub async fn commit_web_version(
     }
 
     let mut tx = pool.begin().await?;
-    let meta = sqlx::query_as::<_, (i32, serde_json::Value, serde_json::Value, Vec<String>, bool)>(
-        "select current_version, title, \"desc\", tags, ordered from templates where id = $1 for update",
-    )
-    .bind(id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some((current, title, desc, tags, ordered)) = meta else {
+    let meta =
+        sqlx::query_as::<_, (i32, serde_json::Value, serde_json::Value, Vec<String>, bool, Option<String>)>(
+            "select current_version, title, \"desc\", tags, ordered, list_kind \
+             from templates where id = $1 for update",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+    let Some((current, title, desc, tags, ordered, kind)) = meta else {
         return Err(WebVersionError::NotFound);
     };
     let version = current + 1;
@@ -257,6 +259,8 @@ pub async fn commit_web_version(
         desc: db::loc(&desc),
         tags,
         ordered,
+        // kind — из той же строки templates (Ф2a): мусор не публикуем.
+        kind: kind.filter(|k| crate::git::serialize::is_valid_kind(k)),
         steps: rows.iter().enumerate().map(|(i, r)| db::ser_step_from_row(i as i32 + 1, r)).collect(),
     };
 
