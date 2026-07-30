@@ -25,6 +25,14 @@ impl Level {
             _ => Level::Required,
         }
     }
+    /// Строка для канона list.json — та же, что отдаёт `level::text` из БД.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Level::Required => "required",
+            Level::Recommended => "recommended",
+            Level::Optional => "optional",
+        }
+    }
 }
 
 // LocaleText jsonb: {"en": s} для непустого, иначе {} (порт project.ts L()).
@@ -34,7 +42,7 @@ fn loc_val(s: &str) -> serde_json::Value {
 }
 
 /// LocaleText (jsonb) → строка: берём 'en', иначе первое значение.
-fn loc(v: &serde_json::Value) -> String {
+pub(crate) fn loc(v: &serde_json::Value) -> String {
     if let Some(o) = v.as_object() {
         if let Some(s) = o.get("en").and_then(|x| x.as_str()) {
             return s.to_string();
@@ -265,10 +273,52 @@ pub async fn insert_step_rows(
     Ok(())
 }
 
-/// Единственный путь «новая версия»: FOR UPDATE current_version → insert
-/// template_versions → шаги → bump current_version + updated_at, всё в одной
-/// транзакции (FOR UPDATE — защита от гонки нумерации и вне guarded-пути).
-/// None = списка нет. Возвращает (ver_id, version, created_at_ms).
+/// Вставка строки template_versions — часть движка «новая версия» (общая для
+/// git-проекции и git-first веб-пути). Возвращает (ver_id, created_at сек,
+/// created_at мс): секунды нужны git-коммиту (усечение как у ISO-даты в TS),
+/// миллисекунды — ответу домена.
+pub async fn insert_version_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    template_id: Uuid,
+    version: i32,
+    note: &str,
+    author_id: Option<Uuid>,
+) -> Result<(Uuid, i64, i64), sqlx::Error> {
+    sqlx::query_as(
+        "insert into template_versions (template_id, version, note, author_id) values ($1, $2, $3, $4) \
+         returning id, floor(extract(epoch from created_at))::bigint, \
+                   floor(extract(epoch from created_at) * 1000)::bigint",
+    )
+    .bind(template_id)
+    .bind(version)
+    .bind(note)
+    .bind(author_id)
+    .fetch_one(&mut **tx)
+    .await
+}
+
+/// Завершение движка «новая версия»: current_version + updated_at.
+pub async fn bump_current_version(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    template_id: Uuid,
+    version: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("update templates set current_version = $1, updated_at = now() where id = $2")
+        .bind(version)
+        .bind(template_id)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Путь «новая версия» для git-проекции (push/merge): FOR UPDATE current_version →
+/// insert template_versions → шаги → bump, всё в одной транзакции (FOR UPDATE —
+/// защита от гонки нумерации и вне guarded-пути). None = списка нет.
+/// Возвращает (ver_id, version, created_at_ms).
+///
+/// Веб-путь идёт НЕ здесь, а через git::version::commit_web_version — тем же
+/// движком (insert_version_row/insert_step_rows/bump_current_version), но с
+/// git-коммитом внутри транзакции: сначала коммит, потом строки.
 pub async fn add_version_rows(
     pool: &PgPool,
     template_id: Uuid,
@@ -286,31 +336,35 @@ pub async fn add_version_rows(
         return Ok(None);
     };
     let new_version = current + 1;
-    let (ver_id, created_ms): (Uuid, i64) = sqlx::query_as(
-        "insert into template_versions (template_id, version, note, author_id) values ($1, $2, $3, $4) \
-         returning id, floor(extract(epoch from created_at) * 1000)::bigint",
-    )
-    .bind(template_id)
-    .bind(new_version)
-    .bind(note)
-    .bind(author_id)
-    .fetch_one(&mut *tx)
-    .await?;
+    let (ver_id, _created_s, created_ms) =
+        insert_version_row(&mut tx, template_id, new_version, note, author_id).await?;
 
     insert_step_rows(&mut tx, ver_id, rows).await?;
-
-    sqlx::query("update templates set current_version = $1, updated_at = now() where id = $2")
-        .bind(new_version)
-        .bind(template_id)
-        .execute(&mut *tx)
-        .await?;
+    bump_current_version(&mut tx, template_id, new_version).await?;
     tx.commit().await?;
     Ok(Some((ver_id, new_version, created_ms)))
 }
 
+/// Что переносится в новую версию из ТЕКУЩЕЙ по идентичности блока: надстройки
+/// Postgres, которых нет в каноне list.json (ADR-0014) — push их не приносит,
+/// и без переноса он бы их молча стирал.
+#[derive(Clone)]
+pub struct CarryOver {
+    pub needs_human: bool,
+    pub needs_human_ask: serde_json::Value,
+    pub image_key: Option<String>,
+}
+
+impl Default for CarryOver {
+    fn default() -> Self {
+        // ask = {} (не Null!): колонка jsonb NOT NULL, Null-bind уронил бы вставку.
+        CarryOver { needs_human: false, needs_human_ask: serde_json::json!({}), image_key: None }
+    }
+}
+
 // ProjStep → StepRow: санитизация git-входа (порт project.ts): trim, пустые
-// subtasks/refs выбрасываются, LocaleText жмётся в {"en": …}, image не несём.
-fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, serde_json::Value)>) -> StepRow {
+// subtasks/refs выбрасываются, LocaleText жмётся в {"en": …}.
+fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, CarryOver>) -> StepRow {
     let subtasks = serde_json::Value::Array(
         s.subtasks
             .iter()
@@ -318,13 +372,13 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, ser
             .map(|x| serde_json::json!({ "en": x.trim() }))
             .collect(),
     );
-    // Пометка «здесь нужен человек» из ТЕКУЩЕЙ версии по идентичности блока (см. ниже).
-    let nh = s
+    // Надстройки из ТЕКУЩЕЙ версии по идентичности блока (см. CarryOver).
+    let carry = s
         .block_id
         .as_deref()
         .and_then(|v| Uuid::parse_str(v).ok())
         .and_then(|id| keep.get(&id).cloned())
-        .unwrap_or((false, serde_json::json!({})));
+        .unwrap_or_default();
     let refs = serde_json::Value::Array(
         s.refs
             .iter()
@@ -350,7 +404,10 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, ser
         title: loc_val(&s.title),
         desc: loc_val(&s.desc),
         command: s.command.trim().to_string(),
-        image_key: None,
+        // Картинка шага живёт в S3/БД, канон её не несёт — переносим по block_id,
+        // иначе КАЖДЫЙ push молча стирал бы скриншоты всех шагов (P1 авто-ревью
+        // #63; docs/github-parity.md всегда обещал «пуш картинки не меняет»).
+        image_key: carry.image_key.clone(),
         level: Level::parse(&s.level),
         why: loc_val(&s.why),
         section: loc_val(&s.section),
@@ -360,20 +417,21 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, ser
         // (golden-паритет с TS), поэтому из git она прийти не может. Если писать false,
         // каждый push молча стирал бы честные пометки — ровно та потеря, что чинилась во
         // фронте 2026-07-27. Переносим по block_id: идентичность блока git как раз несёт.
-        // Блок без block_id сопоставить не с чем — там пометка честно неизвестна.
-        needs_human: nh.0,
-        needs_human_ask: nh.1,
+        // Блок без block_id сопоставить не с чем — там надстройки честно неизвестны.
+        needs_human: carry.needs_human,
+        needs_human_ask: carry.needs_human_ask,
     }
 }
 
-/// Пометки «здесь нужен человек» текущей версии, по идентичности блока. Пустая карта —
-/// нормальный случай (список без пометок или без block_id у строк).
+/// Надстройки текущей версии, переносимые по идентичности блока (CarryOver).
+/// Пустая карта — нормальный случай (список без пометок/картинок или без
+/// block_id у строк).
 async fn current_marks(
     pool: &PgPool,
     template_id: Uuid,
-) -> Result<std::collections::HashMap<Uuid, (bool, serde_json::Value)>, sqlx::Error> {
+) -> Result<std::collections::HashMap<Uuid, CarryOver>, sqlx::Error> {
     let rows = sqlx::query(
-        "select s.block_id, s.needs_human, s.needs_human_ask \
+        "select s.block_id, s.needs_human, s.needs_human_ask, s.image_key \
          from steps s \
          join template_versions tv on tv.id = s.version_id \
          join templates t on t.id = tv.template_id and t.current_version = tv.version \
@@ -385,9 +443,16 @@ async fn current_marks(
     let mut out = std::collections::HashMap::new();
     for r in rows {
         if let Ok(Some(id)) = r.try_get::<Option<Uuid>, _>("block_id") {
-            let flag = r.try_get::<bool, _>("needs_human").unwrap_or(false);
-            let ask = r.try_get::<serde_json::Value, _>("needs_human_ask").unwrap_or(serde_json::json!({}));
-            out.insert(id, (flag, ask));
+            out.insert(
+                id,
+                CarryOver {
+                    needs_human: r.try_get::<bool, _>("needs_human").unwrap_or(false),
+                    needs_human_ask: r
+                        .try_get::<serde_json::Value, _>("needs_human_ask")
+                        .unwrap_or(serde_json::json!({})),
+                    image_key: r.try_get::<Option<String>, _>("image_key").ok().flatten(),
+                },
+            );
         }
     }
     Ok(out)
@@ -407,6 +472,51 @@ pub async fn add_version(
     match add_version_rows(pool, template_id, note, None, &rows).await? {
         Some((_ver_id, version, _ms)) => Ok(version),
         None => Err(sqlx::Error::RowNotFound),
+    }
+}
+
+/// StepRow → SerStep: en-проекция строки под канон list.json.
+///
+/// ЗЕРКАЛО чтения load_bundle_data (строка БД → SerStep): git-first путь строит
+/// канон из ещё не вставленных строк, и он обязан быть байт-в-байт тем, что
+/// bootstrap соберёт из этих же строк после вставки — иначе восстановленный из
+/// БД репозиторий разойдётся с оригиналом. Правила фильтрации те же: пустые
+/// subtasks выбрасываются, ref без label выбрасывается, пустой url = None,
+/// type/content несём только у не-step блоков.
+pub fn ser_step_from_row(n: i32, r: &StepRow) -> SerStep {
+    let is_step = is_step_type(&r.block_type);
+    SerStep {
+        n,
+        block_type: Some(r.block_type.clone()).filter(|t| !is_step_type(t)),
+        content: if is_step { serde_json::Value::Null } else { r.content.clone() },
+        block_id: r.block_id.map(|u| u.to_string()),
+        title: loc(&r.title),
+        desc: loc(&r.desc),
+        command: r.command.clone(),
+        level: r.level.as_str().to_string(),
+        why: loc(&r.why),
+        section: loc(&r.section),
+        subtasks: r
+            .subtasks
+            .as_array()
+            .map(|a| a.iter().map(loc).filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default(),
+        refs: r
+            .refs
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| {
+                        let label = x.get("label").map(loc).unwrap_or_default();
+                        if label.is_empty() {
+                            return None;
+                        }
+                        let url = x.get("url").and_then(|u| u.as_str()).map(|s| s.to_string());
+                        Some(StepRef { label, url })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -452,4 +562,84 @@ pub async fn update_meta(
             .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod ser_step_tests {
+    use super::{Level, StepRow, ser_step_from_row};
+    use uuid::Uuid;
+
+    fn row() -> StepRow {
+        StepRow {
+            block_type: "step".into(),
+            content: serde_json::json!({}),
+            block_id: Some(Uuid::from_u128(7)),
+            title: serde_json::json!({ "en": "Install Redis", "ru": "Поставить Redis" }),
+            desc: serde_json::json!({ "en": "Grab it" }),
+            command: "brew install redis".into(),
+            image_key: None,
+            level: Level::Recommended,
+            why: serde_json::json!({ "en": "нужно для кэша" }),
+            section: serde_json::json!({ "en": "Setup" }),
+            subtasks: serde_json::json!([{ "en": "проверить версию" }, { "en": "" }, {}]),
+            refs: serde_json::json!([
+                { "label": { "en": "docs" }, "url": "https://redis.io" },
+                { "label": { "en": "без ссылки" } },
+                { "label": { "en": "" }, "url": "https://dropped.example" },
+            ]),
+            needs_human: true,
+            needs_human_ask: serde_json::json!({}),
+        }
+    }
+
+    /// en-проекция строки: фильтры ровно как у чтения БД (load_bundle_data) —
+    /// иначе bootstrap из вставленных строк соберёт другой канон.
+    #[test]
+    fn en_проекция_и_фильтры_совпадают_с_чтением_бд() {
+        let s = ser_step_from_row(3, &row());
+        assert_eq!(s.n, 3);
+        assert_eq!(s.block_type, None, "step не несёт type");
+        assert_eq!(s.content, serde_json::Value::Null, "у шага content не пишется");
+        assert_eq!(s.block_id.as_deref(), Some("00000000-0000-0000-0000-000000000007"));
+        assert_eq!(s.title, "Install Redis", "канон берёт en");
+        assert_eq!(s.level, "recommended");
+        assert_eq!(s.subtasks, vec!["проверить версию".to_string()], "пустые подзадачи выброшены");
+        assert_eq!(s.refs.len(), 2, "ref без label выброшен");
+        assert_eq!(s.refs[0].url.as_deref(), Some("https://redis.io"));
+        assert_eq!(s.refs[1].url, None, "отсутствующий url = None");
+    }
+
+    /// Не-step блок: type/content уезжают в канон как есть.
+    #[test]
+    fn блок_несёт_type_и_content() {
+        let mut r = row();
+        r.block_type = "text".into();
+        r.content = serde_json::json!({ "md": "Вступление" });
+        let s = ser_step_from_row(1, &r);
+        assert_eq!(s.block_type.as_deref(), Some("text"));
+        assert_eq!(s.content, serde_json::json!({ "md": "Вступление" }));
+    }
+
+    /// «Здесь нужен человек» и image_key в канон НЕ попадают (их нет в list.json) —
+    /// это надстройки Postgres; проверяем, что производная их просто не читает.
+    #[test]
+    fn надстройки_не_текут_в_канон() {
+        let mut r = row();
+        r.image_key = Some("avatars/x.png".into());
+        let s = ser_step_from_row(1, &r);
+        // SerStep физически не имеет полей для image/needs_human — сборка канона
+        // из него не может их пронести; тест фиксирует контракт от регрессии.
+        let json = crate::git::serialize::list_json(&crate::git::bundle::VersionData {
+            version: 1,
+            note: String::new(),
+            ts: 0,
+            title: "L".into(),
+            desc: String::new(),
+            tags: vec![],
+            ordered: true,
+            steps: vec![s],
+        });
+        assert!(!json.contains("image"), "image не в каноне: {json}");
+        assert!(!json.contains("needs"), "пометка не в каноне: {json}");
+    }
 }

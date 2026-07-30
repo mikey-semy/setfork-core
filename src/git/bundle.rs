@@ -13,6 +13,7 @@ use git2::{ObjectType, Oid, Repository, Signature, Time};
 use super::MAIN_REF;
 use super::serialize::commit_message;
 pub use super::serialize::{SerStep, StepRef, VersionData, version_files};
+use super::update::{MainUpdateError, update_main};
 
 // Идентичность коммитов — ОДИНАКОВО с TS (store.ts/bundle.ts) для детерминированных SHA.
 // Переиспользуются merge-коммитами в services::git_core.
@@ -31,8 +32,8 @@ fn run_git(args: &[&str]) -> io::Result<()> {
     Ok(())
 }
 
-fn git_io(e: git2::Error) -> io::Error {
-    io::Error::other(format!("git2: {e}"))
+fn upd_io(e: MainUpdateError) -> io::Error {
+    io::Error::other(e.to_string())
 }
 
 // Дерево версии из version_files (README.md, list.json, steps/NN.md); поддерево steps/.
@@ -70,20 +71,32 @@ fn commit_version(repo: &Repository, parent: Option<Oid>, v: &VersionData) -> Re
     repo.commit(None, &sig, &sig, &msg, &tree, &refs) // update_ref=None: main выставим в конце
 }
 
-// Строит историю версий: коммиты + теги vN + refs/heads/main + HEAD→main. Возвращает tip.
+// Строит историю версий: коммиты, refs/heads/main ЧЕРЕЗ update_main (та же
+// валидация, что у pre-receive), затем теги vN + HEAD→main. Возвращает tip.
+//
+// Порядок намеренный: main двигается ДО тегов. Если бы теги ставились первыми,
+// отказ update_main (например, CAS при гонке) оставил бы теги vN на осиротевших
+// коммитах — и история версий начала бы врать.
 fn build_history(
     repo: &Repository,
     versions: &[VersionData],
     mut parent: Option<Oid>,
-) -> Result<Option<Oid>, git2::Error> {
+) -> Result<Option<Oid>, MainUpdateError> {
+    let expected_old = parent;
+    let mut tagged: Vec<(i32, Oid)> = Vec::with_capacity(versions.len());
     for v in versions {
         let oid = commit_version(repo, parent, v)?;
-        let obj = repo.find_object(oid, Some(ObjectType::Commit))?;
-        repo.tag_lightweight(&format!("v{}", v.version), &obj, true)?;
+        tagged.push((v.version, oid));
         parent = Some(oid);
     }
-    if let Some(tip) = parent {
-        repo.reference(MAIN_REF, tip, true, "setfork")?;
+    if let Some(tip) = parent
+        && parent != expected_old
+    {
+        update_main(repo, tip, expected_old, "setfork: versions")?;
+        for (ver, oid) in tagged {
+            let obj = repo.find_object(oid, Some(ObjectType::Commit))?;
+            repo.tag_lightweight(&format!("v{ver}"), &obj, true)?;
+        }
         let _ = repo.set_head(MAIN_REF);
     }
     Ok(parent)
@@ -96,7 +109,7 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
         return Err(io::Error::new(io::ErrorKind::NotFound, "no versions"));
     }
     let work = std::env::temp_dir().join(format!("setfork-git-{}", uuid::Uuid::new_v4()));
-    let build = (|| -> Result<(), git2::Error> {
+    let build = (|| -> Result<(), MainUpdateError> {
         let repo = Repository::init_bare(&work)?;
         build_history(&repo, versions, None)?;
         Ok(())
@@ -105,7 +118,7 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
         Ok(()) => Ok(work),
         Err(e) => {
             let _ = fs::remove_dir_all(&work);
-            Err(git_io(e))
+            Err(upd_io(e))
         }
     }
 }
@@ -148,32 +161,35 @@ pub fn bootstrap_bare(versions: &[VersionData], bare: &Path) -> io::Result<()> {
     if let Some(parent) = bare.parent() {
         fs::create_dir_all(parent)?;
     }
-    (|| -> Result<(), git2::Error> {
+    (|| -> Result<(), MainUpdateError> {
         let repo = Repository::init_bare(bare)?;
         build_history(&repo, versions, None)?;
         Ok(())
     })()
-    .map_err(git_io)?;
+    .map_err(upd_io)?;
     install_hook(bare)?;
     gc_auto(bare); // упаковать объекты стартовой истории
     Ok(())
 }
 
-/// Дописывает недостающие веб-версии поверх текущего main (git2), сохраняя запушенные коммиты.
+/// Дописывает версии поверх текущего main (git2), сохраняя запушенные коммиты.
 /// `versions` — только те, что добавить (version > have). Без worktree.
-pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<()> {
+/// Возвращает hex-sha нового tip main (None — дописывать было нечего).
+///
+/// Это НЕ «ленивая досыпка» (её больше нет): функцию зовут единый путь записи
+/// версии (git::version::commit_web_version) и одноразовый догон sync-repos.
+pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<Option<String>> {
     if versions.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
-    (|| -> Result<(), git2::Error> {
+    let tip = (|| -> Result<Option<Oid>, MainUpdateError> {
         let repo = Repository::open_bare(bare)?;
         let parent = repo.refname_to_id(MAIN_REF).ok();
-        build_history(&repo, versions, parent)?;
-        Ok(())
+        build_history(&repo, versions, parent)
     })()
-    .map_err(git_io)?;
+    .map_err(upd_io)?;
     gc_auto(bare); // loose-объекты дозаписанных версий → упаковка при пороге
-    Ok(())
+    Ok(tip.map(|o| o.to_string()))
 }
 
 /// Максимальный номер версии среди тегов v* (git2).

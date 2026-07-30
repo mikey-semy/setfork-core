@@ -21,6 +21,7 @@ use uuid::Uuid;
 use super::util::{db_status, loc_json, loc_map, parse_id, refs_json};
 use crate::blocks::{content_value, storage_type, wire_type};
 use crate::db;
+use crate::git::{repo, version};
 use crate::pb_domain::list_read_server::ListRead;
 use crate::pb_domain::list_write_server::ListWrite;
 use crate::pb_domain::{
@@ -297,28 +298,53 @@ fn step_row(s: &NewStep) -> db::StepRow {
     }
 }
 
+// Отказ git-first записи версии → gRPC-статус (текст — оператору в лог фронта).
+fn web_version_status(e: version::WebVersionError) -> Status {
+    match e {
+        version::WebVersionError::NotFound => Status::not_found("list not found"),
+        version::WebVersionError::OutOfSync { have, current } => Status::failed_precondition(format!(
+            "repo out of sync (git v{have}, db v{current}) — см. runbook git-projection-catchup"
+        )),
+        version::WebVersionError::Db(e) => db_status(e),
+        version::WebVersionError::Git(e) => Status::internal(format!("git commit failed: {e}")),
+        // Канон записан, проекция отстала: повтор сохранения сам долечит
+        // (sync_repo_with_db спроецирует tip), либо reproject руками.
+        version::WebVersionError::ProjectionLost { version, sha, source } => Status::internal(format!(
+            "version v{version} committed to git ({sha}) but projection failed: {source}; retry or reproject"
+        )),
+    }
+}
+
 #[tonic::async_trait]
 impl ListWrite for ListWriteSvc {
+    /// Новая версия — GIT-FIRST (Ф1): сначала коммит vN на main (через единую
+    /// точку обновления с валидацией), затем строки БД как проекция — одна
+    /// операция под репо-локом. БД здесь read-model: git не откатывается.
     async fn add_version(&self, req: Request<AddVersionRequest>) -> Result<Response<Version>, Status> {
         let AddVersionRequest { list_id, note, steps, author_id } = req.into_inner();
         let tid = parse_id(&list_id)?;
         // author_id: '' = null (фоновые/git-пути автора не знают).
         let author = if author_id.is_empty() { None } else { Some(parse_id(&author_id)?) };
         let rows: Vec<db::StepRow> = steps.iter().map(step_row).collect();
-        // Транзакция «новая версия» общая с git-проекцией — db::add_version_rows.
-        let Some((ver_id, new_version, created_ms)) =
-            db::add_version_rows(&self.pool, tid, &note, author, &rows).await.map_err(db_status)?
-        else {
-            return Err(Status::not_found("list not found"));
-        };
+
+        // Репо обязано существовать до коммита (bootstrap при первом касании).
+        let bare = repo::ensure_repo_by_id(&self.pool, tid)
+            .await
+            .map_err(db_status)?
+            .ok_or_else(|| Status::not_found("list not found"))?;
+        // Коммит + проекция — критическая секция, как у push/merge.
+        let _guard = repo::repo_guard(&self.pool, tid).await.map_err(db_status)?;
+        let out = version::commit_web_version(&self.pool, tid, &bare, &note, author, rows)
+            .await
+            .map_err(web_version_status)?;
 
         Ok(Response::new(Version {
-            id: ver_id.to_string(),
+            id: out.ver_id.to_string(),
             list_id: tid.to_string(),
-            version: new_version,
+            version: out.version,
             note,
-            commit_sha: String::new(),
-            created_at_ms: created_ms,
+            commit_sha: out.commit_sha,
+            created_at_ms: out.created_at_ms,
             author_id,
         }))
     }

@@ -1,6 +1,11 @@
 //! Персистентные bare-репо (GIT_DATA_DIR, общий с фронтом том): bootstrap из
-//! истории версий, ленивая досыпка веб-версий поверх запушенных коммитов,
-//! пер-репо локи (in-process mutex + PG advisory) — порт store.ts.
+//! истории версий при первом касании/восстановлении и пер-репо локи
+//! (in-process mutex + PG advisory).
+//!
+//! Ленивой досыпки веб-версий здесь больше НЕТ (Ф1): версии рождаются
+//! git-first в git::version::commit_web_version, читающие пути ничего не
+//! дописывают. Отставшие репо выравнивает одноразовый `sync-repos` (main.rs)
+//! и защитное предусловие пути записи (git::version::sync_repo_with_db).
 use crate::db;
 use crate::git::bundle;
 use sqlx::{PgPool, Postgres, Transaction};
@@ -17,7 +22,8 @@ fn root() -> PathBuf {
         std::env::var("GIT_DATA_DIR").expect("GIT_DATA_DIR не задан (общий с фронтом том git-объектов)"),
     )
 }
-fn repo_path(id: Uuid) -> PathBuf {
+/// Путь bare-репо списка. pub — нужен CLI sync-repos и git-first пути записи.
+pub fn repo_path(id: Uuid) -> PathBuf {
     root().join(format!("{}.git", id))
 }
 
@@ -75,23 +81,41 @@ pub(crate) fn join_err<E: std::fmt::Display>(e: E) -> sqlx::Error {
     sqlx::Error::Protocol(e.to_string())
 }
 
-/// Гарантирует персистентный bare-репозиторий, синхронный с историей версий (порт store.ts ensureRepo).
-/// git-объекты — источник правды (пуш сохраняется), веб-версии дописываются лениво поверх.
+/// Гарантирует персистентный bare-репозиторий: bootstrap из истории БД, если
+/// репо нет на диске (первое касание или восстановление тома), освежение
+/// pre-receive hook и ВЫРАВНИВАНИЕ с БД (git::version::sync_repo_with_db).
+///
+/// Выравнивание — это НЕ прежняя «ленивая досыпка»: с Ф1 версии попадают в git
+/// в момент создания (git-first), и на выровненном репо здесь нечего делать.
+/// Оно срабатывает только на деградированных состояниях — легаси-хвостах до
+/// одноразового `sync-repos` и хвостах сбоя проекции. Без него отставшее
+/// легаси-репо принимало бы push поверх УСТАРЕВШЕГО main и молча затирало
+/// веб-версии, которые в старом мире сделали бы такой push честным
+/// non-fast-forward-отказом.
 /// Возвращает (путь, template_id) или None (списка нет).
 pub async fn ensure_repo(
     pool: &PgPool,
     owner: &str,
     slug: &str,
 ) -> Result<Option<(PathBuf, Uuid)>, sqlx::Error> {
-    let Some((id, current_version)) = db::resolve_list(pool, owner, slug).await? else {
+    let Some((id, _current_version)) = db::resolve_list(pool, owner, slug).await? else {
         return Ok(None);
     };
+    Ok(ensure_repo_by_id(pool, id).await?.map(|bare| (bare, id)))
+}
+
+/// То же по template_id (git-first путь записи знает id, а не owner/slug).
+pub async fn ensure_repo_by_id(pool: &PgPool, id: Uuid) -> Result<Option<PathBuf>, sqlx::Error> {
     let bare = repo_path(id);
     let _guard = repo_guard(pool, id).await?;
 
     if !bare.exists() {
-        // bootstrap из полной истории
-        let versions = db::load_bundle_data(pool, id).await?;
+        // bootstrap из полной истории (детерминированные SHA — см. bundle.rs)
+        let versions = match db::load_bundle_data(pool, id).await {
+            Ok(v) => v,
+            Err(sqlx::Error::RowNotFound) => return Ok(None), // списка нет
+            Err(e) => return Err(e),
+        };
         if versions.is_empty() {
             return Ok(None);
         }
@@ -100,43 +124,24 @@ pub async fn ensure_repo(
             .await
             .map_err(join_err)?
             .map_err(join_err)?;
-        return Ok(Some((bare, id)));
+        return Ok(Some(bare));
     }
 
-    // репо есть → освежаем pre-receive hook (идемпотентно; так обновления правил
-    // докатываются и до уже существующих на диске репо), затем дописываем версии.
+    // Репо есть → освежаем pre-receive hook (идемпотентно; так обновления правил
+    // докатываются и до уже существующих на диске репо).
     let bare_hook = bare.clone();
     tokio::task::spawn_blocking(move || bundle::install_hook(&bare_hook))
         .await
         .map_err(join_err)?
         .map_err(join_err)?;
-    let bare_tag = bare.clone();
-    let have =
-        tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag)).await.map_err(join_err)?;
-    // Тег vN выше текущей версии — аномалия: имена `v<число>` принадлежат версиям,
-    // и взяться сверху они могут только от чужого тега (релиз с таким именем).
-    // Пока он висит, `current_version > have` ложно, и версии ПЕРЕСТАЮТ доезжать
-    // в git — молча. Раньше это было невидимо; теперь видно в логе и метрике.
-    if have > current_version {
-        metrics::counter!("version_tag_conflicts_total").increment(1);
-        tracing::error!(
-            %id, have, current_version,
-            "тег v{have} выше текущей версии {current_version}: имя вида v<число> занято НЕ версией — \
-             досыпка версий в git остановлена; удалите посторонний тег"
-        );
+
+    // Выравнивание деградированных состояний (см. док-коммент ensure_repo).
+    // Ошибка выравнивания чтение не роняет: устаревшее репо читаемо, а Conflict
+    // уже громко залогирован внутри sync; запись остановит своё предусловие.
+    if let Err(e) = super::version::sync_repo_with_db(pool, id, &bare).await {
+        tracing::error!(%id, error = %e, "выравнивание репо с БД не удалось (чтение продолжается)");
     }
-    if current_version > have {
-        let versions: Vec<_> =
-            db::load_bundle_data(pool, id).await?.into_iter().filter(|v| v.version > have).collect();
-        if !versions.is_empty() {
-            let bare2 = bare.clone();
-            tokio::task::spawn_blocking(move || bundle::append_versions(&bare2, &versions))
-                .await
-                .map_err(join_err)?
-                .map_err(join_err)?;
-        }
-    }
-    Ok(Some((bare, id)))
+    Ok(Some(bare))
 }
 
 /// Bundle из персистентного репо (включая запушенные коммиты) — порт store.ts bundleRepo.
