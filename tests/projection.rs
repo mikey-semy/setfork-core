@@ -239,10 +239,8 @@ async fn push_preserves_block_identity() {
     git(&work, &["commit", "-q", "-m", "v2: identity"]);
     git(&work, &["push", "-q", "origin", "main"]);
 
-    let ver = project::project_pushed_commit(&pool, list_id, &bare)
-        .await
-        .expect("проекция")
-        .expect("проецируемо");
+    let ver =
+        project::project_pushed_commit(&pool, list_id, &bare).await.expect("проекция").expect("проецируемо");
     assert_eq!(ver, 2);
 
     let rows: Vec<(i32, Option<Uuid>)> = sqlx::query_as(
