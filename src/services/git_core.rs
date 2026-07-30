@@ -7,16 +7,16 @@ use uuid::Uuid;
 
 use super::util::{db_status, internal};
 use crate::db;
-use crate::git::bundle::VersionData;
-use crate::git::{MAIN_REF, bundle, history, project, repo, smart_http, write};
+use crate::git::bundle::{SerStep, StepRef, VersionData};
+use crate::git::{MAIN_REF, bundle, history, project, repo, serialize, smart_http, write};
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
     Commit, CommitToBranchRequest, CommitToBranchResponse, CommitsResponse, CreateBranchRequest,
-    CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListCommitsRequest, MergeBranchRequest,
-    MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse, PostRequest,
-    ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest,
-    UpdateBranchResponse,
+    CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListContent, ListCommitsRequest,
+    MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse,
+    PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse,
+    UpdateBranchRequest, UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -179,6 +179,58 @@ fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
             })
             .collect(),
     }
+}
+
+/// Провод → домен сериализации: структура версии от клиента становится тем же
+/// `VersionData`, из которого материализуются коммиты версий. Один тип на оба
+/// пути записи — поэтому канон не может разойтись между «пуш» и «правка в ветке».
+fn from_list_content(c: ListContent) -> VersionData {
+    VersionData {
+        version: c.version,
+        note: String::new(), // сообщение коммита приходит отдельным полем запроса
+        ts: 0,               // ветка коммитится «сейчас», дата берётся не отсюда
+        title: c.title,
+        desc: c.desc,
+        tags: c.tags,
+        ordered: c.ordered,
+        steps: c
+            .steps
+            .into_iter()
+            .map(|s| SerStep {
+                n: s.n,
+                // Провод не отличает '' от отсутствия: пустой type = шаг (blocks::is_step_type).
+                block_type: if crate::blocks::is_step_type(&s.r#type) { None } else { Some(s.r#type.clone()) },
+                content: crate::blocks::content_value(&s.r#type, &s.content_json),
+                block_id: Some(s.block_id).filter(|v| !v.trim().is_empty()),
+                title: s.title,
+                desc: s.desc,
+                command: s.command,
+                level: s.level,
+                why: s.why,
+                section: s.section,
+                subtasks: s.subtasks,
+                refs: s
+                    .refs
+                    .into_iter()
+                    .map(|r| StepRef { label: r.label, url: Some(r.url).filter(|u| !u.is_empty()) })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+/// Канонические байты list.json для записи в ветку. `content` (структура) —
+/// основной путь: формат собирает ЯДРО. `legacy` (готовые байты от клиента) —
+/// переходный путь, пока фронт не переведён; удалить вместе с полем в proto.
+fn canon_list_json(content: Option<ListContent>, legacy: Vec<u8>) -> Result<Vec<u8>, Status> {
+    if let Some(c) = content {
+        return Ok(serialize::list_json(&from_list_content(c)).into_bytes());
+    }
+    // Клиентские байты обязаны быть валидным JSON-объектом (list.json — канон).
+    if serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&legacy).is_err() {
+        return Err(Status::invalid_argument("list_json is not a JSON object"));
+    }
+    Ok(legacy)
 }
 
 #[tonic::async_trait]
@@ -519,15 +571,13 @@ impl GitCore for GitCoreSvc {
         &self,
         req: Request<MergeResolvedRequest>,
     ) -> Result<Response<MergeBranchResponse>, Status> {
-        let MergeResolvedRequest { repo, branch, list_json } = req.into_inner();
+        let MergeResolvedRequest { repo, branch, list_json, content } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
-        // Контент обязан быть валидным JSON-объектом (list.json — канон).
-        if serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&list_json).is_err() {
-            return Err(Status::invalid_argument("list_json is not a JSON object"));
-        }
+        // Канон собирает ядро (content) либо принимает готовым от старого клиента.
+        let list_json = canon_list_json(content, list_json)?;
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let tip = with_repo(bare.clone(), move |repo| {
@@ -688,16 +738,14 @@ impl GitCore for GitCoreSvc {
             expected_tip,
             author_name,
             author_email,
+            content,
         } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
-        // Контент обязан быть валидным JSON-объектом — как в merge_resolved:
-        // list.json канон, и мусор в ветке сломал бы её снапшот и дифф.
-        if serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&list_json).is_err() {
-            return Err(Status::invalid_argument("list_json is not a JSON object"));
-        }
+        // Канон собирает ядро (content) либо принимает готовым от старого клиента.
+        let list_json = canon_list_json(content, list_json)?;
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Тот же лок, что у merge/push: tip читаем ПОСЛЕ захвата, иначе
         // конкурентный пуш в ветку потерялся бы.
@@ -746,6 +794,105 @@ impl GitCore for GitCoreSvc {
             })
             .collect();
         Ok(Response::new(CommitsResponse { found: found.is_some(), commits }))
+    }
+}
+
+// Формат принадлежит ядру: канон, собранный из структуры провода, обязан быть
+// БАЙТ-В-БАЙТ тем же, что материализация версии кладёт в дерево коммита. Если
+// эти два пути разойдутся, «правка в ветке» начнёт писать другой формат, чем push.
+#[cfg(test)]
+mod canon_tests {
+    use super::{ListContent, canon_list_json, from_list_content};
+    use crate::git::bundle::version_files;
+    use crate::pb::{SnapshotRef, SnapshotStep};
+
+    fn step(n: i32) -> SnapshotStep {
+        SnapshotStep {
+            n,
+            title: "Install Redis".into(),
+            desc: "Grab it".into(),
+            command: "brew install redis".into(),
+            level: "required".into(),
+            why: "нужно для кэша".into(),
+            section: "Setup".into(),
+            subtasks: vec!["проверить версию".into()],
+            refs: vec![SnapshotRef { label: "docs".into(), url: "https://redis.io".into() }],
+            r#type: String::new(),
+            content_json: String::new(),
+            block_id: "11111111-2222-3333-4444-555555555555".into(),
+        }
+    }
+
+    fn content(steps: Vec<SnapshotStep>) -> ListContent {
+        ListContent {
+            title: "Redis Caching".into(),
+            desc: "Описание".into(),
+            tags: vec!["redis".into(), "кэш".into()],
+            ordered: true,
+            version: 7,
+            steps,
+        }
+    }
+
+    /// Канон из структуры == list.json из материализации той же версии.
+    #[test]
+    fn structured_content_matches_materialized_list_json() {
+        let c = content(vec![step(1), SnapshotStep { n: 2, title: "Configure".into(), ..step(2) }]);
+        let from_wire = canon_list_json(Some(c.clone()), Vec::new()).expect("канон из структуры");
+        let materialized = version_files(&from_list_content(c))
+            .into_iter()
+            .find(|(p, _)| p == "list.json")
+            .expect("list.json")
+            .1;
+        assert_eq!(String::from_utf8(from_wire).unwrap(), materialized);
+    }
+
+    /// Не-step блоки: type/content едут проводом и попадают в канон.
+    #[test]
+    fn non_step_block_carries_type_and_content() {
+        let block = SnapshotStep {
+            n: 1,
+            r#type: "text".into(),
+            content_json: r#"{"md":"Вступление"}"#.into(),
+            block_id: String::new(),
+            ..step(1)
+        };
+        let out = canon_list_json(Some(content(vec![block])), Vec::new()).expect("канон");
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("\"type\": \"text\""), "тип блока в каноне: {s}");
+        assert!(s.contains("\"md\": \"Вступление\""), "payload блока в каноне: {s}");
+        assert!(!s.contains("\"blockId\""), "пустая идентичность не пишется вовсе");
+    }
+
+    /// Пустой url ссылки — это ОТСУТСТВИЕ url (провод не различает '' и None).
+    #[test]
+    fn empty_ref_url_is_omitted() {
+        let s = SnapshotStep {
+            refs: vec![SnapshotRef { label: "без ссылки".into(), url: String::new() }],
+            ..step(1)
+        };
+        let out = canon_list_json(Some(content(vec![s])), Vec::new()).expect("канон");
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"label\": \"без ссылки\""));
+        assert!(!text.contains("\"url\""), "пустой url не должен попадать в канон: {text}");
+    }
+
+    /// Переходный путь: без content берём готовые байты клиента, но валидируем.
+    #[test]
+    fn legacy_bytes_pass_through_and_are_validated() {
+        let ok = canon_list_json(None, br#"{"title":"x"}"#.to_vec()).expect("валидный объект");
+        assert_eq!(ok, br#"{"title":"x"}"#.to_vec());
+        assert!(canon_list_json(None, b"[]".to_vec()).is_err(), "массив — не объект");
+        assert!(canon_list_json(None, b"not json".to_vec()).is_err());
+    }
+
+    /// content приоритетнее устаревших байтов: смешанный запрос не двусмыслен.
+    #[test]
+    fn content_wins_over_legacy_bytes() {
+        let legacy = r#"{"title":"старое"}"#.as_bytes().to_vec();
+        let out = canon_list_json(Some(content(vec![step(1)])), legacy).expect("канон");
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("Redis Caching") && !s.contains("старое"));
     }
 }
 
