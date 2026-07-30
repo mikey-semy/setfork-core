@@ -221,9 +221,10 @@ async fn kind_переживает_полный_цикл() {
     .expect("bootstrap B");
 
     // Веб-версия на A: канон несёт kind.
-    let out = commit_web_version(&pool, a_id, &bare_a, "web", None, vec![step_row("Second")])
-        .await
-        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out =
+        commit_web_version(&pool, a_id, &bare_a, "web", None, vec![step_row("Second")], Default::default())
+            .await
+            .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     assert_eq!(out.version, 2);
     let canon = tip_list_json(&bare_a);
     let parsed: serde_json::Value = serde_json::from_slice(&canon).expect("json");
@@ -374,6 +375,65 @@ async fn картинка_и_пометка_переживают_полный_ц
     .expect("B v3 step");
     assert!(!nh, "явный false снял пометку пушем");
     assert_eq!(ask, serde_json::json!({}), "вопрос погашен вместе с пометкой");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Ф2a-довесок: мета применяется ТОЙ ЖЕ транзакцией, что и версия, и коммит
+/// сразу несёт свежие title/tags/ordered. Пустой title игнорируется.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn мета_едет_вместе_с_версией_и_попадает_в_канон() {
+    let pool = support::pool_with_schema().await;
+    let list_id = seed_list(&pool, "meta-a", "meta", None).await;
+
+    let tmp = std::env::temp_dir().join(format!("setfork-meta-{}", Uuid::new_v4()));
+    let bare = tmp.join("m.git");
+    bundle::bootstrap_bare(&setfork_core::db::load_bundle_data(&pool, list_id).await.expect("hist"), &bare)
+        .expect("bootstrap");
+
+    let meta = setfork_core::git::version::MetaPatch {
+        title: Some(serde_json::json!({ "en": "Renamed", "ru": "Переименован" })),
+        desc: None,
+        tags: Some(vec!["baking".into(), "flour".into()]),
+        ordered: Some(false),
+    };
+    let out = commit_web_version(&pool, list_id, &bare, "with meta", None, vec![step_row("Mix")], meta)
+        .await
+        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    assert_eq!(out.version, 2);
+
+    // Канон коммита сразу несёт свежую мету (en-проекция).
+    let parsed: serde_json::Value = serde_json::from_slice(&tip_list_json(&bare)).expect("json");
+    assert_eq!(parsed["title"], serde_json::json!("Renamed"));
+    assert_eq!(parsed["tags"], serde_json::json!(["baking", "flour"]));
+    assert_eq!(parsed["ordered"], serde_json::json!(false));
+
+    // БД обновлена той же транзакцией (полный LocaleText, не en-срез).
+    let (title, tags, ordered): (serde_json::Value, Vec<String>, bool) =
+        sqlx::query_as("select title, tags, ordered from templates where id = $1")
+            .bind(list_id)
+            .fetch_one(&pool)
+            .await
+            .expect("templates");
+    assert_eq!(title["ru"], "Переименован", "БД хранит полный LocaleText");
+    assert_eq!(tags, vec!["baking".to_string(), "flour".to_string()]);
+    assert!(!ordered);
+
+    // Пустой title игнорируется — название обязательно.
+    let bad = setfork_core::git::version::MetaPatch {
+        title: Some(serde_json::json!({ "en": "  " })),
+        ..Default::default()
+    };
+    commit_web_version(&pool, list_id, &bare, "empty title", None, vec![step_row("Mix")], bad)
+        .await
+        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let title: serde_json::Value = sqlx::query_scalar("select title from templates where id = $1")
+        .bind(list_id)
+        .fetch_one(&pool)
+        .await
+        .expect("title");
+    assert_eq!(title["en"], "Renamed", "пустой title не затёр название");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

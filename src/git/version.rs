@@ -174,6 +174,22 @@ async fn tag_on_tip(bare: &Path, ver: i32) -> Result<bool, sqlx::Error> {
     .map_err(join_err)
 }
 
+/// Патч меты, применяемый той же транзакцией, что и версия (Ф2a-довесок):
+/// None = поле не трогать. Раньше фронт писал мету отдельным запросом ДО
+/// addVersion — сбой RPC оставлял мету записанной без версии и без коммита.
+#[derive(Debug, Default)]
+pub struct MetaPatch {
+    pub title: Option<serde_json::Value>, // LocaleText jsonb
+    pub desc: Option<serde_json::Value>,
+    pub tags: Option<Vec<String>>,
+    pub ordered: Option<bool>,
+}
+
+// LocaleText jsonb несёт хоть один непустой перевод?
+fn has_text(v: &serde_json::Value) -> bool {
+    v.as_object().is_some_and(|o| o.values().any(|s| s.as_str().is_some_and(|t| !t.trim().is_empty())))
+}
+
 /// Итог git-first записи версии.
 #[derive(Debug)]
 pub struct WebVersion {
@@ -219,6 +235,7 @@ pub async fn commit_web_version(
     note: &str,
     author_id: Option<Uuid>,
     rows: Vec<StepRow>,
+    meta: MetaPatch,
 ) -> Result<WebVersion, WebVersionError> {
     // Предусловие: git-tip соответствует current_version. Отставшие репо догоняются
     // здесь же (иначе новый коммит оставил бы дыру в истории), убежавшие — лечатся
@@ -233,7 +250,7 @@ pub async fn commit_web_version(
     }
 
     let mut tx = pool.begin().await?;
-    let meta =
+    let row =
         sqlx::query_as::<_, (i32, serde_json::Value, serde_json::Value, Vec<String>, bool, Option<String>)>(
             "select current_version, title, \"desc\", tags, ordered, list_kind \
              from templates where id = $1 for update",
@@ -241,8 +258,57 @@ pub async fn commit_web_version(
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?;
-    let Some((current, title, desc, tags, ordered, kind)) = meta else {
+    let Some((current, title, desc, tags, ordered, kind)) = row else {
         return Err(WebVersionError::NotFound);
+    };
+    // Патч меты — В ЭТОЙ ЖЕ транзакции, ДО сборки канона: коммит версии сразу
+    // несёт свежие title/desc/tags/ordered, а сбой RPC не оставляет мету
+    // записанной без версии (Ф2a-довесок). Пустой title игнорируется —
+    // название обязательно.
+    let title = match &meta.title {
+        Some(t) if has_text(t) => {
+            sqlx::query("update templates set title = $1::jsonb where id = $2")
+                .bind(t)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            t.clone()
+        }
+        _ => title,
+    };
+    let desc = match &meta.desc {
+        Some(d) => {
+            sqlx::query("update templates set \"desc\" = $1::jsonb where id = $2")
+                .bind(d)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            d.clone()
+        }
+        None => desc,
+    };
+    let tags = match &meta.tags {
+        Some(tg) => {
+            let tg: Vec<String> = tg.iter().take(20).cloned().collect();
+            sqlx::query("update templates set tags = $1 where id = $2")
+                .bind(&tg)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            tg
+        }
+        None => tags,
+    };
+    let ordered = match meta.ordered {
+        Some(o) => {
+            sqlx::query("update templates set ordered = $1 where id = $2")
+                .bind(o)
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            o
+        }
+        None => ordered,
     };
     let version = current + 1;
     // Строка версии — в ещё открытую транзакцию: git-коммиту нужен её created_at

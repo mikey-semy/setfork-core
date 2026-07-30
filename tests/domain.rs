@@ -221,6 +221,7 @@ async fn add_version_bumps_current_and_orders_desc() {
             note: "second".into(),
             steps: vec![step("Only")],
             author_id: String::new(), // '' = null (автор версии; тест не про авторство)
+            meta: None,
         }))
         .await
         .expect("add_version")
@@ -258,6 +259,7 @@ async fn add_version_unknown_list_is_not_found() {
             note: String::new(),
             steps: vec![],
             author_id: String::new(),
+            meta: None,
         }))
         .await
         .expect_err("несуществующий список");

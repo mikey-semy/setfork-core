@@ -321,11 +321,21 @@ impl ListWrite for ListWriteSvc {
     /// точку обновления с валидацией), затем строки БД как проекция — одна
     /// операция под репо-локом. БД здесь read-model: git не откатывается.
     async fn add_version(&self, req: Request<AddVersionRequest>) -> Result<Response<Version>, Status> {
-        let AddVersionRequest { list_id, note, steps, author_id } = req.into_inner();
+        let AddVersionRequest { list_id, note, steps, author_id, meta } = req.into_inner();
         let tid = parse_id(&list_id)?;
         // author_id: '' = null (фоновые/git-пути автора не знают).
         let author = if author_id.is_empty() { None } else { Some(parse_id(&author_id)?) };
         let rows: Vec<db::StepRow> = steps.iter().map(step_row).collect();
+        // Патч меты (Ф2a-довесок): применяется ядром в той же транзакции, что и
+        // версия, — сбой RPC не оставляет мету записанной без версии.
+        let meta = meta
+            .map(|m| version::MetaPatch {
+                title: m.title.is_some().then(|| loc_json(&m.title)),
+                desc: m.desc.is_some().then(|| loc_json(&m.desc)),
+                tags: m.tags.map(|t| t.v),
+                ordered: m.ordered,
+            })
+            .unwrap_or_default();
 
         // Репо обязано существовать до коммита (bootstrap при первом касании).
         let bare = repo::ensure_repo_by_id(&self.pool, tid)
@@ -334,7 +344,7 @@ impl ListWrite for ListWriteSvc {
             .ok_or_else(|| Status::not_found("list not found"))?;
         // Коммит + проекция — критическая секция, как у push/merge.
         let _guard = repo::repo_guard(&self.pool, tid).await.map_err(db_status)?;
-        let out = version::commit_web_version(&self.pool, tid, &bare, &note, author, rows)
+        let out = version::commit_web_version(&self.pool, tid, &bare, &note, author, rows, meta)
             .await
             .map_err(web_version_status)?;
 
