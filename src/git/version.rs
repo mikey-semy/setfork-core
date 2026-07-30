@@ -108,7 +108,13 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
             db::load_bundle_data(pool, id).await?.into_iter().filter(|v| v.version > have).collect();
         let count = versions.len() as u64;
         if count == 0 {
-            // Версии в БД числятся (current), а строк истории нет — рассинхрон данных.
+            // Строк истории нет вовсе. Если и main ещё не родился (пустое репо,
+            // ensure создал его под список без версий) — это «список до первой
+            // версии»: current_version тут дефолт колонки, выравнивать нечего.
+            // Рассинхроном считается только «main есть, а строк нет».
+            if have == 0 && !main_exists(bare).await? {
+                return Ok(SyncOutcome::InSync);
+            }
             return Ok(SyncOutcome::Conflict { have, current });
         }
         let bare2 = bare.to_path_buf();
@@ -138,6 +144,16 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
          НЕ версией либо история разошлась — запись остановлена, см. runbook git-projection-catchup"
     );
     Ok(SyncOutcome::Conflict { have, current })
+}
+
+/// Есть ли у репо main (пустой bare списка до первой версии его не имеет).
+async fn main_exists(bare: &Path) -> Result<bool, sqlx::Error> {
+    let bare_chk = bare.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        git2::Repository::open_bare(&bare_chk).is_ok_and(|r| r.refname_to_id(MAIN_REF).is_ok())
+    })
+    .await
+    .map_err(join_err)
 }
 
 /// Тег `v<ver>` указывает ровно на tip main? Ошибки чтения (нет main, нет тега)

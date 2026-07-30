@@ -117,7 +117,21 @@ pub async fn ensure_repo_by_id(pool: &PgPool, id: Uuid) -> Result<Option<PathBuf
             Err(e) => return Err(e),
         };
         if versions.is_empty() {
-            return Ok(None);
+            // Список существует, а строк истории ещё нет (current_version — дефолт
+            // колонки). Это легальное состояние: старый drizzle-путь addVersion
+            // принимал такую «первую» версию, и молча ужесточить контракт значило
+            // сломать вызывающих (итесты фронта поймали ровно это). Репо рождается
+            // ПУСТЫМ: первый addVersion создаст первый коммит через update_main
+            // (создание main, expected_old = None).
+            let bare2 = bare.clone();
+            tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+                git2::Repository::init_bare(&bare2).map_err(|e| std::io::Error::other(e.to_string()))?;
+                bundle::install_hook(&bare2)
+            })
+            .await
+            .map_err(join_err)?
+            .map_err(join_err)?;
+            return Ok(Some(bare));
         }
         let bare2 = bare.clone();
         tokio::task::spawn_blocking(move || bundle::bootstrap_bare(&versions, &bare2))

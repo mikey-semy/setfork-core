@@ -272,3 +272,50 @@ async fn пуш_не_стирает_картинку_и_пометку_по_ид
     assert_eq!(rows[1].1, None, "новый блок без идентичности — надстроек нет");
     assert!(!rows[1].2);
 }
+
+/// СПИСОК БЕЗ СТРОК ИСТОРИИ ПРИНИМАЕТ ВЕРСИЮ (репро падения итестов фронта на
+/// master): current_version — дефолт колонки, строк версий нет. Старый drizzle-
+/// путь вставлял v2 не глядя; git-first обязан уметь то же — репо рождается
+/// пустым, первая версия становится ПЕРВЫМ коммитом (создание main).
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn список_без_истории_принимает_первую_версию() {
+    support::ensure_git_data_dir();
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "fresh").await;
+    // Ровно как тестовый сид фронта: только строка списка, БЕЗ template_versions.
+    let list_id: Uuid = sqlx::query_scalar(
+        "insert into templates (owner_id, slug, title) values ($1, 'fresh', '{\"en\":\"Fresh\"}') returning id",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .expect("seed template only");
+
+    let bare = setfork_core::git::repo::ensure_repo_by_id(&pool, list_id)
+        .await
+        .expect("ensure")
+        .expect("репо обязано родиться пустым, а не not found");
+    let _guard = setfork_core::git::repo::repo_guard(&pool, list_id).await.expect("guard");
+    let out = commit_web_version(&pool, list_id, &bare, "first real", None, vec![step_row("Первый")])
+        .await
+        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+
+    assert_eq!(out.version, 2, "как у старого пути: current(деф.1)+1, дыра v1 легальна");
+    assert_eq!(bundle::max_tag_version(&bare), 2);
+    let repo = git2::Repository::open_bare(&bare).expect("open");
+    let tip = repo.refname_to_id("refs/heads/main").expect("main родился");
+    assert_eq!(repo.find_commit(tip).expect("tip").parent_count(), 0, "первый коммит без родителей");
+    let cur: i32 = sqlx::query_scalar("select current_version from templates where id = $1")
+        .bind(list_id)
+        .fetch_one(&pool)
+        .await
+        .expect("current");
+    assert_eq!(cur, 2);
+
+    // Повторный sync на таком репо — InSync, а не Conflict.
+    let again = sync_repo_with_db(&pool, list_id, &bare).await.expect("sync");
+    assert_eq!(again, SyncOutcome::InSync);
+
+    let _ = std::fs::remove_dir_all(&bare);
+}
