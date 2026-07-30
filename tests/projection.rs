@@ -156,3 +156,107 @@ async fn pushed_commit_projects_new_version_and_tag() {
 
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// ИДЕНТИЧНОСТЬ БЛОКОВ ПЕРЕЖИВАЕТ PUSH.
+///
+/// `blockId` из list.json (ADR-0013) обязан доехать до `steps.block_id`. Если
+/// проекция его теряет, любой push — хоть правка запятой — обнуляет идентичность
+/// всем блокам сразу: отваливаются якоря комментариев к пунктам, а дифф и бандл
+/// откатываются на сопоставление по заголовку.
+///
+/// Перенесено из TS (`push-projection.itest.ts`) вместе с удалением второй
+/// реализации: в ядре этот случай не проверялся, в тесте выше `block_id: None`.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn push_preserves_block_identity() {
+    const BLOCK_A: &str = "11111111-2222-3333-4444-555555555555";
+    const BLOCK_B: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "ident").await;
+    let list_id: Uuid = sqlx::query_scalar(
+        "insert into templates (owner_id, slug, title, current_version) \
+         values ($1, 'ident', '{\"en\":\"Ident\"}', 1) returning id",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .expect("seed list");
+    sqlx::query("insert into template_versions (template_id, version, note) values ($1, 1, 'initial')")
+        .bind(list_id)
+        .execute(&pool)
+        .await
+        .expect("seed v1");
+
+    let root = std::env::temp_dir().join(format!("setfork-ident-{}", Uuid::new_v4()));
+    let bare = root.join("repo.git");
+    let v1 = VersionData {
+        version: 1,
+        note: "initial".into(),
+        ts: 1_700_000_000,
+        title: "Ident".into(),
+        desc: String::new(),
+        tags: vec![],
+        ordered: true,
+        steps: vec![SerStep {
+            n: 1,
+            block_type: None,
+            content: serde_json::Value::Null,
+            block_id: None,
+            title: "First".into(),
+            desc: String::new(),
+            command: String::new(),
+            level: "required".into(),
+            why: String::new(),
+            section: String::new(),
+            subtasks: vec![],
+            refs: vec![],
+        }],
+    };
+    bundle::bootstrap_bare(&[v1], &bare).expect("bootstrap");
+
+    // Push с идентичностью: валидный id, ПУСТОЙ id (мусор не должен ронять
+    // проекцию) и повтор того же id (двойника быть не должно — идентичность
+    // принадлежит блоку, а не строке).
+    let work = root.join("work");
+    git(&root, &["clone", "-q", bare.to_str().unwrap(), work.to_str().unwrap()]);
+    let list_json = serde_json::json!({
+        "title": "Ident", "desc": "", "tags": [], "ordered": true, "version": 2,
+        "steps": [
+            { "n": 1, "blockId": BLOCK_A, "title": "First", "desc": "", "command": "",
+              "level": "required", "why": "", "section": "", "subtasks": [], "refs": [] },
+            { "n": 2, "blockId": "   ", "title": "Second", "desc": "", "command": "",
+              "level": "required", "why": "", "section": "", "subtasks": [], "refs": [] },
+            { "n": 3, "blockId": BLOCK_B, "title": "Third", "desc": "", "command": "",
+              "level": "required", "why": "", "section": "", "subtasks": [], "refs": [] }
+        ]
+    });
+    std::fs::write(work.join("list.json"), serde_json::to_string_pretty(&list_json).unwrap())
+        .expect("write list.json");
+    // steps/ из v1 мешал бы: оверрайд по номеру перекрыл бы title второго шага.
+    let _ = std::fs::remove_dir_all(work.join("steps"));
+    git(&work, &["add", "-A"]);
+    git(&work, &["commit", "-q", "-m", "v2: identity"]);
+    git(&work, &["push", "-q", "origin", "main"]);
+
+    let ver =
+        project::project_pushed_commit(&pool, list_id, &bare).await.expect("проекция").expect("проецируемо");
+    assert_eq!(ver, 2);
+
+    let rows: Vec<(i32, Option<Uuid>)> = sqlx::query_as(
+        "select s.n, s.block_id from steps s \
+         join template_versions tv on tv.id = s.version_id \
+         where tv.template_id = $1 and tv.version = 2 order by s.n",
+    )
+    .bind(list_id)
+    .fetch_all(&pool)
+    .await
+    .expect("steps");
+
+    assert_eq!(rows.len(), 3, "все три блока спроецированы");
+    assert_eq!(rows[0].1.map(|u| u.to_string()).as_deref(), Some(BLOCK_A), "идентичность доехала");
+    assert_eq!(rows[1].1, None, "пробельный blockId — это отсутствие идентичности, а не мусор в БД");
+    assert_eq!(rows[2].1.map(|u| u.to_string()).as_deref(), Some(BLOCK_B));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
