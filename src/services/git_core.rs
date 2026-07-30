@@ -60,6 +60,21 @@ fn valid_tag(name: &str) -> bool {
         })
 }
 
+/// Имя `v<число>` ЗАРЕЗЕРВИРОВАНО за версиями: их теги ставит система (bundle.rs,
+/// project.rs), и по ним же считается «докуда версии уже записаны в git»
+/// (bundle::max_tag_version → repo::ensure_repo).
+///
+/// Без резервирования релиз с именем «v20» на списке с 8 версиями поднимал бы
+/// максимум до 20 — и новые версии переставали доезжать в git ВООБЩЕ, молча.
+/// А релиз «v2» просто перевешивал существующий тег версии (create_tag ставит с
+/// force), после чего история версий врёт.
+///
+/// Дробные и составные имена («v1.0», «v2-beta») версиями не считаются и остаются
+/// доступны человеку — под запрет попадает ровно то, что парсит max_tag_version.
+fn is_version_tag(name: &str) -> bool {
+    name.strip_prefix('v').is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// GitCore: git-операции (smart-HTTP, ветки/теги/merge, bundle) поверх общего пула.
 pub struct GitCoreSvc {
     pub pool: PgPool,
@@ -726,6 +741,11 @@ impl GitCore for GitCoreSvc {
         if !valid_tag(&name) {
             return Err(Status::invalid_argument("bad tag name"));
         }
+        // Отдельным кодом от «плохого имени»: имя корректно, но принадлежит версиям.
+        // Клиенту нужно показать РАЗНЫЕ подсказки, поэтому и сообщения разные.
+        if is_version_tag(&name) {
+            return Err(Status::invalid_argument("reserved tag name"));
+        }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
         let sha = with_repo(bare, move |repo| {
             // Коммит версии: у каждой версии уже есть лёгкий тег vN.
@@ -998,7 +1018,7 @@ mod canon_tests {
 
 #[cfg(test)]
 mod branch_name_tests {
-    use super::{valid_branch, valid_tag};
+    use super::{is_version_tag, valid_branch, valid_tag};
 
     /// Список — дословное зеркало проверок `badBranch` на фронте
     /// (features/git/core.inproc.ts). Расходиться этим двум копиям нельзя: имя,
@@ -1053,6 +1073,33 @@ b",     // перевод строки
         ] {
             assert!(!valid_tag(bad), "тег должен быть отвергнут: {bad:?}");
         }
+    }
+
+    /// `v<число>` принадлежит версиям: по этим тегам считается «докуда версии уже
+    /// записаны в git». Релиз с таким именем либо останавливал досыпку версий
+    /// молча (имя выше текущей версии), либо перевешивал тег существующей версии.
+    #[test]
+    fn имена_версий_зарезервированы_за_системой() {
+        for reserved in ["v1", "v8", "v20", "v0", "v000", "v999999"] {
+            assert!(is_version_tag(reserved), "имя версии должно быть зарезервировано: {reserved}");
+        }
+    }
+
+    /// Запрет ровно на то, что парсит max_tag_version — не шире. Человеку остаются
+    /// и «v1.0», и «v2-beta», и всё, где после v не только цифры.
+    #[test]
+    fn человеческие_имена_с_v_остаются_доступны() {
+        for free in ["v1.0", "v2-beta", "v", "version1", "v1a", "1", "v1_2", "V1"] {
+            assert!(!is_version_tag(free), "имя должно остаться человеку: {free}");
+        }
+    }
+
+    /// Зарезервированное имя проходит проверку ФОРМЫ — значит одной valid_tag мало,
+    /// и отдельная проверка в create_tag обязана существовать.
+    #[test]
+    fn зарезервированное_имя_формально_валидно() {
+        assert!(valid_tag("v20"), "по форме ref это корректное имя");
+        assert!(is_version_tag("v20"), "и именно поэтому нужен отдельный запрет");
     }
 }
 
