@@ -323,18 +323,13 @@ fn commit_resolved(
     Ok(merged.to_string())
 }
 
-/// Канонические байты list.json для записи в ветку. `content` (структура) —
-/// основной путь: формат собирает ЯДРО. `legacy` (готовые байты от клиента) —
-/// переходный путь, пока фронт не переведён; удалить вместе с полем в proto.
-fn canon_list_json(content: Option<ListContent>, legacy: Vec<u8>) -> Result<Vec<u8>, Status> {
-    if let Some(c) = content {
-        return Ok(serialize::list_json(&from_list_content(c)).into_bytes());
-    }
-    // Клиентские байты обязаны быть валидным JSON-объектом (list.json — канон).
-    if serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&legacy).is_err() {
-        return Err(Status::invalid_argument("list_json is not a JSON object"));
-    }
-    Ok(legacy)
+/// Канонические байты list.json для записи в ветку — ВСЕГДА собираются здесь,
+/// из присланной структуры. Прислать готовый файл больше нельзя: поле `list_json`
+/// снято из контракта (`reserved`), потому что оно требовало от клиента знать
+/// правила формата, а значит держать вторую его реализацию.
+fn canon_list_json(content: Option<ListContent>) -> Result<Vec<u8>, Status> {
+    let c = content.ok_or_else(|| Status::invalid_argument("content required"))?;
+    Ok(serialize::list_json(&from_list_content(c)).into_bytes())
 }
 
 #[tonic::async_trait]
@@ -697,13 +692,13 @@ impl GitCore for GitCoreSvc {
         &self,
         req: Request<MergeResolvedRequest>,
     ) -> Result<Response<MergeBranchResponse>, Status> {
-        let MergeResolvedRequest { repo, branch, list_json, content, mode, message } = req.into_inner();
+        let MergeResolvedRequest { repo, branch, content, mode, message } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
         // Канон собирает ядро (content) либо принимает готовым от старого клиента.
-        let list_json = canon_list_json(content, list_json)?;
+        let list_json = canon_list_json(content)?;
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let tip = with_repo(bare.clone(), move |repo| {
@@ -850,22 +845,14 @@ impl GitCore for GitCoreSvc {
         &self,
         req: Request<CommitToBranchRequest>,
     ) -> Result<Response<CommitToBranchResponse>, Status> {
-        let CommitToBranchRequest {
-            repo,
-            branch,
-            list_json,
-            message,
-            expected_tip,
-            author_name,
-            author_email,
-            content,
-        } = req.into_inner();
+        let CommitToBranchRequest { repo, branch, message, expected_tip, author_name, author_email, content } =
+            req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
         // Канон собирает ядро (content) либо принимает готовым от старого клиента.
-        let list_json = canon_list_json(content, list_json)?;
+        let list_json = canon_list_json(content)?;
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Тот же лок, что у merge/push: tip читаем ПОСЛЕ захвата, иначе
         // конкурентный пуш в ветку потерялся бы.
@@ -958,7 +945,7 @@ mod canon_tests {
     #[test]
     fn structured_content_matches_materialized_list_json() {
         let c = content(vec![step(1), SnapshotStep { n: 2, title: "Configure".into(), ..step(2) }]);
-        let from_wire = canon_list_json(Some(c.clone()), Vec::new()).expect("канон из структуры");
+        let from_wire = canon_list_json(Some(c.clone())).expect("канон из структуры");
         let materialized = version_files(&from_list_content(c))
             .into_iter()
             .find(|(p, _)| p == "list.json")
@@ -977,7 +964,7 @@ mod canon_tests {
             block_id: String::new(),
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![block])), Vec::new()).expect("канон");
+        let out = canon_list_json(Some(content(vec![block]))).expect("канон");
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("\"type\": \"text\""), "тип блока в каноне: {s}");
         assert!(s.contains("\"md\": \"Вступление\""), "payload блока в каноне: {s}");
@@ -991,28 +978,18 @@ mod canon_tests {
             refs: vec![SnapshotRef { label: "без ссылки".into(), url: String::new() }],
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![s])), Vec::new()).expect("канон");
+        let out = canon_list_json(Some(content(vec![s]))).expect("канон");
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\"label\": \"без ссылки\""));
         assert!(!text.contains("\"url\""), "пустой url не должен попадать в канон: {text}");
     }
 
-    /// Переходный путь: без content берём готовые байты клиента, но валидируем.
+    /// Прислать готовый файл больше нельзя: без структуры запрос бессмыслен.
     #[test]
-    fn legacy_bytes_pass_through_and_are_validated() {
-        let ok = canon_list_json(None, br#"{"title":"x"}"#.to_vec()).expect("валидный объект");
-        assert_eq!(ok, br#"{"title":"x"}"#.to_vec());
-        assert!(canon_list_json(None, b"[]".to_vec()).is_err(), "массив — не объект");
-        assert!(canon_list_json(None, b"not json".to_vec()).is_err());
-    }
-
-    /// content приоритетнее устаревших байтов: смешанный запрос не двусмыслен.
-    #[test]
-    fn content_wins_over_legacy_bytes() {
-        let legacy = r#"{"title":"старое"}"#.as_bytes().to_vec();
-        let out = canon_list_json(Some(content(vec![step(1)])), legacy).expect("канон");
-        let s = String::from_utf8(out).unwrap();
-        assert!(s.contains("Redis Caching") && !s.contains("старое"));
+    fn без_содержимого_запрос_отклоняется() {
+        let err = canon_list_json(None).expect_err("канон не из чего собрать");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert_eq!(err.message(), "content required");
     }
 }
 
