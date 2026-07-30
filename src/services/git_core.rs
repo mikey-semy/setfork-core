@@ -13,7 +13,7 @@ use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
     Commit, CommitToBranchRequest, CommitToBranchResponse, CommitsResponse, CreateBranchRequest,
-    CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListContent, ListCommitsRequest,
+    CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListCommitsRequest, ListContent,
     MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse,
     PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse,
     UpdateBranchRequest, UpdateBranchResponse,
@@ -199,7 +199,11 @@ fn from_list_content(c: ListContent) -> VersionData {
             .map(|s| SerStep {
                 n: s.n,
                 // Провод не отличает '' от отсутствия: пустой type = шаг (blocks::is_step_type).
-                block_type: if crate::blocks::is_step_type(&s.r#type) { None } else { Some(s.r#type.clone()) },
+                block_type: if crate::blocks::is_step_type(&s.r#type) {
+                    None
+                } else {
+                    Some(s.r#type.clone())
+                },
                 content: crate::blocks::content_value(&s.r#type, &s.content_json),
                 block_id: Some(s.block_id).filter(|v| !v.trim().is_empty()),
                 title: s.title,
