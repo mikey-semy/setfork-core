@@ -418,3 +418,45 @@ async fn постороннее_имя_версии_останавливает_�
     let sync = sync_repo_with_db(&pool, list_id, &bare).await.expect("sync");
     assert_eq!(sync, SyncOutcome::Conflict { have: 20, current: 1 });
 }
+
+/// ЧИТАЮЩИЙ ПУТЬ ТОЖЕ ВЫРАВНИВАЕТ ЛЕГАСИ: ensure_repo_by_id догоняет отставшее
+/// репо. Без этого в окне до sync-repos push пришёл бы поверх УСТАРЕВШЕГО main
+/// и молча затёр веб-версии, которые раньше делали его non-fast-forward-отказом.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn ensure_выравнивает_отставшее_репо_перед_доступом() {
+    support::ensure_git_data_dir();
+    let pool = support::pool_with_schema().await;
+    let list_id = seed_list(&pool, "reader", "stale-read", "Stale Read").await;
+    let v2_id: Uuid = sqlx::query_scalar(
+        "insert into template_versions (template_id, version, note) values ($1, 2, 'web only') returning id",
+    )
+    .bind(list_id)
+    .fetch_one(&pool)
+    .await
+    .expect("seed v2");
+    sqlx::query(
+        "insert into steps (version_id, n, type, title, level) values ($1, 1, 'step', '{\"en\":\"Second\"}', 'required')",
+    )
+    .bind(v2_id)
+    .execute(&pool)
+    .await
+    .expect("seed v2 step");
+    sqlx::query("update templates set current_version = 2 where id = $1")
+        .bind(list_id)
+        .execute(&pool)
+        .await
+        .expect("bump");
+
+    // Репо на «законном» месте (GIT_DATA_DIR/<id>.git), но только с v1 — легаси.
+    let bare = setfork_core::git::repo::repo_path(list_id);
+    bundle::bootstrap_bare(&[v1_data(&pool, list_id, "Stale Read").await], &bare).expect("bootstrap v1");
+    assert_eq!(bundle::max_tag_version(&bare), 1, "предусловие: репо отстало");
+
+    let got =
+        setfork_core::git::repo::ensure_repo_by_id(&pool, list_id).await.expect("ensure").expect("репо есть");
+    assert_eq!(got, bare);
+    assert_eq!(bundle::max_tag_version(&bare), 2, "ensure выровнял репо с БД");
+
+    let _ = std::fs::remove_dir_all(&bare);
+}
