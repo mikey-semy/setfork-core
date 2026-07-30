@@ -38,6 +38,8 @@ pub enum SyncOutcome {
 ///
 /// Ветки:
 /// * репо нет → bootstrap всей истории из БД (восстановление/первое касание);
+/// * `max_tag == current`, но main УШЁЛ ВПЕРЁД тега → непроецированный
+///   push/merge-коммит (проекция упала ДО постановки тега) — спроецировать tip;
 /// * `max_tag < current` → дописать недостающие версии (одноразовый долг
 ///   ленивой досыпки; после миграции штатно возникать не должен);
 /// * `max_tag == current + 1` и тег стоит на tip main → спроецировать tip
@@ -72,6 +74,32 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
         tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag)).await.map_err(join_err)?;
 
     if have == current {
+        // Равенство счётчиков ещё не синхронность: если проекция push/merge упала
+        // ДО постановки тега, main уже впереди, а тега vN нет — по счётчикам всё
+        // «сошлось». Не проверив tip, мы бы позволили следующей веб-записи
+        // положить свой v(N+1) поверх, и принятый push никогда не стал бы
+        // версией (P1 авто-ревью #63). Сверяем тег текущей версии с tip.
+        if current > 0 && !tag_on_tip(bare, current).await? {
+            match project::project_pushed_commit(pool, id, bare).await? {
+                Some(v) => {
+                    tracing::warn!(
+                        %id, version = v,
+                        "main был впереди без тега (непроецированный push) — tip спроецирован (heal)"
+                    );
+                    return Ok(SyncOutcome::ProjectedTip { version: v });
+                }
+                // tip не проецируем (битый/пустой list.json — так push и оставил
+                // его без версии). Это штатный «неверсионный» коммит: запись
+                // поверх легитимна, история его сохранит.
+                None => {
+                    tracing::warn!(
+                        %id, current,
+                        "main впереди тега v{current}, но tip не проецируется (list.json без версии) — оставлен как есть"
+                    );
+                    return Ok(SyncOutcome::InSync);
+                }
+            }
+        }
         return Ok(SyncOutcome::InSync);
     }
 
@@ -95,23 +123,12 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
 
     // have > current: либо хвост незавершённой записи (ровно на 1, тег на tip),
     // либо посторонний тег vN / глубокое расхождение.
-    if have == current + 1 {
-        let bare_chk = bare.to_path_buf();
-        let tag_on_tip = tokio::task::spawn_blocking(move || -> bool {
-            let Ok(repo) = git2::Repository::open_bare(&bare_chk) else { return false };
-            let (Ok(tag), Ok(tip)) =
-                (repo.refname_to_id(&format!("refs/tags/v{have}")), repo.refname_to_id(MAIN_REF))
-            else {
-                return false;
-            };
-            tag == tip
-        })
-        .await
-        .map_err(join_err)?;
-        if tag_on_tip && let Some(v) = project::project_pushed_commit(pool, id, bare).await? {
-            tracing::warn!(%id, version = v, "git был впереди БД на одну версию — tip спроецирован (heal)");
-            return Ok(SyncOutcome::ProjectedTip { version: v });
-        }
+    if have == current + 1
+        && tag_on_tip(bare, have).await?
+        && let Some(v) = project::project_pushed_commit(pool, id, bare).await?
+    {
+        tracing::warn!(%id, version = v, "git был впереди БД на одну версию — tip спроецирован (heal)");
+        return Ok(SyncOutcome::ProjectedTip { version: v });
     }
 
     metrics::counter!("version_tag_conflicts_total").increment(1);
@@ -121,6 +138,24 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
          НЕ версией либо история разошлась — запись остановлена, см. runbook git-projection-catchup"
     );
     Ok(SyncOutcome::Conflict { have, current })
+}
+
+/// Тег `v<ver>` указывает ровно на tip main? Ошибки чтения (нет main, нет тега)
+/// считаем «на месте»: sync не должен мешать чтению из-за нечитаемого ref'а —
+/// расхождение счётчиков поймают другие ветки.
+async fn tag_on_tip(bare: &Path, ver: i32) -> Result<bool, sqlx::Error> {
+    let bare_chk = bare.to_path_buf();
+    tokio::task::spawn_blocking(move || -> bool {
+        let Ok(repo) = git2::Repository::open_bare(&bare_chk) else { return true };
+        let (Ok(tag), Ok(tip)) =
+            (repo.refname_to_id(&format!("refs/tags/v{ver}")), repo.refname_to_id(MAIN_REF))
+        else {
+            return true;
+        };
+        tag == tip
+    })
+    .await
+    .map_err(join_err)
 }
 
 /// Итог git-first записи версии.

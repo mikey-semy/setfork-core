@@ -345,9 +345,26 @@ pub async fn add_version_rows(
     Ok(Some((ver_id, new_version, created_ms)))
 }
 
+/// Что переносится в новую версию из ТЕКУЩЕЙ по идентичности блока: надстройки
+/// Postgres, которых нет в каноне list.json (ADR-0014) — push их не приносит,
+/// и без переноса он бы их молча стирал.
+#[derive(Clone)]
+pub struct CarryOver {
+    pub needs_human: bool,
+    pub needs_human_ask: serde_json::Value,
+    pub image_key: Option<String>,
+}
+
+impl Default for CarryOver {
+    fn default() -> Self {
+        // ask = {} (не Null!): колонка jsonb NOT NULL, Null-bind уронил бы вставку.
+        CarryOver { needs_human: false, needs_human_ask: serde_json::json!({}), image_key: None }
+    }
+}
+
 // ProjStep → StepRow: санитизация git-входа (порт project.ts): trim, пустые
-// subtasks/refs выбрасываются, LocaleText жмётся в {"en": …}, image не несём.
-fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, serde_json::Value)>) -> StepRow {
+// subtasks/refs выбрасываются, LocaleText жмётся в {"en": …}.
+fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, CarryOver>) -> StepRow {
     let subtasks = serde_json::Value::Array(
         s.subtasks
             .iter()
@@ -355,13 +372,13 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, ser
             .map(|x| serde_json::json!({ "en": x.trim() }))
             .collect(),
     );
-    // Пометка «здесь нужен человек» из ТЕКУЩЕЙ версии по идентичности блока (см. ниже).
-    let nh = s
+    // Надстройки из ТЕКУЩЕЙ версии по идентичности блока (см. CarryOver).
+    let carry = s
         .block_id
         .as_deref()
         .and_then(|v| Uuid::parse_str(v).ok())
         .and_then(|id| keep.get(&id).cloned())
-        .unwrap_or((false, serde_json::json!({})));
+        .unwrap_or_default();
     let refs = serde_json::Value::Array(
         s.refs
             .iter()
@@ -387,7 +404,10 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, ser
         title: loc_val(&s.title),
         desc: loc_val(&s.desc),
         command: s.command.trim().to_string(),
-        image_key: None,
+        // Картинка шага живёт в S3/БД, канон её не несёт — переносим по block_id,
+        // иначе КАЖДЫЙ push молча стирал бы скриншоты всех шагов (P1 авто-ревью
+        // #63; docs/github-parity.md всегда обещал «пуш картинки не меняет»).
+        image_key: carry.image_key.clone(),
         level: Level::parse(&s.level),
         why: loc_val(&s.why),
         section: loc_val(&s.section),
@@ -397,20 +417,21 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, (bool, ser
         // (golden-паритет с TS), поэтому из git она прийти не может. Если писать false,
         // каждый push молча стирал бы честные пометки — ровно та потеря, что чинилась во
         // фронте 2026-07-27. Переносим по block_id: идентичность блока git как раз несёт.
-        // Блок без block_id сопоставить не с чем — там пометка честно неизвестна.
-        needs_human: nh.0,
-        needs_human_ask: nh.1,
+        // Блок без block_id сопоставить не с чем — там надстройки честно неизвестны.
+        needs_human: carry.needs_human,
+        needs_human_ask: carry.needs_human_ask,
     }
 }
 
-/// Пометки «здесь нужен человек» текущей версии, по идентичности блока. Пустая карта —
-/// нормальный случай (список без пометок или без block_id у строк).
+/// Надстройки текущей версии, переносимые по идентичности блока (CarryOver).
+/// Пустая карта — нормальный случай (список без пометок/картинок или без
+/// block_id у строк).
 async fn current_marks(
     pool: &PgPool,
     template_id: Uuid,
-) -> Result<std::collections::HashMap<Uuid, (bool, serde_json::Value)>, sqlx::Error> {
+) -> Result<std::collections::HashMap<Uuid, CarryOver>, sqlx::Error> {
     let rows = sqlx::query(
-        "select s.block_id, s.needs_human, s.needs_human_ask \
+        "select s.block_id, s.needs_human, s.needs_human_ask, s.image_key \
          from steps s \
          join template_versions tv on tv.id = s.version_id \
          join templates t on t.id = tv.template_id and t.current_version = tv.version \
@@ -422,9 +443,16 @@ async fn current_marks(
     let mut out = std::collections::HashMap::new();
     for r in rows {
         if let Ok(Some(id)) = r.try_get::<Option<Uuid>, _>("block_id") {
-            let flag = r.try_get::<bool, _>("needs_human").unwrap_or(false);
-            let ask = r.try_get::<serde_json::Value, _>("needs_human_ask").unwrap_or(serde_json::json!({}));
-            out.insert(id, (flag, ask));
+            out.insert(
+                id,
+                CarryOver {
+                    needs_human: r.try_get::<bool, _>("needs_human").unwrap_or(false),
+                    needs_human_ask: r
+                        .try_get::<serde_json::Value, _>("needs_human_ask")
+                        .unwrap_or(serde_json::json!({})),
+                    image_key: r.try_get::<Option<String>, _>("image_key").ok().flatten(),
+                },
+            );
         }
     }
     Ok(out)
