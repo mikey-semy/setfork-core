@@ -37,3 +37,6 @@ tonic-prost-build = "0.14"
 # Чистый Rust protobuf-компилятор — protoc-бинарь не нужен ни в системе, ни vendored.
 protox = "0.9"
 prost = "0.14"
+
+[dev-dependencies]
+jsonschema = { version = "0.49.2", default-features = false }

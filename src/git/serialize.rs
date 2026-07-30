@@ -42,7 +42,36 @@ pub struct VersionData {
     pub desc: String,
     pub tags: Vec<String>,
     pub ordered: bool,
+    /// Тип списка (ADR-0010): procedure|inventory|checklist|criteria|options|recipe.
+    /// None — не определён (старые списки): поле в канон не пишется вовсе, чтобы
+    /// их байты не менялись без нужды (тот же приём, что blockId).
+    pub kind: Option<String>,
     pub steps: Vec<SerStep>,
+}
+
+/// Допустимые значения `kind` — ЗЕРКАЛО setfork-frontend/src/shared/ai/list-kind.ts
+/// (LIST_KINDS). Меняться обязаны парой: значение, которого нет здесь, проекция
+/// молча отбросит (санитизация чужого git-входа), и тип потеряется.
+pub const LIST_KINDS: [&str; 6] = ["procedure", "inventory", "checklist", "criteria", "options", "recipe"];
+
+/// Валидное значение kind? (для санитизации проекции и валидации записи)
+pub fn is_valid_kind(s: &str) -> bool {
+    LIST_KINDS.contains(&s)
+}
+
+/// URL опубликованной JSON Schema манифеста — пишется в каждый list.json ключом
+/// `$schema` (автодополнение в редакторе сразу после клона). ОТ ПЕРЕМЕННОЙ
+/// (решение владельца 2026-07-30): у инстансов свои домены, и зашитый чужой
+/// домен давал бы молча не работающее автодополнение из-за шейпинга. Внутри
+/// инстанса URL стабилен — детерминизм SHA не страдает; golden фиксируют дефолт.
+pub fn schema_url() -> &'static str {
+    static URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    URL.get_or_init(|| {
+        std::env::var("SETFORK_SCHEMA_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "https://setfork.com/schema/list.v1.json".to_string())
+    })
 }
 
 /// list.json — машиночитаемый снимок версии (то, что парсит проекция при push).
@@ -89,15 +118,22 @@ pub fn list_json(v: &VersionData) -> String {
             serde_json::Value::Object(m)
         })
         .collect();
-    let root = serde_json::json!({
-        "title": v.title,
-        "desc": v.desc,
-        "tags": v.tags,
-        "ordered": v.ordered,
-        "version": v.version,
-        "steps": steps,
-    });
-    let mut s = serde_json::to_string_pretty(&root).unwrap();
+    // Порядок ключей корня зафиксирован осознанно (Ф2a): $schema первым
+    // (конвенция редакторов), kind — рядом с ordered (свойство списка) и только
+    // при наличии, version и steps замыкают. Меняется только сознательно —
+    // это байты публичного контракта.
+    let mut root = serde_json::Map::new();
+    root.insert("$schema".into(), serde_json::json!(schema_url()));
+    root.insert("title".into(), serde_json::json!(v.title));
+    root.insert("desc".into(), serde_json::json!(v.desc));
+    root.insert("tags".into(), serde_json::json!(v.tags));
+    root.insert("ordered".into(), serde_json::json!(v.ordered));
+    if let Some(k) = &v.kind {
+        root.insert("kind".into(), serde_json::json!(k));
+    }
+    root.insert("version".into(), serde_json::json!(v.version));
+    root.insert("steps".into(), serde_json::Value::Array(steps));
+    let mut s = serde_json::to_string_pretty(&serde_json::Value::Object(root)).unwrap();
     s.push('\n');
     s
 }
@@ -324,6 +360,7 @@ mod tests {
             desc: "Set up".into(),
             tags: vec!["redis".into()],
             ordered: true,
+            kind: None,
             steps,
         }
     }
@@ -366,7 +403,9 @@ mod tests {
     fn list_json_key_order_and_trailing_newline() {
         let files = version_files(&ver(vec![step(1, "Install Redis")]));
         let lj = &files.iter().find(|(p, _)| p == "list.json").unwrap().1;
-        assert!(lj.starts_with("{\n  \"title\": \"Redis Caching\","), "key order title-first");
+        // Ф2a: $schema стал первым ключом (осознанное изменение формата), title — за ним.
+        assert!(lj.starts_with("{\n  \"$schema\": "), "key order $schema-first: {lj}");
+        assert!(lj.contains("\n  \"title\": \"Redis Caching\","), "title сразу после $schema");
         assert!(lj.ends_with('\n'));
     }
 
@@ -494,6 +533,51 @@ mod tests {
         let hundred: Vec<SerStep> = (1..=100).map(|i| step(i, &format!("Step {i}"))).collect();
         let files = version_files(&ver(hundred));
         assert!(files.iter().any(|(p, _)| p == "steps/001-step-1.md"));
+    }
+
+    // ── Ф2a: манифест — версионированный публичный контракт ─────────────────
+
+    /// $schema пишется ВСЕГДА и первым ключом (конвенция редакторов): это и есть
+    /// автодополнение сразу после git clone.
+    #[test]
+    fn канон_начинается_со_ссылки_на_схему() {
+        let lj = list_json(&ver(vec![step(1, "x")]));
+        let first_line = lj.lines().nth(1).expect("вторая строка");
+        assert!(
+            first_line.trim_start().starts_with("\"$schema\": "),
+            "$schema — первый ключ корня: {first_line}"
+        );
+        assert!(lj.contains(schema_url()), "URL из schema_url(): {lj}");
+    }
+
+    /// kind: пишется между ordered и version ТОЛЬКО при наличии — старые списки
+    /// (kind не определён) дают байт-в-байт прежний файл (как blockId).
+    #[test]
+    fn kind_пишется_только_при_наличии_и_на_своём_месте() {
+        let mut v = ver(vec![step(1, "x")]);
+        let without = list_json(&v);
+        assert!(!without.contains("\"kind\""), "без kind поля нет: {without}");
+
+        v.kind = Some("recipe".into());
+        let with = list_json(&v);
+        let idx_ordered = with.find("\"ordered\"").expect("ordered");
+        let idx_kind = with.find("\"kind\": \"recipe\"").expect("kind в каноне");
+        let idx_version = with.find("\"version\"").expect("version");
+        assert!(idx_ordered < idx_kind && idx_kind < idx_version, "порядок ключей: ordered < kind < version");
+        // README (витрина) kind не несёт — это Ф2b-зона, не трогаем.
+        let readme = version_files(&v).into_iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(!readme.contains("recipe"), "kind не течёт в README: {readme}");
+    }
+
+    /// Реестр kind — зеркало LIST_KINDS фронта; валидатор ровно по нему.
+    #[test]
+    fn реестр_kind_совпадает_с_валидатором() {
+        for k in LIST_KINDS {
+            assert!(is_valid_kind(k), "{k}");
+        }
+        for bad in ["", "step", "Recipe", "процедура", "list"] {
+            assert!(!is_valid_kind(bad), "{bad:?}");
+        }
     }
 
     #[test]

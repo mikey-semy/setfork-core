@@ -1,4 +1,5 @@
 {
+  "$schema": "https://setfork.com/schema/list.v1.json",
   "title": "Golden List",
   "desc": "Fixed dataset for golden tests",
   "tags": [

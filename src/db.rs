@@ -101,6 +101,16 @@ pub async fn resolve_list(
     Ok(row)
 }
 
+/// list_kind списка (валидное значение или None) — для канона веточных записей
+/// (Ф2a): провод kind не несёт, тип — свойство templates.
+pub async fn load_list_kind(pool: &PgPool, id: Uuid) -> Result<Option<String>, sqlx::Error> {
+    let k: Option<Option<String>> = sqlx::query_scalar("select list_kind from templates where id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(k.flatten().filter(|k| crate::git::serialize::is_valid_kind(k)))
+}
+
 /// Число опубликованных публичных списков — быстрый self-check связи с БД.
 pub async fn published_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
     let (n,): (i64,) = sqlx::query_as(
@@ -114,7 +124,7 @@ pub async fn published_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
 /// Загрузка всей истории версий списка для материализации репо (порт bundle.ts loadVersions).
 /// title/desc/tags/ordered — с уровня списка (одинаковы для всех версий); шаги — по версии.
 pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<VersionData>, sqlx::Error> {
-    let trow = sqlx::query("select title, \"desc\", tags, ordered from templates where id = $1")
+    let trow = sqlx::query("select title, \"desc\", tags, ordered, list_kind from templates where id = $1")
         .bind(list_id)
         .fetch_one(pool)
         .await?;
@@ -122,6 +132,13 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
     let desc = loc(&trow.get::<serde_json::Value, _>("desc"));
     let tags: Vec<String> = trow.get("tags");
     let ordered: bool = trow.get("ordered");
+    // kind в канон — только валидное значение (Ф2a): мусор в колонке не должен
+    // становиться публичным контрактом файла.
+    let kind: Option<String> = trow
+        .try_get::<Option<String>, _>("list_kind")
+        .ok()
+        .flatten()
+        .filter(|k| crate::git::serialize::is_valid_kind(k));
 
     let vrows = sqlx::query(
         // floor, не round: git усекает дробные секунды ISO-даты (TS передаёт .toISOString()).
@@ -208,6 +225,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
             desc: desc.clone(),
             tags: tags.clone(),
             ordered,
+            kind: kind.clone(),
             steps: steps_by_ver.remove(&vid).unwrap_or_default(),
         });
     }
@@ -520,7 +538,7 @@ pub fn ser_step_from_row(n: i32, r: &StepRow) -> SerStep {
     }
 }
 
-/// Метаданные списка из list.json (title/desc/tags/ordered) — порт project.ts patch.
+/// Метаданные списка из list.json (title/desc/tags/ordered/kind) — порт project.ts patch.
 /// None = поле отсутствовало в list.json → не трогаем.
 pub async fn update_meta(
     pool: &PgPool,
@@ -529,6 +547,7 @@ pub async fn update_meta(
     desc: Option<String>,
     tags: Option<Vec<String>>,
     ordered: Option<bool>,
+    kind: Option<String>,
 ) -> Result<(), sqlx::Error> {
     if let Some(t) = title
         && !t.trim().is_empty()
@@ -557,6 +576,16 @@ pub async fn update_meta(
     if let Some(o) = ordered {
         sqlx::query("update templates set ordered = $1 where id = $2")
             .bind(o)
+            .bind(template_id)
+            .execute(pool)
+            .await?;
+    }
+    // kind из push: пишем только валидное значение (санитизация чужого git-входа,
+    // как block_id); отсутствие поля или мусор колонку не трогают — иначе push
+    // старого клона стирал бы тип, выставленный генерацией.
+    if let Some(k) = kind.filter(|k| crate::git::serialize::is_valid_kind(k)) {
+        sqlx::query("update templates set list_kind = $1 where id = $2")
+            .bind(&k)
             .bind(template_id)
             .execute(pool)
             .await?;
@@ -637,6 +666,7 @@ mod ser_step_tests {
             desc: String::new(),
             tags: vec![],
             ordered: true,
+            kind: None,
             steps: vec![s],
         });
         assert!(!json.contains("image"), "image не в каноне: {json}");

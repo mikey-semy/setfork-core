@@ -28,19 +28,26 @@ if [[ ! -d "$FRONT/.git" && ! -f "$FRONT/.git" ]]; then
 fi
 
 fail=0
-for f in proto/*.proto; do
-  if ! expected=$(git -C "$FRONT" show "$REF:$f" 2>/dev/null); then
-    echo "proto-sync: $REF:$f не читается из $FRONT — пропуск файла"
-    continue
+# Кросс-репные артефакты-копии: proto-контракты + JSON Schema манифеста (Ф2a:
+# схема живёт в ядре — владельце формата, фронт раздаёт копию из public/).
+sync_file() {
+  local ours="$1" theirs="$2"
+  if ! expected=$(git -C "$FRONT" show "$REF:$theirs" 2>/dev/null); then
+    echo "proto-sync: $REF:$theirs не читается из $FRONT — пропуск файла"
+    return 0
   fi
   # tr -d '\r': локальный чекаут может быть CRLF (Windows autocrlf), блоб — LF.
-  if ! diff -u <(printf '%s\n' "$expected" | tr -d '\r') <(tr -d '\r' <"$f") >/tmp/proto-sync-diff.$$ 2>&1; then
-    echo "proto-sync: РАЗЪЕЗД $f ↔ $FRONT@$REF"
+  if ! diff -u <(printf '%s\n' "$expected" | tr -d '\r') <(tr -d '\r' <"$ours") >/tmp/proto-sync-diff.$$ 2>&1; then
+    echo "proto-sync: РАЗЪЕЗД $ours ↔ $FRONT@$REF:$theirs"
     cat /tmp/proto-sync-diff.$$
     fail=1
   fi
   rm -f /tmp/proto-sync-diff.$$
+}
+for f in proto/*.proto; do
+  sync_file "$f" "$f"
 done
+sync_file schema/list.v1.json public/schema/list.v1.json
 if [[ $fail -eq 0 ]]; then
   echo "proto-sync: OK (идентичны с $FRONT@$REF)"
 fi

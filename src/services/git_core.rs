@@ -312,6 +312,10 @@ fn from_list_content(c: ListContent) -> VersionData {
         desc: c.desc,
         tags: c.tags,
         ordered: c.ordered,
+        // Провод kind не несёт: тип списка — свойство templates, канон получает
+        // его из БД (canon_list_json), иначе каждая веточная запись стирала бы
+        // kind из дерева (ловушка №1 разведки Ф2a).
+        kind: None,
         steps: c
             .steps
             .into_iter()
@@ -399,9 +403,11 @@ fn commit_resolved(
 /// из присланной структуры. Прислать готовый файл больше нельзя: поле `list_json`
 /// снято из контракта (`reserved`), потому что оно требовало от клиента знать
 /// правила формата, а значит держать вторую его реализацию.
-fn canon_list_json(content: Option<ListContent>) -> Result<Vec<u8>, Status> {
+fn canon_list_json(content: Option<ListContent>, kind: Option<String>) -> Result<Vec<u8>, Status> {
     let c = content.ok_or_else(|| Status::invalid_argument("content required"))?;
-    Ok(serialize::list_json(&from_list_content(c)).into_bytes())
+    let mut v = from_list_content(c);
+    v.kind = kind.filter(|k| serialize::is_valid_kind(k));
+    Ok(serialize::list_json(&v).into_bytes())
 }
 
 #[tonic::async_trait]
@@ -728,9 +734,10 @@ impl GitCore for GitCoreSvc {
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
-        // Канон собирает ядро (content) либо принимает готовым от старого клиента.
-        let list_json = canon_list_json(content)?;
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Канон собирает ядро: содержимое — из запроса, kind — из templates (Ф2a).
+        let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
+        let list_json = canon_list_json(content, kind)?;
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let tip = with_repo(bare.clone(), move |repo| {
             commit_resolved(repo, &branch, &list_json, mode == "squash", &message)
@@ -862,9 +869,10 @@ impl GitCore for GitCoreSvc {
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
-        // Канон собирает ядро (content) либо принимает готовым от старого клиента.
-        let list_json = canon_list_json(content)?;
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
+        // Канон собирает ядро: содержимое — из запроса, kind — из templates (Ф2a).
+        let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
+        let list_json = canon_list_json(content, kind)?;
         // Тот же лок, что у merge/push: tip читаем ПОСЛЕ захвата, иначе
         // конкурентный пуш в ветку потерялся бы.
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
@@ -956,7 +964,7 @@ mod canon_tests {
     #[test]
     fn structured_content_matches_materialized_list_json() {
         let c = content(vec![step(1), SnapshotStep { n: 2, title: "Configure".into(), ..step(2) }]);
-        let from_wire = canon_list_json(Some(c.clone())).expect("канон из структуры");
+        let from_wire = canon_list_json(Some(c.clone()), None).expect("канон из структуры");
         let materialized = version_files(&from_list_content(c))
             .into_iter()
             .find(|(p, _)| p == "list.json")
@@ -975,7 +983,7 @@ mod canon_tests {
             block_id: String::new(),
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![block]))).expect("канон");
+        let out = canon_list_json(Some(content(vec![block])), None).expect("канон");
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("\"type\": \"text\""), "тип блока в каноне: {s}");
         assert!(s.contains("\"md\": \"Вступление\""), "payload блока в каноне: {s}");
@@ -989,7 +997,7 @@ mod canon_tests {
             refs: vec![SnapshotRef { label: "без ссылки".into(), url: String::new() }],
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![s]))).expect("канон");
+        let out = canon_list_json(Some(content(vec![s])), None).expect("канон");
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\"label\": \"без ссылки\""));
         assert!(!text.contains("\"url\""), "пустой url не должен попадать в канон: {text}");
@@ -998,7 +1006,7 @@ mod canon_tests {
     /// Прислать готовый файл больше нельзя: без структуры запрос бессмыслен.
     #[test]
     fn без_содержимого_запрос_отклоняется() {
-        let err = canon_list_json(None).expect_err("канон не из чего собрать");
+        let err = canon_list_json(None, None).expect_err("канон не из чего собрать");
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
         assert_eq!(err.message(), "content required");
     }

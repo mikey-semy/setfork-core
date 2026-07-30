@@ -75,6 +75,7 @@ async fn v1_data(pool: &PgPool, list_id: Uuid, title: &str) -> VersionData {
         desc: String::new(),
         tags: vec![],
         ordered: true,
+        kind: None,
         steps: vec![SerStep {
             n: 1,
             block_type: None,
