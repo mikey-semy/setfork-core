@@ -31,6 +31,24 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --verbose
+      # Сверка proto с копией во фронте. БЕЗ этого шага скрипт никто не звал, и его
+      # «::warning:: проверка не выполнена» не появлялось нигде — гейт выглядел живым,
+      # хотя не работал (замечание авто-ревью #55). Теперь отсутствие клона фронта
+      # видно в аннотациях прогона, а расхождение контрактов — красит шаг.
+      #
+      # Клон фронта берём тем же токеном, если он задан секретом; без него шаг сам
+      # печатает «НЕ ВЫПОЛНЕН» и не блокирует — кросс-репный чекаут приватного репо
+      # без токена невозможен, и врать об этом гейт не должен.
+      - name: proto-sync (фронт)
+        env:
+          FRONTEND_TOKEN: ${{ secrets.FRONTEND_RO_TOKEN }}
+        run: |
+          if [ -n "${FRONTEND_TOKEN:-}" ] && [ ! -d ../setfork-frontend/.git ]; then
+            url="https://x-access-token:${FRONTEND_TOKEN}@github.com/mikey-semy/setfork-frontend.git"
+            git clone --quiet --depth 50 "$url" ../setfork-frontend \
+              || echo "::warning::клон фронта не удался — proto-sync пропущен"
+          fi
+          bash scripts/check-proto-sync.sh
 
   # Интеграционные + golden против настоящего Postgres — те же тесты,
   # что гоняет scripts/ci-local.sh на эфемерном контейнере.
