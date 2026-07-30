@@ -257,6 +257,57 @@ fn from_list_content(c: ListContent) -> VersionData {
     }
 }
 
+/// Коммит ручного резолва: дерево main с заменённым `list.json` и БЕЗ `steps/`
+/// (md-оверрайды сбрасываются — канон разрешённых шагов один, см. proto).
+///
+/// `squash` определяет РОДИТЕЛЕЙ, а не дерево: дерево здесь всегда одно — то,
+/// что человек разрешил руками. При squash родитель один (main), и история
+/// ветки в main не уезжает; вклад авторов сохраняется трейлерами, как в
+/// merge_branch. Раньше режима не было вовсе, и фронт на remote-пути просто
+/// ОТКАЗЫВАЛ в резолве squash-списков, выдавая отказ за 'conflict'.
+///
+/// Вынесено из RPC отдельной функцией, чтобы поведение проверялось тестами на
+/// настоящем git-репо, без Postgres и транспорта.
+fn commit_resolved(
+    repo: &git2::Repository,
+    branch: &str,
+    list_json: &[u8],
+    squash: bool,
+    message: &str,
+) -> Result<String, Status> {
+    let branch_tip = repo
+        .refname_to_id(&format!("refs/heads/{branch}"))
+        .map_err(|_| Status::not_found("branch not found"))?;
+    let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
+    if main_tip == branch_tip {
+        return Err(Status::failed_precondition("nothing-to-merge"));
+    }
+    let ours = repo.find_commit(main_tip).map_err(internal)?;
+    let theirs = repo.find_commit(branch_tip).map_err(internal)?;
+    let blob = repo.blob(list_json).map_err(internal)?;
+    let mut tb = repo.treebuilder(Some(&ours.tree().map_err(internal)?)).map_err(internal)?;
+    tb.insert("list.json", blob, 0o100644).map_err(internal)?;
+    if tb.get("steps").map_err(internal)?.is_some() {
+        tb.remove("steps").map_err(internal)?;
+    }
+    let tree_id = tb.write().map_err(internal)?;
+    let tree = repo.find_tree(tree_id).map_err(internal)?;
+    let sig = merge_sig()?;
+
+    let (msg, parents): (String, Vec<&git2::Commit>) = if squash {
+        let title = if message.trim().is_empty() {
+            format!("Squashed branch '{branch}'")
+        } else {
+            message.trim().to_string()
+        };
+        (with_coauthors(repo, branch_tip, main_tip, &title), vec![&ours])
+    } else {
+        (format!("Merge branch '{branch}' (resolved)"), vec![&ours, &theirs])
+    };
+    let merged = repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &parents).map_err(internal)?;
+    Ok(merged.to_string())
+}
+
 /// Канонические байты list.json для записи в ветку. `content` (структура) —
 /// основной путь: формат собирает ЯДРО. `legacy` (готовые байты от клиента) —
 /// переходный путь, пока фронт не переведён; удалить вместе с полем в proto.
@@ -631,7 +682,7 @@ impl GitCore for GitCoreSvc {
         &self,
         req: Request<MergeResolvedRequest>,
     ) -> Result<Response<MergeBranchResponse>, Status> {
-        let MergeResolvedRequest { repo, branch, list_json, content } = req.into_inner();
+        let MergeResolvedRequest { repo, branch, list_json, content, mode, message } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
@@ -641,29 +692,7 @@ impl GitCore for GitCoreSvc {
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let tip = with_repo(bare.clone(), move |repo| {
-            let branch_tip = repo
-                .refname_to_id(&format!("refs/heads/{branch}"))
-                .map_err(|_| Status::not_found("branch not found"))?;
-            let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
-            if main_tip == branch_tip {
-                return Err(Status::failed_precondition("nothing-to-merge"));
-            }
-            // Дерево = дерево main c заменённым list.json и БЕЗ steps/ (см. proto).
-            let ours = repo.find_commit(main_tip).map_err(internal)?;
-            let theirs = repo.find_commit(branch_tip).map_err(internal)?;
-            let blob = repo.blob(&list_json).map_err(internal)?;
-            let mut tb = repo.treebuilder(Some(&ours.tree().map_err(internal)?)).map_err(internal)?;
-            tb.insert("list.json", blob, 0o100644).map_err(internal)?;
-            if tb.get("steps").map_err(internal)?.is_some() {
-                tb.remove("steps").map_err(internal)?;
-            }
-            let tree_id = tb.write().map_err(internal)?;
-            let tree = repo.find_tree(tree_id).map_err(internal)?;
-            let sig = merge_sig()?;
-            let msg = format!("Merge branch '{branch}' (resolved)");
-            let merged =
-                repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
-            Ok(merged.to_string())
+            commit_resolved(repo, &branch, &list_json, mode == "squash", &message)
         })
         .await?;
         let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
@@ -1029,7 +1058,7 @@ b",     // перевод строки
 
 #[cfg(test)]
 mod squash_tests {
-    use super::with_coauthors;
+    use super::{commit_resolved, with_coauthors};
 
     /// Каталог-однодневка: удаляется на Drop (в т.ч. при panic внутри теста).
     struct Tmp(std::path::PathBuf);
@@ -1105,5 +1134,77 @@ mod squash_tests {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
         assert_eq!(with_coauthors(&repo, base, base, "Заголовок"), "Заголовок");
+    }
+
+    // ── Ручной резолв конфликта: режим слияния ───────────────────────────────
+    // Раньше режима не было, и фронт на remote-пути (а это ПРОД) отказывал в
+    // резолве squash-списков, выдавая отказ за 'conflict'.
+
+    /// main + ветка с одним своим коммитом от стороннего автора.
+    fn main_and_branch(repo: &git2::Repository) -> (git2::Oid, git2::Oid) {
+        let base = commit(repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
+        let theirs = commit(repo, "refs/heads/pr-1", "их правка", ("Гость", "guest@example.com"), &[base]);
+        // main уходит вперёд — иначе это не расхождение, а перемотка.
+        commit(repo, "refs/heads/main", "наша правка", ("SetFork", "git@setfork.com"), &[base]);
+        (repo.refname_to_id("refs/heads/main").expect("main"), theirs)
+    }
+
+    fn commit_at<'a>(repo: &'a git2::Repository, sha: &str) -> git2::Commit<'a> {
+        repo.find_commit(git2::Oid::from_str(sha).expect("oid")).expect("commit")
+    }
+
+    #[test]
+    fn резолв_squash_даёт_одного_родителя_и_трейлеры() {
+        let (_t, repo) = bare();
+        main_and_branch(&repo);
+        let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, true, "Свели руками").expect("резолв");
+        let c = commit_at(&repo, &sha);
+        assert_eq!(c.parent_count(), 1, "squash не тянет историю ветки в main");
+        let msg = c.message().expect("сообщение");
+        assert!(msg.starts_with("Свели руками"), "заголовок из запроса: {msg}");
+        assert!(msg.contains("Co-authored-by: Гость <guest@example.com>"), "авторство ветки: {msg}");
+        // Разрешённый канон на месте, steps/ сброшены.
+        let tree = c.tree().expect("дерево");
+        assert!(tree.get_path(std::path::Path::new("list.json")).is_ok());
+        assert!(tree.get_path(std::path::Path::new("steps")).is_err());
+    }
+
+    #[test]
+    fn резолв_squash_без_сообщения_берёт_имя_ветки() {
+        let (_t, repo) = bare();
+        main_and_branch(&repo);
+        let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, true, "   ").expect("резолв");
+        assert!(commit_at(&repo, &sha).message().expect("msg").starts_with("Squashed branch 'pr-1'"));
+    }
+
+    #[test]
+    fn резолв_обычным_merge_даёт_двух_родителей() {
+        let (_t, repo) = bare();
+        main_and_branch(&repo);
+        let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, false, "").expect("резолв");
+        let c = commit_at(&repo, &sha);
+        assert_eq!(c.parent_count(), 2, "обычный резолв сохраняет обе линии");
+        assert_eq!(c.message().expect("msg"), "Merge branch 'pr-1' (resolved)");
+    }
+
+    #[test]
+    fn резолв_двигает_main_и_знает_про_отсутствие_ветки() {
+        let (_t, repo) = bare();
+        main_and_branch(&repo);
+        let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, true, "x").expect("резолв");
+        assert_eq!(repo.refname_to_id(super::MAIN_REF).expect("main").to_string(), sha, "main переехал");
+
+        let err = commit_resolved(&repo, "нет-такой", br#"{"steps":[]}"#, true, "x").expect_err("нет ветки");
+        assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    #[test]
+    fn резолв_ветки_на_том_же_коммите_нечего_сливать() {
+        let (_t, repo) = bare();
+        let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
+        repo.reference("refs/heads/pr-1", base, true, "ветка на main").expect("ref");
+        let err = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, false, "").expect_err("nothing");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert_eq!(err.message(), "nothing-to-merge");
     }
 }
