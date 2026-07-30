@@ -421,6 +421,81 @@ mod tests {
         assert!(lj.contains("\"type\": \"image\""));
     }
 
+    // ── Перенос покрытия из TS перед удалением второй реализации (Ф0b) ──────
+    // Эти случаи проверялись ТОЛЬКО в serialize.test.ts фронта. Удалить его,
+    // не перенеся их, значило бы молча потерять проверки формата: снаружи это
+    // выглядит как «тесты дублировались», а на деле дублировались не все.
+
+    /// README — витрина списка: заголовок, теги, строка-маркер вида списка.
+    #[test]
+    fn readme_carries_title_tags_and_ordered_marker() {
+        let files = version_files(&ver(vec![step(1, "Install Redis")]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("# Redis Caching"), "заголовок: {readme}");
+        assert!(readme.contains("`redis`"), "теги в обратных кавычках: {readme}");
+        assert!(readme.contains("> Ordered list · v3 · 1 items"), "маркер вида/версии: {readme}");
+        assert!(readme.ends_with('\n'));
+
+        // Неупорядоченный список маркируется иначе — иначе смысл списка врёт.
+        let mut v = ver(vec![step(1, "Install Redis")]);
+        v.ordered = false;
+        let files = version_files(&v);
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("> Unordered set · v3 · 1 items"), "{readme}");
+    }
+
+    /// Front-matter шага: level сырьём, а строки — JSON-экранированными.
+    /// Кавычка внутри заголовка без экранирования сломала бы разбор файла.
+    #[test]
+    fn step_front_matter_escapes_strings_and_keeps_level_raw() {
+        let mut s = step(1, "Say \"hi\"");
+        s.level = "optional".into();
+        s.section = "Setup".into();
+        s.command = "echo \"x\"".into();
+        let files = version_files(&ver(vec![s]));
+        let md = &files.iter().find(|(p, _)| p.starts_with("steps/")).unwrap().1;
+        assert!(md.contains("title: \"Say \\\"hi\\\"\""), "экранирование заголовка: {md}");
+        assert!(md.contains("level: optional"), "level пишется сырьём: {md}");
+        assert!(md.contains("section: \"Setup\""), "{md}");
+        assert!(md.contains("command: \"echo \\\"x\\\"\""), "экранирование команды: {md}");
+    }
+
+    /// Явный type="step" и отсутствующий type — одно и то же. Разойдись они,
+    /// один и тот же список давал бы разные файлы в зависимости от того, чем
+    /// он записан (проекция пуша ставит '' , БД хранит 'step').
+    #[test]
+    fn explicit_step_type_is_identical_to_absent_type() {
+        let with_type = version_files(&ver(vec![SerStep {
+            block_type: Some("step".into()),
+            ..step(1, "Install Redis")
+        }]));
+        let without = version_files(&ver(vec![step(1, "Install Redis")]));
+        let paths = |f: &Vec<(String, String)>| f.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
+        assert_eq!(paths(&with_type), paths(&without), "набор файлов не зависит от формы type");
+        let readme = |f: &Vec<(String, String)>| f.iter().find(|(p, _)| p == "README.md").unwrap().1.clone();
+        assert_eq!(readme(&with_type), readme(&without), "README не зависит от формы type");
+    }
+
+    /// Ширина нумерации файлов растёт вместе с длиной списка: у 100 пунктов
+    /// первый — `001-`, иначе сортировка по имени рассыпается.
+    #[test]
+    fn step_file_padding_widens_with_list_length() {
+        let one = version_files(&ver(vec![step(7, "Install Redis")]));
+        assert!(
+            one.iter().any(|(p, _)| p == "steps/07-install-redis.md"),
+            "{:?}",
+            one.iter().map(|(p, _)| p).collect::<Vec<_>>()
+        );
+
+        let many: Vec<SerStep> = (1..=12).map(|i| step(i, &format!("Step {i}"))).collect();
+        let files = version_files(&ver(many));
+        assert!(files.iter().any(|(p, _)| p == "steps/01-step-1.md"));
+
+        let hundred: Vec<SerStep> = (1..=100).map(|i| step(i, &format!("Step {i}"))).collect();
+        let files = version_files(&ver(hundred));
+        assert!(files.iter().any(|(p, _)| p == "steps/001-step-1.md"));
+    }
+
     #[test]
     fn commit_message_strips_boilerplate_and_appends_newline() {
         let mut v = ver(vec![step(1, "x")]);

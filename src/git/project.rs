@@ -568,6 +568,61 @@ mod tests {
         assert_eq!(p.command.as_deref(), Some("new cmd"));
     }
 
+    // ── Разбор list.json: перенос покрытия из TS (parseList) перед Ф0b ──────
+
+    /// Round-trip: сериализованная версия читается обратно тем же составом —
+    /// и шаги, и презентационные блоки с их payload.
+    #[test]
+    fn list_json_round_trips_steps_and_blocks() {
+        use crate::git::bundle::{VersionData, version_files};
+        let v = VersionData {
+            version: 4,
+            note: String::new(),
+            ts: 0,
+            title: "L".into(),
+            desc: "D".into(),
+            tags: vec!["t".into()],
+            ordered: true,
+            steps: vec![
+                ser("First", "do it", "echo hi"),
+                SerStep {
+                    n: 2,
+                    block_type: Some("text".into()),
+                    content: serde_json::json!({ "md": "note" }),
+                    ..ser("", "", "")
+                },
+            ],
+        };
+        let raw = version_files(&v).into_iter().find(|(p, _)| p == "list.json").unwrap().1;
+        let snap = super::snapshot_from_data("sha".into(), raw.as_bytes(), &HashMap::new()).expect("снапшот");
+
+        assert_eq!((snap.title.as_str(), snap.desc.as_str(), snap.ordered), ("L", "D", true));
+        assert_eq!(snap.tags, vec!["t".to_string()]);
+        assert_eq!(snap.steps.len(), 2, "шаг и блок оба доехали");
+        assert_eq!(snap.steps[0].title, "First");
+        assert_eq!(snap.steps[0].command, "echo hi");
+        assert_eq!(snap.steps[1].block_type, "text");
+        assert_eq!(snap.steps[1].content, serde_json::json!({ "md": "note" }));
+    }
+
+    /// Мусор не должен притворяться списком. ВНИМАНИЕ на пустой объект: он
+    /// разбирается в снапшот БЕЗ шагов (все поля опциональны), а не отвергается —
+    /// TS-реализация на `{}` возвращала null. Расхождение зафиксировано осознанно:
+    /// `pre-receive` требует лишь НАЛИЧИЯ list.json, поэтому `{}` реально может
+    /// приехать пушем, и пустой снапшот честнее отказа «ветки нет».
+    #[test]
+    fn list_json_garbage_is_rejected_but_empty_object_is_empty_snapshot() {
+        assert!(super::snapshot_from_data("s".into(), b"not json", &HashMap::new()).is_none());
+        assert!(
+            super::snapshot_from_data("s".into(), b"[]", &HashMap::new()).is_none(),
+            "массив — не список"
+        );
+
+        let empty = super::snapshot_from_data("s".into(), b"{}", &HashMap::new()).expect("пустой объект");
+        assert!(empty.title.is_empty() && empty.steps.is_empty());
+        assert!(empty.ordered, "по умолчанию список упорядоченный");
+    }
+
     #[test]
     fn parse_handles_unusual_content() {
         // Мусор/без front-matter → безопасно: title/command None, тело как desc.

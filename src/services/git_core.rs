@@ -151,9 +151,16 @@ pub fn with_coauthors(
             let a = c.author();
             // Подпись может быть не-UTF8 — такую пропускаем, а не падаем.
             let (Ok(n), Ok(e)) = (a.name(), a.email()) else { continue };
-            let (n, e) = (n.to_string(), e.to_string());
+            let (n, e) = (n.trim().to_string(), e.trim().to_string());
+            // Пустое имя или почта дали бы ломаную строку «Co-authored-by:  <>»,
+            // которую git трейлером не считает, а человек читает как мусор.
+            if n.is_empty() || e.is_empty() {
+                continue;
+            }
             // Служебная подпись самого сервиса соавторством не является.
-            if e == bundle::AUTHOR_EMAIL {
+            // Регистр не важен: почта регистронезависима, и «GIT@SetFork.com»
+            // — та же служебная подпись, а не соавтор.
+            if e.eq_ignore_ascii_case(bundle::AUTHOR_EMAIL) {
                 continue;
             }
             let line = format!("Co-authored-by: {n} <{e}>");
@@ -1158,6 +1165,48 @@ mod squash_tests {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
         assert_eq!(with_coauthors(&repo, base, base, "Заголовок"), "Заголовок");
+    }
+
+    // ── Перенос покрытия из TS (coauthors.test.ts) перед Ф0b ────────────────
+    // Сверка реализаций показала, что TS фильтровал больше: пустые подписи и
+    // регистр служебной почты. Здесь это чинится в ядре — оно остаётся одно.
+
+    /// Подпись с пробелами по краям не должна давать кривой трейлер.
+    ///
+    /// Пустое имя/почту здесь не проверить: git2 отказывается создавать такую
+    /// подпись вовсе («Signature cannot have an empty name or email»), и обычным
+    /// путём такой коммит не появится. Отбраковка пустых в `with_coauthors`
+    /// оставлена как защита от коммитов, приехавших пушем из импортированных
+    /// репозиториев (формат коммита сам по себе `author  <>` допускает).
+    #[test]
+    fn подпись_с_пробелами_по_краям_обрезается() {
+        let (_t, repo) = bare();
+        let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
+        let a = commit(&repo, "refs/heads/pr", "a", ("  Гость  ", " g@example.com "), &[base]);
+
+        let msg = with_coauthors(&repo, a, base, "Заголовок");
+        assert!(msg.contains("Co-authored-by: Гость <g@example.com>"), "подпись обрезана: {msg}");
+        assert!(!msg.contains("  Гость"), "лишние пробелы не доехали: {msg}");
+    }
+
+    /// Почта регистронезависима: «GIT@SetFork.com» — та же служебная подпись.
+    #[test]
+    fn служебная_почта_узнаётся_в_любом_регистре() {
+        let (_t, repo) = bare();
+        let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
+        let a = commit(&repo, "refs/heads/pr", "a", ("SetFork", "GIT@SetFork.COM"), &[base]);
+        assert_eq!(with_coauthors(&repo, a, base, "Заголовок"), "Заголовок");
+    }
+
+    /// Перед трейлерами обязана быть пустая строка — иначе git не считает их
+    /// трейлерами и `git interpret-trailers` их не видит.
+    #[test]
+    fn перед_трейлерами_пустая_строка() {
+        let (_t, repo) = bare();
+        let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
+        let a = commit(&repo, "refs/heads/pr", "a", ("Гость", "g@example.com"), &[base]);
+        let msg = with_coauthors(&repo, a, base, "Заголовок");
+        assert_eq!(msg, "Заголовок\n\nCo-authored-by: Гость <g@example.com>");
     }
 
     // ── Ручной резолв конфликта: режим слияния ───────────────────────────────
