@@ -113,6 +113,18 @@ pub async fn ensure_repo(
     let bare_tag = bare.clone();
     let have =
         tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag)).await.map_err(join_err)?;
+    // Тег vN выше текущей версии — аномалия: имена `v<число>` принадлежат версиям,
+    // и взяться сверху они могут только от чужого тега (релиз с таким именем).
+    // Пока он висит, `current_version > have` ложно, и версии ПЕРЕСТАЮТ доезжать
+    // в git — молча. Раньше это было невидимо; теперь видно в логе и метрике.
+    if have > current_version {
+        metrics::counter!("version_tag_conflicts_total").increment(1);
+        tracing::error!(
+            %id, have, current_version,
+            "тег v{have} выше текущей версии {current_version}: имя вида v<число> занято НЕ версией — \
+             досыпка версий в git остановлена; удалите посторонний тег"
+        );
+    }
     if current_version > have {
         let versions: Vec<_> =
             db::load_bundle_data(pool, id).await?.into_iter().filter(|v| v.version > have).collect();
