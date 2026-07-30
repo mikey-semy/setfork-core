@@ -36,6 +36,28 @@ fn valid_branch(name: &str) -> bool {
         && !name.contains("..")
 }
 
+// ТЕГИ — не ветки. Имя тега никуда не уходит в аргументы `git` (create_tag работает
+// через git2::tag_lightweight), поэтому ASCII-ограничение ветвей здесь неуместно: под
+// него не проходят живые релизные имена вроде «релиз-1» (P1 авто-ревью core #56 —
+// парити с фронтом сломала бы уже созданные релизы).
+//
+// Что остаётся запрещённым — то, от чего ломается сам ref: пустое имя, ведущий '-',
+// '..', пробелы и служебные символы git-refspec (~^:?*[\), завершающая точка и '/'.
+fn valid_tag(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('-')
+        && !name.starts_with('/')
+        && !name.ends_with('/')
+        && !name.ends_with('.')
+        && !name.contains("..")
+        && !name.contains("//")
+        && !name.contains("@{")
+        && !name.chars().any(|c| {
+            // '\u{5c}' = обратный слэш (git-check-ref-format его запрещает).
+            c.is_whitespace() || c.is_control() || matches!(c, '~' | '^' | ':' | '?' | '*' | '[' | ']' | '\u{5c}')
+        })
+}
+
 /// GitCore: git-операции (smart-HTTP, ветки/теги/merge, bundle) поверх общего пула.
 pub struct GitCoreSvc {
     pub pool: PgPool,
@@ -616,7 +638,7 @@ impl GitCore for GitCoreSvc {
     async fn create_tag(&self, req: Request<CreateTagRequest>) -> Result<Response<BranchOpResponse>, Status> {
         let CreateTagRequest { repo, name, version } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
-        if !valid_branch(&name) {
+        if !valid_tag(&name) {
             return Err(Status::invalid_argument("bad tag name"));
         }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
@@ -794,7 +816,7 @@ impl GitCore for GitCoreSvc {
 
 #[cfg(test)]
 mod branch_name_tests {
-    use super::valid_branch;
+    use super::{valid_branch, valid_tag};
 
     /// Список — дословное зеркало проверок `badBranch` на фронте
     /// (features/git/core.inproc.ts). Расходиться этим двум копиям нельзя: имя,
@@ -819,6 +841,38 @@ mod branch_name_tests {
             assert!(!valid_branch(bad), "должно быть отвергнуто: {bad:?}");
         }
     }
+
+    /// ТЕГИ живут по своим правилам: имя тега не уходит в аргументы `git`, поэтому
+    /// человекочитаемые релизы («релиз-1», «версия 2» через дефис) остаются валидными —
+    /// иначе парити с ветками сломала бы уже созданные релизы (авто-ревью core #56).
+    #[test]
+    fn tags_allow_human_names_but_not_broken_refs() {
+        for ok in ["v1.2.3", "релиз-1", "release_2026-07", "prod.1"] {
+            assert!(valid_tag(ok), "тег должен быть валиден: {ok}");
+        }
+        for bad in [
+            "",        // пусто
+            "-rc1",    // ведущий '-'
+            "a..b",    // путь наверх
+            "rel~1",   // служебные символы refspec
+            "rel^2",   //
+            "rel:1",   //
+            "rel?1",   //
+            "rel*",    //
+            "rel[1]",  //
+            "a b",     // пробел
+            "a
+b",    // перевод строки
+            "rel.",    // завершающая точка
+            "/rel",    // ведущий слэш
+            "rel/",    // завершающий слэш
+            "a//b",    // двойной слэш
+            "rel@{1}", // reflog-синтаксис
+        ] {
+            assert!(!valid_tag(bad), "тег должен быть отвергнут: {bad:?}");
+        }
+    }
+
 }
 
 #[cfg(test)]
