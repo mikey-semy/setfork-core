@@ -23,7 +23,18 @@ pub struct SerStep {
     pub title: String,
     pub desc: String,
     pub command: String,
+    /// S3-ключ картинки шага (решение владельца, Ф2a-довесок): в канон идёт КЛЮЧ,
+    /// а не подписанный URL — подпись imgproxy протухает при ротации ключей, и
+    /// канон в git начал бы врать задним числом. Кликабельную ссылку даст README
+    /// при пересборке (Ф2b). Пишется только при наличии (байты старых не меняются).
+    pub image_key: Option<String>,
     pub level: String,
+    /// «Здесь нужен человек» — продуктовая часть пункта (Ф2a-довесок).
+    /// Пишется только при true; явный false в ФАЙЛЕ — способ снять пометку пушем
+    /// (тристейт читает проекция, сериализация false не пишет).
+    pub needs_human: bool,
+    /// Вопрос к пометке (en-проекция); пишется только при needs_human и непустом.
+    pub needs_human_ask: Option<String>,
     pub why: String,
     pub section: String,
     pub subtasks: Vec<String>,
@@ -110,7 +121,18 @@ pub fn list_json(v: &VersionData) -> String {
             m.insert("title".into(), serde_json::json!(s.title));
             m.insert("desc".into(), serde_json::json!(s.desc));
             m.insert("command".into(), serde_json::json!(s.command));
+            // Ф2a-довесок: новые поля пишутся ТОЛЬКО при наличии — байты списков
+            // без картинок/пометок не меняются (та же дисциплина, что blockId/kind).
+            if let Some(ik) = &s.image_key {
+                m.insert("imageKey".into(), serde_json::Value::String(ik.clone()));
+            }
             m.insert("level".into(), serde_json::json!(s.level));
+            if s.needs_human {
+                m.insert("needsHuman".into(), serde_json::json!(true));
+                if let Some(ask) = &s.needs_human_ask {
+                    m.insert("needsHumanAsk".into(), serde_json::Value::String(ask.clone()));
+                }
+            }
             m.insert("why".into(), serde_json::json!(s.why));
             m.insert("section".into(), serde_json::json!(s.section));
             m.insert("subtasks".into(), serde_json::json!(s.subtasks));
@@ -341,7 +363,10 @@ mod tests {
             title: title.into(),
             desc: String::new(),
             command: String::new(),
+            image_key: None,
             level: "required".into(),
+            needs_human: false,
+            needs_human_ask: None,
             why: String::new(),
             section: String::new(),
             subtasks: vec![],

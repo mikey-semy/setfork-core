@@ -84,7 +84,10 @@ async fn v1_data(pool: &PgPool, list_id: Uuid, title: &str) -> VersionData {
             title: "First".into(),
             desc: String::new(),
             command: String::new(),
+            image_key: None,
             level: "required".into(),
+            needs_human: false,
+            needs_human_ask: None,
             why: String::new(),
             section: String::new(),
             subtasks: vec![],
@@ -178,9 +181,17 @@ async fn непроецированный_push_замечается_и_прое�
     assert_eq!(bundle::max_tag_version(&bare), 2, "тег доехал");
 
     // Следующая веб-запись идёт ПОВЕРХ, а не вместо.
-    let out = commit_web_version(&pool, list_id, &bare, "after heal", None, vec![step_row("Third")])
-        .await
-        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out = commit_web_version(
+        &pool,
+        list_id,
+        &bare,
+        "after heal",
+        None,
+        vec![step_row("Third")],
+        Default::default(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     assert_eq!(out.version, 3);
 }
 
@@ -201,9 +212,17 @@ async fn битый_tip_не_блокирует_запись() {
     let sync = sync_repo_with_db(&pool, list_id, &bare).await.expect("sync");
     assert_eq!(sync, SyncOutcome::InSync, "битый tip — не версия и не блокер");
 
-    let out = commit_web_version(&pool, list_id, &bare, "over broken", None, vec![step_row("Recovered")])
-        .await
-        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out = commit_web_version(
+        &pool,
+        list_id,
+        &bare,
+        "over broken",
+        None,
+        vec![step_row("Recovered")],
+        Default::default(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     assert_eq!(out.version, 2);
     // Битый коммит остался в истории (родителем) — git не теряет принятое.
     let repo = git2::Repository::open_bare(&bare).expect("open");
@@ -298,9 +317,17 @@ async fn список_без_истории_принимает_первую_ве
         .expect("ensure")
         .expect("репо обязано родиться пустым, а не not found");
     let _guard = setfork_core::git::repo::repo_guard(&pool, list_id).await.expect("guard");
-    let out = commit_web_version(&pool, list_id, &bare, "first real", None, vec![step_row("Первый")])
-        .await
-        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out = commit_web_version(
+        &pool,
+        list_id,
+        &bare,
+        "first real",
+        None,
+        vec![step_row("Первый")],
+        Default::default(),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
 
     assert_eq!(out.version, 2, "как у старого пути: current(деф.1)+1, дыра v1 легальна");
     assert_eq!(bundle::max_tag_version(&bare), 2);

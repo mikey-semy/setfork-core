@@ -153,7 +153,8 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
     // длинного списка давала N+1 round-trip'ов), группировка по version_id.
     let srows = sqlx::query(
         "select s.version_id, s.n, s.block_id, s.\"type\", s.content, s.title, s.\"desc\", s.command, \
-                s.level::text as level, s.why, s.section, s.subtasks, s.refs \
+                s.image_key, s.level::text as level, s.needs_human, s.needs_human_ask, \
+                s.why, s.section, s.subtasks, s.refs \
          from steps s join template_versions tv on tv.id = s.version_id \
          where tv.template_id = $1 order by s.version_id, s.n asc",
     )
@@ -205,7 +206,15 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 title: loc(&sr.get::<serde_json::Value, _>("title")),
                 desc: loc(&sr.get::<serde_json::Value, _>("desc")),
                 command: sr.get::<String, _>("command"),
+                // Ф2a-довесок: картинка и пометка — честное содержимое канона.
+                image_key: sr.try_get::<Option<String>, _>("image_key").ok().flatten(),
                 level: sr.get::<String, _>("level"),
+                needs_human: sr.try_get::<bool, _>("needs_human").unwrap_or(false),
+                needs_human_ask: sr
+                    .try_get::<serde_json::Value, _>("needs_human_ask")
+                    .ok()
+                    .map(|v| loc(&v))
+                    .filter(|a| !a.is_empty()),
                 why: loc(&sr.get::<serde_json::Value, _>("why")),
                 section: loc(&sr.get::<serde_json::Value, _>("section")),
                 subtasks,
@@ -422,29 +431,32 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, CarryOver>
         title: loc_val(&s.title),
         desc: loc_val(&s.desc),
         command: s.command.trim().to_string(),
-        // Картинка шага живёт в S3/БД, канон её не несёт — переносим по block_id,
-        // иначе КАЖДЫЙ push молча стирал бы скриншоты всех шагов (P1 авто-ревью
-        // #63; docs/github-parity.md всегда обещал «пуш картинки не меняет»).
-        image_key: carry.image_key.clone(),
+        // Ф2a-довесок: канон несёт imageKey — файл теперь источник. Отсутствие
+        // поля (старый клон) — фолбэк на перенос по block_id, чтобы push старого
+        // клона не стирал картинку (P1 авто-ревью #63).
+        image_key: s.image_key.clone().or_else(|| carry.image_key.clone()),
         level: Level::parse(&s.level),
         why: loc_val(&s.why),
         section: loc_val(&s.section),
         subtasks,
         refs,
-        // ПОМЕТКА НЕ ТЕРЯЕТСЯ НА ПУШЕ. В list.json «здесь нужен человек» не пишется
-        // (golden-паритет с TS), поэтому из git она прийти не может. Если писать false,
-        // каждый push молча стирал бы честные пометки — ровно та потеря, что чинилась во
-        // фронте 2026-07-27. Переносим по block_id: идентичность блока git как раз несёт.
-        // Блок без block_id сопоставить не с чем — там надстройки честно неизвестны.
-        needs_human: carry.needs_human,
-        needs_human_ask: carry.needs_human_ask,
+        // Ф2a-довесок: пометка теперь в каноне. Тристейт: поле есть → файл источник
+        // (true с вопросом из файла; ЯВНЫЙ false — снятие пометки пушем); поля нет
+        // (старый клон) → перенос по block_id, чтобы push не стирал честные пометки
+        // (та потеря чинилась во фронте 2026-07-27 и в P1 авто-ревью #63).
+        needs_human: s.needs_human.unwrap_or(carry.needs_human),
+        needs_human_ask: match s.needs_human {
+            Some(true) => s.needs_human_ask.as_deref().map(loc_val).unwrap_or(serde_json::json!({})),
+            Some(false) => serde_json::json!({}),
+            None => carry.needs_human_ask.clone(),
+        },
     }
 }
 
 /// Надстройки текущей версии, переносимые по идентичности блока (CarryOver).
 /// Пустая карта — нормальный случай (список без пометок/картинок или без
 /// block_id у строк).
-async fn current_marks(
+pub(crate) async fn current_marks(
     pool: &PgPool,
     template_id: Uuid,
 ) -> Result<std::collections::HashMap<Uuid, CarryOver>, sqlx::Error> {
@@ -511,7 +523,10 @@ pub fn ser_step_from_row(n: i32, r: &StepRow) -> SerStep {
         title: loc(&r.title),
         desc: loc(&r.desc),
         command: r.command.clone(),
+        image_key: r.image_key.clone(),
         level: r.level.as_str().to_string(),
+        needs_human: r.needs_human,
+        needs_human_ask: Some(loc(&r.needs_human_ask)).filter(|a| !a.is_empty() && r.needs_human),
         why: loc(&r.why),
         section: loc(&r.section),
         subtasks: r
@@ -649,15 +664,15 @@ mod ser_step_tests {
         assert_eq!(s.content, serde_json::json!({ "md": "Вступление" }));
     }
 
-    /// «Здесь нужен человек» и image_key в канон НЕ попадают (их нет в list.json) —
-    /// это надстройки Postgres; проверяем, что производная их просто не читает.
+    /// Ф2a-довесок: картинка и пометка — ЧЕСТНОЕ содержимое канона (решение
+    /// владельца). Пишутся только при наличии; вопрос — только при поднятой пометке.
     #[test]
-    fn надстройки_не_текут_в_канон() {
+    fn надстройки_текут_в_канон_намеренно() {
         let mut r = row();
-        r.image_key = Some("avatars/x.png".into());
+        r.image_key = Some("steps/x.png".into());
         let s = ser_step_from_row(1, &r);
-        // SerStep физически не имеет полей для image/needs_human — сборка канона
-        // из него не может их пронести; тест фиксирует контракт от регрессии.
+        assert_eq!(s.image_key.as_deref(), Some("steps/x.png"));
+        assert!(s.needs_human, "пометка из строки");
         let json = crate::git::serialize::list_json(&crate::git::bundle::VersionData {
             version: 1,
             note: String::new(),
@@ -669,7 +684,26 @@ mod ser_step_tests {
             kind: None,
             steps: vec![s],
         });
-        assert!(!json.contains("image"), "image не в каноне: {json}");
-        assert!(!json.contains("needs"), "пометка не в каноне: {json}");
+        assert!(json.contains("\"imageKey\": \"steps/x.png\""), "картинка в каноне: {json}");
+        assert!(json.contains("\"needsHuman\": true"), "пометка в каноне: {json}");
+
+        // Без картинки и пометки поля не пишутся — байты старых списков не меняются.
+        let mut plain = row();
+        plain.image_key = None;
+        plain.needs_human = false;
+        let s = ser_step_from_row(1, &plain);
+        let json = crate::git::serialize::list_json(&crate::git::bundle::VersionData {
+            version: 1,
+            note: String::new(),
+            ts: 0,
+            title: "L".into(),
+            desc: String::new(),
+            tags: vec![],
+            ordered: true,
+            kind: None,
+            steps: vec![s],
+        });
+        assert!(!json.contains("imageKey"), "нет картинки — нет поля: {json}");
+        assert!(!json.contains("needsHuman"), "нет пометки — нет поля: {json}");
     }
 }

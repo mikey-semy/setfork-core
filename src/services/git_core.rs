@@ -332,7 +332,13 @@ fn from_list_content(c: ListContent) -> VersionData {
                 title: s.title,
                 desc: s.desc,
                 command: s.command,
+                // Провод SnapshotStep этих полей не несёт: canon_list_json обогащает
+                // их из текущей версии по block_id (иначе веточная запись стирала бы
+                // картинку/пометку из канона — та же ловушка, что была с kind).
+                image_key: None,
                 level: s.level,
+                needs_human: false,
+                needs_human_ask: None,
                 why: s.why,
                 section: s.section,
                 subtasks: s.subtasks,
@@ -403,10 +409,24 @@ fn commit_resolved(
 /// из присланной структуры. Прислать готовый файл больше нельзя: поле `list_json`
 /// снято из контракта (`reserved`), потому что оно требовало от клиента знать
 /// правила формата, а значит держать вторую его реализацию.
-fn canon_list_json(content: Option<ListContent>, kind: Option<String>) -> Result<Vec<u8>, Status> {
+fn canon_list_json(
+    content: Option<ListContent>,
+    kind: Option<String>,
+    carry: &std::collections::HashMap<Uuid, db::CarryOver>,
+) -> Result<Vec<u8>, Status> {
     let c = content.ok_or_else(|| Status::invalid_argument("content required"))?;
     let mut v = from_list_content(c);
     v.kind = kind.filter(|k| serialize::is_valid_kind(k));
+    // Ф2a-довесок: провод не несёт картинку/пометку — обогащаем из текущей версии
+    // по идентичности блока, иначе веточная запись стирала бы их из канона
+    // (та же ловушка, что была с kind).
+    for s in &mut v.steps {
+        let Some(bid) = s.block_id.as_deref().and_then(|b| Uuid::parse_str(b).ok()) else { continue };
+        let Some(co) = carry.get(&bid) else { continue };
+        s.image_key = co.image_key.clone();
+        s.needs_human = co.needs_human;
+        s.needs_human_ask = Some(db::loc(&co.needs_human_ask)).filter(|a| !a.is_empty() && co.needs_human);
+    }
     Ok(serialize::list_json(&v).into_bytes())
 }
 
@@ -735,9 +755,11 @@ impl GitCore for GitCoreSvc {
             return Err(Status::invalid_argument("bad branch name"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
-        // Канон собирает ядро: содержимое — из запроса, kind — из templates (Ф2a).
+        // Канон собирает ядро: содержимое — из запроса, kind и надстройки блоков
+        // (картинка/пометка, по идентичности) — из БД (Ф2a).
         let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
-        let list_json = canon_list_json(content, kind)?;
+        let carry = db::current_marks(&self.pool, id).await.map_err(db_status)?;
+        let list_json = canon_list_json(content, kind, &carry)?;
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let tip = with_repo(bare.clone(), move |repo| {
             commit_resolved(repo, &branch, &list_json, mode == "squash", &message)
@@ -870,9 +892,11 @@ impl GitCore for GitCoreSvc {
             return Err(Status::invalid_argument("bad branch name"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
-        // Канон собирает ядро: содержимое — из запроса, kind — из templates (Ф2a).
+        // Канон собирает ядро: содержимое — из запроса, kind и надстройки блоков
+        // (картинка/пометка, по идентичности) — из БД (Ф2a).
         let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
-        let list_json = canon_list_json(content, kind)?;
+        let carry = db::current_marks(&self.pool, id).await.map_err(db_status)?;
+        let list_json = canon_list_json(content, kind, &carry)?;
         // Тот же лок, что у merge/push: tip читаем ПОСЛЕ захвата, иначе
         // конкурентный пуш в ветку потерялся бы.
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
@@ -964,7 +988,8 @@ mod canon_tests {
     #[test]
     fn structured_content_matches_materialized_list_json() {
         let c = content(vec![step(1), SnapshotStep { n: 2, title: "Configure".into(), ..step(2) }]);
-        let from_wire = canon_list_json(Some(c.clone()), None).expect("канон из структуры");
+        let from_wire =
+            canon_list_json(Some(c.clone()), None, &Default::default()).expect("канон из структуры");
         let materialized = version_files(&from_list_content(c))
             .into_iter()
             .find(|(p, _)| p == "list.json")
@@ -983,7 +1008,7 @@ mod canon_tests {
             block_id: String::new(),
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![block])), None).expect("канон");
+        let out = canon_list_json(Some(content(vec![block])), None, &Default::default()).expect("канон");
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("\"type\": \"text\""), "тип блока в каноне: {s}");
         assert!(s.contains("\"md\": \"Вступление\""), "payload блока в каноне: {s}");
@@ -997,7 +1022,7 @@ mod canon_tests {
             refs: vec![SnapshotRef { label: "без ссылки".into(), url: String::new() }],
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![s])), None).expect("канон");
+        let out = canon_list_json(Some(content(vec![s])), None, &Default::default()).expect("канон");
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\"label\": \"без ссылки\""));
         assert!(!text.contains("\"url\""), "пустой url не должен попадать в канон: {text}");
@@ -1006,7 +1031,7 @@ mod canon_tests {
     /// Прислать готовый файл больше нельзя: без структуры запрос бессмыслен.
     #[test]
     fn без_содержимого_запрос_отклоняется() {
-        let err = canon_list_json(None, None).expect_err("канон не из чего собрать");
+        let err = canon_list_json(None, None, &Default::default()).expect_err("канон не из чего собрать");
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
         assert_eq!(err.message(), "content required");
     }

@@ -78,7 +78,10 @@ fn ser_step(n: i32, title: &str) -> SerStep {
         title: title.into(),
         desc: String::new(),
         command: String::new(),
+        image_key: None,
         level: "required".into(),
+        needs_human: false,
+        needs_human_ask: None,
         why: String::new(),
         section: String::new(),
         subtasks: vec![],
@@ -177,7 +180,7 @@ async fn веб_версия_коммитится_git_first_и_проециру�
     bundle::bootstrap_bare(&[v1], &bare).expect("bootstrap");
 
     let rows = vec![step_row("First", "", Level::Required), step_row("Second", "echo 2", Level::Optional)];
-    let out = commit_web_version(&pool, list_id, &bare, "add second", None, rows)
+    let out = commit_web_version(&pool, list_id, &bare, "add second", None, rows, Default::default())
         .await
         .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
 
@@ -230,7 +233,7 @@ async fn веб_правка_и_push_дают_одинаковый_резуль�
 
     // A: веб-правка (git-first).
     let rows = vec![step_row("First", "", Level::Required), step_row("Second", "echo 2", Level::Optional)];
-    let out = commit_web_version(&pool, a_id, &bare_a, "same edit", None, rows)
+    let out = commit_web_version(&pool, a_id, &bare_a, "same edit", None, rows, Default::default())
         .await
         .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     assert_eq!(out.version, 2);
@@ -313,6 +316,7 @@ async fn отставшее_репо_догоняется_перед_комми�
         "third",
         None,
         vec![step_row("Third", "", Level::Required)],
+        Default::default(),
     )
     .await
     .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
@@ -357,6 +361,7 @@ async fn убежавший_вперёд_git_лечится_проекцией()
         "third",
         None,
         vec![step_row("Third", "", Level::Required)],
+        Default::default(),
     )
     .await
     .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
@@ -399,6 +404,7 @@ async fn постороннее_имя_версии_останавливает_�
         "won't happen",
         None,
         vec![step_row("Nope", "", Level::Required)],
+        Default::default(),
     )
     .await
     .expect_err("запись обязана остановиться");
