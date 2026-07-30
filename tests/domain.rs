@@ -202,6 +202,7 @@ async fn create_and_read_roundtrip() {
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn add_version_bumps_current_and_orders_desc() {
+    support::ensure_git_data_dir(); // git-first: add_version коммитит в репо
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "bob").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -222,6 +223,8 @@ async fn add_version_bumps_current_and_orders_desc() {
         .into_inner();
     assert_eq!(v2.version, 2);
     assert_eq!(v2.note, "second");
+    // Git-first: версия — это коммит; ответ несёт его sha (раньше поле было пустым).
+    assert_eq!(v2.commit_sha.len(), 40, "sha коммита версии в ответе: {:?}", v2.commit_sha);
 
     let got = read
         .get_list(Request::new(ListRef { owner: "bob".into(), slug: "l".into() }))
@@ -242,6 +245,7 @@ async fn add_version_bumps_current_and_orders_desc() {
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn add_version_unknown_list_is_not_found() {
+    support::ensure_git_data_dir(); // git-first: add_version резолвит путь репо
     let pool = support::pool_with_schema().await;
     let write = ListWriteSvc { pool: pool.clone() };
     let err = write

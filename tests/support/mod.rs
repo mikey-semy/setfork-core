@@ -171,6 +171,19 @@ pub async fn pool_with_schema() -> PgPool {
     pool
 }
 
+/// GIT_DATA_DIR для тестов, зовущих git-first запись (ListWrite.add_version):
+/// один временный корень на тест-бинарь. Env процесс-глобален, поэтому ставится
+/// один раз; каталоги репо мелкие и живут в системном temp.
+pub fn ensure_git_data_dir() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let root = std::env::temp_dir().join(format!("setfork-gitdata-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).expect("create GIT_DATA_DIR");
+        // SAFETY: единственная запись env в этом бинаре, под Once, до git-вызовов.
+        unsafe { std::env::set_var("GIT_DATA_DIR", &root) };
+    });
+}
+
 /// Пользователь-фикстура; возвращает id.
 pub async fn seed_user(pool: &PgPool, handle: &str) -> Uuid {
     sqlx::query_scalar("insert into users (handle) values ($1) returning id")

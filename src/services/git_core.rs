@@ -8,6 +8,7 @@ use uuid::Uuid;
 use super::util::{db_status, internal};
 use crate::db;
 use crate::git::bundle::{SerStep, StepRef, VersionData};
+use crate::git::update::{MainUpdateError, update_main};
 use crate::git::{MAIN_REF, bundle, history, project, repo, serialize, smart_http, write};
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
@@ -190,6 +191,24 @@ fn merge_sig() -> Result<git2::Signature<'static>, Status> {
     git2::Signature::now(bundle::AUTHOR_NAME, bundle::AUTHOR_EMAIL).map_err(internal)
 }
 
+/// Отказ единой точки обновления main → gRPC-статус.
+///
+/// MissingListJson — единственный «пользовательский» случай (дерево слияния без
+/// канона); Stale — конкурентная запись (под репо-локом почти невозможна, но
+/// CAS честный); NonFastForward под локом означает сломанный инвариант кода.
+fn main_status(e: MainUpdateError) -> Status {
+    match e {
+        MainUpdateError::MissingListJson => {
+            Status::failed_precondition("list.json is required at the repo root")
+        }
+        MainUpdateError::Stale => Status::aborted("main moved concurrently"),
+        MainUpdateError::NonFastForward => {
+            Status::internal("non-fast-forward update of main (invariant breach)")
+        }
+        MainUpdateError::Git(e) => Status::internal(e),
+    }
+}
+
 /// Текущий oid main (или None, если ветки ещё нет) — для проверки «push сдвинул main».
 fn main_oid(bare: &std::path::Path) -> Option<String> {
     git2::Repository::open_bare(bare).ok()?.refname_to_id(MAIN_REF).ok().map(|o| o.to_string())
@@ -198,6 +217,50 @@ fn main_oid(bare: &std::path::Path) -> Option<String> {
 // Пустая proto-строка → None (proto3 не отличает '' от отсутствия поля).
 fn opt(s: &str) -> Option<&str> {
     (!s.is_empty()).then_some(s)
+}
+
+/// Проекция нового main-tip → версия БД, с одним повтором на транзиентный сбой.
+///
+/// Порядок канона: git уже записан и НЕ откатывается — БД догоняет. Поэтому сбой
+/// проекции не отменяет git-операцию, но обязан быть громким: метрика + ERROR-лог;
+/// восстановление — штатный rebuild проекции `reproject <owner> <slug>` (CLI).
+/// «Спроецировать нечего» (битый/пустой list.json) — тот же исход, что и сбой:
+/// git принят, версии нет; без метрики случай проходил мимо алерта (линза 02, F3).
+async fn project_main_or_log(
+    pool: &PgPool,
+    id: Uuid,
+    bare: &std::path::Path,
+    op: &'static str,
+    owner: &str,
+    slug: &str,
+) -> i32 {
+    let outcome = match project::project_pushed_commit(pool, id, bare).await {
+        Err(e) => {
+            tracing::warn!(owner, slug, %id, error = %e, op, "сбой проекции — повтор через 200мс");
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            project::project_pushed_commit(pool, id, bare).await
+        }
+        ok => ok,
+    };
+    match outcome {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            metrics::counter!("projection_failures_total", "op" => format!("{op}_empty")).increment(1);
+            tracing::warn!(
+                owner, slug, %id, op,
+                "проекция ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
+            );
+            0
+        }
+        Err(e) => {
+            metrics::counter!("projection_failures_total", "op" => op).increment(1);
+            tracing::error!(
+                owner, slug, %id, error = %e, op,
+                "ОШИБКА проекции — git принят, версия НЕ создана; восстановление: reproject"
+            );
+            0
+        }
+    }
 }
 
 // BranchSnapshotData -> pb-снапшот (переиспользуется snapshot-RPC и merge-state).
@@ -326,7 +389,9 @@ fn commit_resolved(
     } else {
         (format!("Merge branch '{branch}' (resolved)"), vec![&ours, &theirs])
     };
-    let merged = repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &parents).map_err(internal)?;
+    // Коммит без ref-обновления; main двигает ТОЛЬКО update_main (валидация как у pre-receive).
+    let merged = repo.commit(None, &sig, &sig, &msg, &tree, &parents).map_err(internal)?;
+    update_main(repo, merged, Some(main_tip), &format!("merge {branch}: resolved")).map_err(main_status)?;
     Ok(merged.to_string())
 }
 
@@ -403,31 +468,10 @@ impl GitCore for GitCoreSvc {
         .map_err(internal)?
         .map_err(internal)?;
         // Проекция list.json нового main tip → новая версия (0 = не спроецировано).
-        // Сбой проекции НЕ отменяет push (git-объекты целы), но обязан быть громким:
-        // тихая потеря версии — худший исход (аудит 2026-07-20, P0-1).
+        // Сбой проекции НЕ отменяет push (git-объекты целы) — тихая потеря версии
+        // худший исход (аудит 2026-07-20, P0-1); громкость — в project_main_or_log.
         let new_version = if moved {
-            match project::project_pushed_commit(&self.pool, id, &bare).await {
-                Ok(Some(v)) => v,
-                // «Спроецировать нечего» — тот же исход, что и сбой: git принят, а версии
-                // нет (битый или пустой list.json). Счётчик рос только в Err-ветке, поэтому
-                // этот случай проходил мимо алерта — молча (линза 02, F3, побочная находка).
-                Ok(None) => {
-                    metrics::counter!("projection_failures_total", "op" => "push_empty").increment(1);
-                    tracing::warn!(
-                        owner = %repo.owner, slug = %repo.slug, %id,
-                        "проекция push ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
-                    );
-                    0
-                }
-                Err(e) => {
-                    metrics::counter!("projection_failures_total", "op" => "push").increment(1);
-                    tracing::error!(
-                        owner = %repo.owner, slug = %repo.slug, %id, error = %e,
-                        "ОШИБКА проекции push — git принят, версия НЕ создана; восстановление: reproject"
-                    );
-                    0
-                }
-            }
+            project_main_or_log(&self.pool, id, &bare, "push", &repo.owner, &repo.slug).await
         } else {
             0
         };
@@ -599,14 +643,15 @@ impl GitCore for GitCoreSvc {
                 };
                 let msg = with_coauthors(repo, branch_tip, main_tip, &title);
                 let sig = merge_sig()?;
-                let squashed =
-                    repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours]).map_err(internal)?;
+                let squashed = repo.commit(None, &sig, &sig, &msg, &tree, &[&ours]).map_err(internal)?;
+                update_main(repo, squashed, Some(main_tip), &format!("merge {name}: squash"))
+                    .map_err(main_status)?;
                 return Ok((squashed.to_string(), false));
             }
-            // main — предок ветки → fast-forward: просто двигаем ref.
+            // main — предок ветки → fast-forward: двигаем ref (через единую точку).
             if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) {
-                repo.reference(MAIN_REF, branch_tip, true, &format!("merge {name}: fast-forward"))
-                    .map_err(internal)?;
+                update_main(repo, branch_tip, Some(main_tip), &format!("merge {name}: fast-forward"))
+                    .map_err(main_status)?;
                 return Ok((branch_tip.to_string(), true));
             }
             // Расхождение → merge-commit; конфликт индекса = failed_precondition.
@@ -620,35 +665,14 @@ impl GitCore for GitCoreSvc {
             let tree = repo.find_tree(tree_id).map_err(internal)?;
             let sig = merge_sig()?;
             let msg = format!("Merge branch '{name}'");
-            let merged =
-                repo.commit(Some(MAIN_REF), &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
+            let merged = repo.commit(None, &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
+            update_main(repo, merged, Some(main_tip), &format!("merge {name}")).map_err(main_status)?;
             Ok((merged.to_string(), false))
         })
         .await?;
         // main сдвинулся → проекция новой версии (0 = list.json не изменился).
-        // Сбой проекции не отменяет merge, но громко логируется (см. receive_pack).
-        let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
-            Ok(Some(v)) => v,
-            // «Спроецировать нечего» — тот же исход, что и сбой: git принят, а версии
-            // нет (битый или пустой list.json). Счётчик рос только в Err-ветке, поэтому
-            // этот случай проходил мимо алерта — молча (линза 02, F3, побочная находка).
-            Ok(None) => {
-                metrics::counter!("projection_failures_total", "op" => "merge_empty").increment(1);
-                tracing::warn!(
-                    owner = %repo.owner, slug = %repo.slug, %id,
-                    "проекция merge ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
-                );
-                0
-            }
-            Err(e) => {
-                metrics::counter!("projection_failures_total", "op" => "merge").increment(1);
-                tracing::error!(
-                    owner = %repo.owner, slug = %repo.slug, %id, error = %e,
-                    "ОШИБКА проекции merge — merge выполнен, версия НЕ создана; восстановление: reproject"
-                );
-                0
-            }
-        };
+        // Сбой проекции не отменяет merge, но громок — см. project_main_or_log.
+        let new_version = project_main_or_log(&self.pool, id, &bare, "merge", &repo.owner, &repo.slug).await;
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: ff }))
     }
 
@@ -712,28 +736,8 @@ impl GitCore for GitCoreSvc {
             commit_resolved(repo, &branch, &list_json, mode == "squash", &message)
         })
         .await?;
-        let new_version = match project::project_pushed_commit(&self.pool, id, &bare).await {
-            Ok(Some(v)) => v,
-            // «Спроецировать нечего» — тот же исход, что и сбой: git принят, а версии
-            // нет (битый или пустой list.json). Счётчик рос только в Err-ветке, поэтому
-            // этот случай проходил мимо алерта — молча (линза 02, F3, побочная находка).
-            Ok(None) => {
-                metrics::counter!("projection_failures_total", "op" => "merge_resolved_empty").increment(1);
-                tracing::warn!(
-                    owner = %repo.owner, slug = %repo.slug, %id,
-                    "проекция merge-resolved ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
-                );
-                0
-            }
-            Err(e) => {
-                metrics::counter!("projection_failures_total", "op" => "merge_resolved").increment(1);
-                tracing::error!(
-                    owner = %repo.owner, slug = %repo.slug, %id, error = %e,
-                    "ОШИБКА проекции merge-resolved — merge выполнен, версия НЕ создана; восстановление: reproject"
-                );
-                0
-            }
-        };
+        let new_version =
+            project_main_or_log(&self.pool, id, &bare, "merge_resolved", &repo.owner, &repo.slug).await;
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: false }))
     }
 

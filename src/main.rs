@@ -85,9 +85,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("wrote {} bytes → {}", data.len(), cli(5));
                 return Ok(());
             }
-            // Ручное восстановление после сбоя проекции (см. services::git_core):
-            // принудительно проецирует текущий main-tip в НОВУЮ версию списка.
-            // Не проверяет, была ли версия уже создана — инструмент оператора.
+            // ШТАТНЫЙ rebuild хвоста проекции (Ф1: git — канон, БД — read-model):
+            // проецирует текущий main-tip в НОВУЮ версию списка. Применять, когда
+            // git оказался впереди БД (лог «канон записан, проекция отстала»).
+            // Не проверяет, была ли версия уже создана — инструмент оператора,
+            // см. runbook git-projection-catchup.
             //   reproject <owner> <slug>
             "reproject" => {
                 require_git_data_dir()?;
@@ -100,6 +102,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     None => println!(
                         "reproject {owner}/{slug}: проецировать нечего (нет валидного list.json/steps)"
                     ),
+                }
+                return Ok(());
+            }
+            // Одноразовый догон после снятия ленивой досыпки (Ф1) и общий
+            // инструмент выравнивания: каждому списку — репо, синхронное с БД.
+            // Идемпотентен, безопасен к повторному запуску. Конфликты (посторонний
+            // тег vN и т.п.) только печатает — чинить руками по runbook.
+            //   sync-repos
+            "sync-repos" => {
+                require_git_data_dir()?;
+                let rows: Vec<(uuid::Uuid, String, String)> = sqlx::query_as(
+                    "select t.id, u.handle, t.slug from templates t join users u on u.id = t.owner_id \
+                     order by u.handle, t.slug",
+                )
+                .fetch_all(&pool)
+                .await?;
+                let total = rows.len();
+                let (mut in_sync, mut boot, mut appended, mut projected, mut conflicts) = (0, 0, 0, 0, 0);
+                for (id, handle, slug) in rows {
+                    let bare = git::repo::repo_path(id);
+                    let _guard = git::repo::repo_guard(&pool, id).await?;
+                    match git::version::sync_repo_with_db(&pool, id, &bare).await {
+                        Ok(git::version::SyncOutcome::InSync) => in_sync += 1,
+                        Ok(git::version::SyncOutcome::Bootstrapped { versions }) => {
+                            boot += 1;
+                            println!("  {handle}/{slug}: репо создано ({versions} версий)");
+                        }
+                        Ok(git::version::SyncOutcome::Appended { from, to }) => {
+                            appended += 1;
+                            println!("  {handle}/{slug}: догнано v{from}..v{to}");
+                        }
+                        Ok(git::version::SyncOutcome::ProjectedTip { version }) => {
+                            projected += 1;
+                            println!("  {handle}/{slug}: tip спроецирован в БД → v{version}");
+                        }
+                        Ok(git::version::SyncOutcome::Conflict { have, current }) => {
+                            conflicts += 1;
+                            println!(
+                                "  ⚠ {handle}/{slug}: КОНФЛИКТ git v{have} ↔ db v{current} — руками, \
+                                 см. runbook git-projection-catchup"
+                            );
+                        }
+                        Err(e) => {
+                            conflicts += 1;
+                            println!("  ⚠ {handle}/{slug}: ошибка — {e}");
+                        }
+                    }
+                }
+                println!(
+                    "sync-repos: всего {total}; синхронны {in_sync}, созданы {boot}, догнаны {appended}, \
+                     спроецированы {projected}, конфликтов {conflicts}"
+                );
+                if conflicts > 0 {
+                    return Err(format!("{conflicts} репо требуют ручного вмешательства").into());
                 }
                 return Ok(());
             }
