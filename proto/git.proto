@@ -179,6 +179,12 @@ message MergeResolvedRequest {
   // Используется, только если content не задан.
   bytes list_json = 3;
   ListContent content = 4; // разрешённый канон структурой; приоритетнее list_json
+  // Способ слияния — семантика ровно как в MergeBranchRequest. Без этих полей
+  // список, настроенный на squash, получал бы историю ветки только потому, что
+  // при слиянии случился конфликт; фронт из-за этого просто ОТКАЗЫВАЛ в ручном
+  // резолве на squash-списках, маскируя отказ под 'conflict'.
+  string mode = 5;    // '' и 'merge' — merge-коммит; 'squash' — один родитель
+  string message = 6; // заголовок squash-коммита ('' → 'Squashed branch <name>')
 }
 
 message MergeBranchRequest {
