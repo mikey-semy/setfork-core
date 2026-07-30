@@ -46,7 +46,10 @@ pub struct VersionData {
 }
 
 /// list.json — машиночитаемый снимок версии (то, что парсит проекция при push).
-fn list_json(v: &VersionData) -> String {
+/// Публична: ядро — единственный владелец формата, и запись канона в ветку
+/// (write::commit_list_json) обязана идти ЧЕРЕЗ ЭТУ функцию, а не через свою
+/// сериализацию на клиенте. Иначе правила формата живут в двух местах.
+pub fn list_json(v: &VersionData) -> String {
     let steps: Vec<serde_json::Value> = v
         .steps
         .iter()
