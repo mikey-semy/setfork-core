@@ -347,6 +347,8 @@ impl ListWrite for ListWriteSvc {
         let out = version::commit_web_version(&self.pool, tid, &bare, &note, author, rows, meta)
             .await
             .map_err(web_version_status)?;
+        // Ф3: зеркало догоняет истину после каждой версии (фоново).
+        super::git_core::spawn_mirror(self.pool.clone(), tid, bare);
 
         Ok(Response::new(Version {
             id: out.ver_id.to_string(),
