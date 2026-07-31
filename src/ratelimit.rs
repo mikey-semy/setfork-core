@@ -26,6 +26,7 @@ const HEAVY: &[&str] = &[
     "CreateBundle",
     "MergeBranch",
     "MergeResolved",
+    "MirrorPush", // сеть до форджи — не даём разгонять
     "CreateBranch",
     "DeleteBranch",
     "Create",     // ListWrite.Create — вставка списка+версии+шагов

@@ -16,8 +16,8 @@ use crate::pb::{
     Commit, CommitToBranchRequest, CommitToBranchResponse, CommitsResponse, CreateBranchRequest,
     CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListCommitsRequest, ListContent,
     MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse,
-    PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse,
-    UpdateBranchRequest, UpdateBranchResponse,
+    MirrorPushResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag,
+    TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -217,6 +217,48 @@ fn main_oid(bare: &std::path::Path) -> Option<String> {
 // Пустая proto-строка → None (proto3 не отличает '' от отсутствия поля).
 fn opt(s: &str) -> Option<&str> {
     (!s.is_empty()).then_some(s)
+}
+
+/// Пуш зеркала СЕЙЧАС (Ф3): читает настройки, расшифровывает токен, пушит,
+/// записывает статус. «Не настроено» — не ошибка (Ok). Любой сбой — в статус
+/// списка (mirror_error) и метрику: молчаливой деградации быть не должно.
+pub(crate) async fn push_mirror_now(pool: &PgPool, id: Uuid, bare: &std::path::Path) -> Result<(), String> {
+    let Some((url, token_enc)) = db::load_mirror(pool, id).await.map_err(|e| e.to_string())? else {
+        return Ok(()); // зеркало не настроено
+    };
+    let outcome = match crate::git::mirror::mirror_secret() {
+        None => {
+            Err("SETFORK_MIRROR_SECRET не задан на сервере — зеркало не может расшифровать токен".to_string())
+        }
+        Some(secret) => match crate::git::mirror::decrypt_token(&token_enc, secret) {
+            None => {
+                Err("токен зеркала не расшифровался (секрет сменён?) — сохраните токен заново".to_string())
+            }
+            Some(token) => crate::git::mirror::mirror_push(bare, &url, &token).await,
+        },
+    };
+    match &outcome {
+        Ok(()) => {
+            metrics::counter!("mirror_push_total", "result" => "ok").increment(1);
+            tracing::info!(%id, url, "зеркало обновлено");
+        }
+        Err(e) => {
+            metrics::counter!("mirror_push_total", "result" => "error").increment(1);
+            tracing::warn!(%id, url, error = %e, "пуш зеркала не удался");
+        }
+    }
+    if let Err(e) = db::record_mirror_result(pool, id, outcome.as_ref().err().map(|s| s.as_str())).await {
+        tracing::error!(%id, error = %e, "статус зеркала не записан");
+    }
+    outcome
+}
+
+/// Фоновый пуш зеркала после записи в main (fire-and-forget: запись не ждёт
+/// сети; исход виден в статусе настроек и метрике).
+pub(crate) fn spawn_mirror(pool: PgPool, id: Uuid, bare: std::path::PathBuf) {
+    tokio::spawn(async move {
+        let _ = push_mirror_now(&pool, id, &bare).await;
+    });
 }
 
 /// Проекция нового main-tip → версия БД, с одним повтором на транзиентный сбой.
@@ -505,7 +547,9 @@ impl GitCore for GitCoreSvc {
         // Сбой проекции НЕ отменяет push (git-объекты целы) — тихая потеря версии
         // худший исход (аудит 2026-07-20, P0-1); громкость — в project_main_or_log.
         let new_version = if moved {
-            project_main_or_log(&self.pool, id, &bare, "push", &repo.owner, &repo.slug).await
+            let v = project_main_or_log(&self.pool, id, &bare, "push", &repo.owner, &repo.slug).await;
+            spawn_mirror(self.pool.clone(), id, bare.clone()); // Ф3: зеркало догоняет истину
+            v
         } else {
             0
         };
@@ -707,6 +751,7 @@ impl GitCore for GitCoreSvc {
         // main сдвинулся → проекция новой версии (0 = list.json не изменился).
         // Сбой проекции не отменяет merge, но громок — см. project_main_or_log.
         let new_version = project_main_or_log(&self.pool, id, &bare, "merge", &repo.owner, &repo.slug).await;
+        spawn_mirror(self.pool.clone(), id, bare.clone()); // Ф3
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: ff }))
     }
 
@@ -775,6 +820,7 @@ impl GitCore for GitCoreSvc {
         .await?;
         let new_version =
             project_main_or_log(&self.pool, id, &bare, "merge_resolved", &repo.owner, &repo.slug).await;
+        spawn_mirror(self.pool.clone(), id, bare.clone()); // Ф3
         Ok(Response::new(MergeBranchResponse { tip_sha: tip, new_version, fast_forward: false }))
     }
 
@@ -801,6 +847,9 @@ impl GitCore for GitCoreSvc {
             Ok(target.to_string())
         })
         .await?;
+        // Ф3: релизный тег — тоже контент зеркала (refspec тянет все теги).
+        let (bare_m, id_m) = self.ensure(&repo.owner, &repo.slug).await?;
+        spawn_mirror(self.pool.clone(), id_m, bare_m);
         Ok(Response::new(BranchOpResponse { tip_sha: sha }))
     }
 
@@ -920,6 +969,17 @@ impl GitCore for GitCoreSvc {
         })
         .await?;
         Ok(Response::new(CommitToBranchResponse { tip_sha: tip, changed }))
+    }
+
+    /// Ф3: пуш зеркала по запросу (кнопка «Синхронизировать», после сохранения
+    /// настроек). Исход в теле ответа — текст ошибки показывается владельцу.
+    async fn mirror_push(&self, req: Request<RepoRef>) -> Result<Response<MirrorPushResponse>, Status> {
+        let RepoRef { owner, slug } = req.into_inner();
+        let (bare, id) = self.ensure(&owner, &slug).await?;
+        match push_mirror_now(&self.pool, id, &bare).await {
+            Ok(()) => Ok(Response::new(MirrorPushResponse { ok: true, error: String::new() })),
+            Err(e) => Ok(Response::new(MirrorPushResponse { ok: false, error: e })),
+        }
     }
 
     /// Коммиты рефа (свежие первыми). `not_in` скрывает достижимое из базы —

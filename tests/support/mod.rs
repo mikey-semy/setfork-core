@@ -43,6 +43,11 @@ create table templates (
   pinned boolean not null default false,
   origin template_origin not null default 'authored',
   forked_from_id uuid,
+  -- Зеркало (Ф3): url + шифрованный токен + статус последнего пуша.
+  mirror_url text,
+  mirror_token text,
+  mirror_synced_at timestamptz,
+  mirror_error text,
   -- Тип списка (ADR-0010); во фронт-схеме text nullable, БЕЗ enum (Ф2a).
   list_kind text,
   current_version integer not null default 1,

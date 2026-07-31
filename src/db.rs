@@ -111,6 +111,30 @@ pub async fn load_list_kind(pool: &PgPool, id: Uuid) -> Result<Option<String>, s
     Ok(k.flatten().filter(|k| crate::git::serialize::is_valid_kind(k)))
 }
 
+/// Настройки зеркала списка (Ф3): (url, шифрованный токен) или None — не настроено.
+pub async fn load_mirror(pool: &PgPool, id: Uuid) -> Result<Option<(String, String)>, sqlx::Error> {
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("select mirror_url, mirror_token from templates where id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.and_then(|(url, token)| match (url, token) {
+        (Some(u), Some(t)) if !u.trim().is_empty() && !t.trim().is_empty() => Some((u, t)),
+        _ => None,
+    }))
+}
+
+/// Статус последнего пуша зеркала: молчаливой деградации быть не должно —
+/// и успех, и ошибка записываются с отметкой времени (видно в настройках).
+pub async fn record_mirror_result(pool: &PgPool, id: Uuid, error: Option<&str>) -> Result<(), sqlx::Error> {
+    sqlx::query("update templates set mirror_synced_at = now(), mirror_error = $1 where id = $2")
+        .bind(error)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Число опубликованных публичных списков — быстрый self-check связи с БД.
 pub async fn published_count(pool: &PgPool) -> Result<i64, sqlx::Error> {
     let (n,): (i64,) = sqlx::query_as(
