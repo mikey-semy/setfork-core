@@ -19,14 +19,18 @@ use super::serialize::tree_path_allowed;
 /// Первый путь дерева вне allowlist'а (или None — дерево чистое).
 ///
 /// Обход pre-order: callback получает префикс каталога и запись, полный путь —
-/// их склейка. Судим только ФАЙЛЫ, в каталоги всегда спускаемся: пустых каталогов
-/// git не хранит, поэтому любой лишний каталог всё равно будет пойман по своему
-/// содержимому — зато в отказе окажется `assets/x.png`, а не голое `assets`,
-/// по которому человеку неясно, что убирать.
+/// их склейка. Пропускаем ТОЛЬКО каталоги, в них спускаемся: пустых каталогов
+/// git не хранит, поэтому лишний каталог всё равно будет пойман по содержимому —
+/// зато в отказе окажется `assets/x.png`, а не голое `assets`, по которому
+/// человеку неясно, что убирать.
+///
+/// Судить «только блобы» было НЕЛЬЗЯ: подмодуль (gitlink) libgit2 отдаёт как
+/// `ObjectType::Commit`, и такая запись проезжала бы мимо правила целиком
+/// (авто-ревью core#70, P2).
 fn first_foreign_path(tree: &git2::Tree<'_>) -> Result<Option<String>, git2::Error> {
     let mut foreign: Option<String> = None;
     tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
-        if entry.kind() != Some(git2::ObjectType::Blob) {
+        if entry.kind() == Some(git2::ObjectType::Tree) {
             return TreeWalkResult::Ok;
         }
         let path = format!("{dir}{}", entry.name().unwrap_or("<не-utf8>"));

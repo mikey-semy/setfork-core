@@ -113,6 +113,68 @@ fn хук_пропускает_легаси_steps() {
     );
 }
 
+// Регрессия P1 авто-ревью core#70. Первая версия хука перечисляла ОБЪЕКТЫ
+// (`rev-list --objects`), а он печатает каждый OID один раз: лишний файл с теми
+// же байтами, что у разрешённого, не появлялся в выводе вовсе и проезжал.
+// Проверено вживую: у одинаковых README.md и evil выводился только README.md.
+#[test]
+fn хук_ловит_лишний_файл_с_содержимым_разрешённого() {
+    let root = tmp("tree-dedup");
+    let (_bare, work) = repo_pair(&root.0);
+
+    let same = std::fs::read(work.join("README.md")).expect("читаем README");
+    std::fs::write(work.join("evil"), &same).expect("тот же блоб под другим именем");
+    git_ok(&work, &["add", "-A"]);
+    git_ok(&work, &["commit", "-q", "-m", "дубль блоба"]);
+
+    let out = git(&work, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "дубль блоба под чужим именем обязан быть отвергнут: {err}");
+    assert!(err.contains("evil"), "{err}");
+}
+
+// Регрессия P2 авто-ревью: `steps` разрешался как ИМЯ, поэтому обычный файл с
+// таким именем в корне проходил обе проверки и оставался в дереве незамеченным.
+#[test]
+fn обычный_файл_с_именем_steps_отвергается() {
+    assert!(!tree_path_allowed("steps"), "каталог судится по содержимому, файл — сам по себе");
+
+    let root = tmp("tree-stepsfile");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("steps"), "не каталог, а обычный файл\n").expect("файл steps");
+    git_ok(&work, &["add", "-A"]);
+    git_ok(&work, &["commit", "-q", "-m", "файл steps"]);
+
+    let out = git(&work, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "файл steps в корне обязан быть отвергнут: {err}");
+}
+
+// Регрессия P2 авто-ревью: гитлинк libgit2 отдаёт как ObjectType::Commit, и
+// «судим только блобы» пропускало подмодуль мимо правила целиком.
+#[test]
+fn update_main_отвергает_гитлинк() {
+    let root = tmp("tree-gitlink");
+    let bare = root.0.join("gl.git");
+    let repo = git2::Repository::init_bare(&bare).expect("init bare");
+    let sig = git2::Signature::new("Тест", "t@example.com", &git2::Time::new(1_700_000_000, 0)).expect("sig");
+
+    let mut b = repo.treebuilder(None).expect("treebuilder");
+    let blob = repo.blob(b"{}").expect("blob");
+    b.insert("list.json", blob, 0o100644).expect("list.json");
+    // Гитлинк: режим 160000, цель — произвольный sha (объекта у нас нет и не надо).
+    let target = git2::Oid::from_str("0123456789abcdef0123456789abcdef01234567").expect("oid");
+    b.insert("vendor", target, 0o160000).expect("gitlink");
+    let tree = repo.find_tree(b.write().expect("write tree")).expect("tree");
+    let tip = repo.commit(None, &sig, &sig, "с подмодулем", &tree, &[]).expect("commit");
+
+    match update_main(&repo, tip, None, "тест") {
+        Err(MainUpdateError::ForeignPath(p)) => assert_eq!(p, "vendor"),
+        other => panic!("подмодуль обязан быть отвергнут, получено {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&bare);
+}
+
 #[test]
 fn update_main_отвергает_посторонний_путь() {
     let root = tmp("tree-git2");
@@ -166,10 +228,11 @@ fn update_main_отвергает_посторонний_путь() {
 
 #[test]
 fn allowlist_путей_совпадает_с_форматом_версии() {
-    for ok in ["README.md", "list.json", ".gitattributes", "steps", "steps/01-a.md"] {
+    for ok in ["README.md", "list.json", ".gitattributes", "steps/01-a.md"] {
         assert!(tree_path_allowed(ok), "{ok}");
     }
     for bad in [
+        "steps", // ФАЙЛ с таким именем; каталог сюда не попадает — он не лист
         "assets/x.png",
         "steps/nested/deep.md", // подкаталог внутри steps — не легаси-форма
         "steps/x.bin",
