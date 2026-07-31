@@ -105,7 +105,9 @@ fn clone_push_pull_roundtrip() {
     git(&root.0, &["clone", bare.to_str().unwrap(), work.to_str().unwrap()]);
     assert!(work.join("list.json").is_file(), "list.json cloned");
     assert!(work.join("README.md").is_file(), "README cloned");
-    assert!(work.join("steps").is_dir(), "steps/ cloned");
+    // Ф2b: в дереве ровно два представления + .gitattributes, steps/ больше нет.
+    assert!(!work.join("steps").exists(), "steps/ удалены из формата (Ф2b)");
+    assert!(work.join(".gitattributes").is_file(), ".gitattributes cloned");
     assert!(git(&work, &["tag"]).contains("v1"), "clone sees v1 tag");
 
     // 4. Пользователь правит и пушит (list.json остаётся → проходит pre-receive hook).

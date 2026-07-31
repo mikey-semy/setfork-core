@@ -36,24 +36,14 @@ fn upd_io(e: MainUpdateError) -> io::Error {
     io::Error::other(e.to_string())
 }
 
-// Дерево версии из version_files (README.md, list.json, steps/NN.md); поддерево steps/.
-// treebuilder.write() канонично сортирует записи — как git, поэтому SHA дерева совпадает.
+// Дерево версии из version_files (Ф2b: README.md, list.json, .gitattributes —
+// плоский корень, steps/ из формата удалены). treebuilder.write() канонично
+// сортирует записи — как git, поэтому SHA дерева совпадает.
 fn build_tree(repo: &Repository, v: &VersionData) -> Result<Oid, git2::Error> {
     let mut root = repo.treebuilder(None)?;
-    let mut steps = repo.treebuilder(None)?;
-    let mut has_steps = false;
     for (path, content) in version_files(v) {
         let blob = repo.blob(content.as_bytes())?;
-        if let Some(name) = path.strip_prefix("steps/") {
-            steps.insert(name, blob, 0o100644)?;
-            has_steps = true;
-        } else {
-            root.insert(path.as_str(), blob, 0o100644)?;
-        }
-    }
-    if has_steps {
-        let steps_oid = steps.write()?;
-        root.insert("steps", steps_oid, 0o040000)?;
+        root.insert(path.as_str(), blob, 0o100644)?;
     }
     root.write()
 }

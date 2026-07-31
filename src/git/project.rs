@@ -7,7 +7,6 @@ use crate::blocks::is_step_type;
 use crate::db;
 use serde::Deserialize;
 use sqlx::PgPool;
-use std::collections::HashMap;
 use std::path::Path;
 use uuid::Uuid;
 
@@ -81,12 +80,15 @@ struct RawList {
     ordered: Option<bool>,
     // Тип списка (Ф2a): до этого терялся на push — проекция его не читала.
     kind: Option<String>,
+    version: Option<i32>,
     steps: Option<Vec<RawStep>>,
 }
 
-/// Owned-снимок tip'а: (hex sha, содержимое list.json, subject коммита,
-/// steps/NN-*.md по 1-based номеру NN). git2-объекты не Send — извлекаем всё до await.
-type TipData = (String, Vec<u8>, String, HashMap<i32, String>);
+/// Owned-снимок tip'а: (hex sha, содержимое list.json, subject коммита).
+/// git2-объекты не Send — извлекаем всё до await. steps/*.md больше не читаются
+/// (Ф2b): list.json — единственный вход проекции; старые папки в истории
+/// просто игнорируются.
+type TipData = (String, Vec<u8>, String);
 
 fn read_tip(bare: &Path) -> Option<TipData> {
     read_ref_tip(bare, MAIN_REF)
@@ -107,113 +109,64 @@ fn read_commit_data(repo: &git2::Repository, oid: git2::Oid) -> Option<TipData> 
     let blob = entry.to_object(repo).ok()?;
     let raw = blob.as_blob()?.content().to_vec();
     let subject = commit.summary().ok().flatten().unwrap_or("").to_string();
-    let steps = read_step_files(repo, &tree);
-    Some((oid.to_string(), raw, subject, steps))
+    Some((oid.to_string(), raw, subject))
 }
 
-// Собирает steps/NN-*.md из дерева: ключ — префикс NN (число до первого '-'), значение — контент.
-// Индекс парсим из имени файла (как его пишет version_files через pad(n, width)).
-fn read_step_files(repo: &git2::Repository, tree: &git2::Tree) -> HashMap<i32, String> {
-    let mut out = HashMap::new();
-    let steps_tree = match tree.get_path(Path::new("steps")).ok().and_then(|e| e.to_object(repo).ok()) {
-        Some(obj) => match obj.into_tree() {
-            Ok(t) => t,
-            Err(_) => return out,
-        },
-        None => return out,
+/// Витрина из канона (Ф2b): парсит list.json и строит README тем же кодом, что
+/// материализация версий (`serialize::readme` через `version_files`). Нужна путям,
+/// которые кладут в дерево ГОТОВЫЙ канон (запись в ветку, ручной резолв): раньше
+/// они меняли list.json, а README тащился старым блобом и протухал до следующей
+/// веб-версии. None — канон не разобрался (README тогда не трогаем: битый вход
+/// не повод стирать витрину).
+pub fn readme_from_canon(raw: &[u8]) -> Option<String> {
+    let parsed: RawList = serde_json::from_slice(raw).ok()?;
+    let steps = parsed
+        .steps
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .enumerate()
+        .map(|(idx, r)| crate::git::bundle::SerStep {
+            n: r.n.unwrap_or((idx as i32) + 1),
+            block_type: r.block_type.clone(),
+            content: r.content.clone().unwrap_or(serde_json::Value::Null),
+            block_id: r.block_id.clone(),
+            title: r.title.clone().unwrap_or_default(),
+            desc: r.desc.clone().unwrap_or_default(),
+            command: r.command.clone().unwrap_or_default(),
+            image_key: r.image_key.clone(),
+            level: r.level.clone().unwrap_or_default(),
+            needs_human: r.needs_human.unwrap_or(false),
+            needs_human_ask: r.needs_human_ask.clone(),
+            why: r.why.clone().unwrap_or_default(),
+            section: r.section.clone().unwrap_or_default(),
+            subtasks: r.subtasks.clone().unwrap_or_default(),
+            refs: r
+                .refs
+                .as_ref()
+                .map(|rs| {
+                    rs.iter()
+                        .map(|x| crate::git::bundle::StepRef {
+                            label: x.label.clone().unwrap_or_default(),
+                            url: x.url.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+        .collect();
+    let v = crate::git::bundle::VersionData {
+        version: parsed.version.unwrap_or(0),
+        note: String::new(),
+        ts: 0,
+        title: parsed.title.clone().unwrap_or_default(),
+        desc: parsed.desc.clone().unwrap_or_default(),
+        tags: parsed.tags.clone().unwrap_or_default(),
+        ordered: parsed.ordered.unwrap_or(true),
+        kind: parsed.kind.clone(),
+        steps,
     };
-    for e in steps_tree.iter() {
-        // git2 0.21: name() → Result (не-UTF8 имя — ошибка, а не None).
-        let name = match e.name() {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        if !name.ends_with(".md") {
-            continue;
-        }
-        // NN — цифры до первого '-' (или до '.md', если slug пуст).
-        let digits: String = name.chars().take_while(|c| c.is_ascii_digit()).collect();
-        let n: i32 = match digits.parse() {
-            Ok(n) => n,
-            Err(_) => continue,
-        };
-        if let Some(blob) = e.to_object(repo).ok().and_then(|o| o.into_blob().ok())
-            && let Ok(s) = String::from_utf8(blob.content().to_vec())
-        {
-            out.insert(n, s);
-        }
-    }
-    out
-}
-
-/// Разобранный per-step .md — безопасное подмножество полей (title/desc/command),
-/// которое можно однозначно распарсить обратно из формата bundle::step_file.
-#[derive(Debug, PartialEq)]
-pub struct ParsedStepMd {
-    pub title: Option<String>,
-    pub desc: Option<String>,
-    pub command: Option<String>,
-}
-
-/// Значение front-matter вида `key: <json-строка>` или `key: raw` → строка.
-/// version_files пишет title/section/command как JSON.stringify(...), level — сырьём.
-fn front_value(raw: &str) -> String {
-    let t = raw.trim();
-    if t.starts_with('"') {
-        serde_json::from_str::<String>(t).unwrap_or_else(|_| t.to_string())
-    } else {
-        t.to_string()
-    }
-}
-
-/// Обратный парс steps/NN-*.md → title/desc/command (зеркало bundle::step_file).
-/// Возвращает None для полей, которых нет в файле; вызывающий берёт их из list.json.
-/// Безопасное подмножество: subtasks/refs/why/section/level НЕ реэкспортируем
-/// (их источник — list.json), чтобы round-trip оставался идемпотентным.
-pub fn parse_step_md(content: &str) -> ParsedStepMd {
-    let mut title = None;
-    let mut command = None;
-
-    // 1) Front-matter между первой парой строк "---".
-    let mut lines = content.lines();
-    let mut body_start = 0usize; // индекс строки, с которой начинается тело
-    if lines.next() == Some("---") {
-        let mut idx = 1usize;
-        for line in content.lines().skip(1) {
-            idx += 1;
-            if line.trim_end() == "---" {
-                body_start = idx; // после закрывающего "---"
-                break;
-            }
-            if let Some(rest) = line.strip_prefix("title:") {
-                title = Some(front_value(rest));
-            } else if let Some(rest) = line.strip_prefix("command:") {
-                command = Some(front_value(rest));
-            }
-        }
-    }
-
-    // 2) Тело: desc — это текст ДО первого маркера (**Why:**, subtask "- [ ]", ref "- ").
-    //    version_files кладёт desc первым блоком и отделяет пустой строкой.
-    let body: Vec<&str> = content.lines().skip(body_start).collect();
-    let mut desc_lines: Vec<&str> = Vec::new();
-    for line in &body {
-        let t = line.trim_start();
-        if t.starts_with("**Why:**") || t.starts_with("- [ ] ") || t.starts_with("- ") {
-            break;
-        }
-        desc_lines.push(line);
-    }
-    // Обрезаем ведущие/замыкающие пустые строки (front-matter отделён пустой строкой).
-    while desc_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
-        desc_lines.remove(0);
-    }
-    while desc_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
-        desc_lines.pop();
-    }
-    let desc = if desc_lines.is_empty() { None } else { Some(desc_lines.join("\n")) };
-
-    ParsedStepMd { title, desc, command }
+    crate::git::serialize::version_files(&v).into_iter().find(|(p, _)| p == "README.md").map(|(_, c)| c)
 }
 
 // Тег vN на запушенный tip (git2, force).
@@ -244,8 +197,8 @@ fn strip_v_prefix(s: &str) -> String {
     s.to_string()
 }
 
-// Общий парс шагов: list.json (набор/порядок) + steps/NN-*.md (пер-шаговые оверрайды).
-fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<ProjStep> {
+// Общий парс шагов из list.json — единственного входа проекции (Ф2b).
+fn parse_steps(steps_raw: &[RawStep]) -> Vec<ProjStep> {
     // Шаг-блок без title — мусор; не-step блоки (text/image) валидны и без title.
     // orig_n — номер шага из list.json (совпадает с именем steps/NN-*.md для оверрайда).
     let mut kept: Vec<(i32, ProjStep)> = Vec::new();
@@ -287,26 +240,6 @@ fn parse_steps(steps_raw: &[RawStep], step_md: &HashMap<i32, String>) -> Vec<Pro
         kept.push((s.n.unwrap_or((idx as i32) + 1), step));
     }
 
-    // list.json — источник истины для НАБОРА/порядка блоков; steps/NN-*.md — опциональные
-    // пер-шаговые оверрайды контента (title/desc/command), только у шаг-блоков.
-    // Ключ .md — номер шага из list.json (orig_n), а не позиция среди блоков.
-    for (orig_n, step) in kept.iter_mut() {
-        if !is_step_type(&step.block_type) {
-            continue;
-        }
-        let Some(content) = step_md.get(orig_n) else { continue };
-        let md = parse_step_md(content);
-        if let Some(t) = md.title.filter(|t| !t.trim().is_empty() && *t != step.title) {
-            step.title = t;
-        }
-        if let Some(d) = md.desc.filter(|d| *d != step.desc) {
-            step.desc = d;
-        }
-        if let Some(c) = md.command.filter(|c| *c != step.command) {
-            step.command = c;
-        }
-    }
-
     kept.into_iter().map(|(_, s)| s).collect()
 }
 
@@ -322,21 +255,21 @@ pub struct BranchSnapshotData {
 
 /// Снапшот ветки по refname: мета list.json + шаги с tip'а. Для read-only рендера.
 pub fn branch_snapshot(bare: &Path, refname: &str) -> Option<BranchSnapshotData> {
-    let (tip, raw, _subject, step_md) = read_ref_tip(bare, refname)?;
-    snapshot_from_data(tip, &raw, &step_md)
+    let (tip, raw, _subject) = read_ref_tip(bare, refname)?;
+    snapshot_from_data(tip, &raw)
 }
 
 /// Материализация произвольного коммита (merge-base для трёхстороннего merge).
 pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {
     let repo = git2::Repository::open_bare(bare).ok()?;
     let oid = git2::Oid::from_str(sha).ok()?;
-    let (tip, raw, _subject, step_md) = read_commit_data(&repo, oid)?;
-    snapshot_from_data(tip, &raw, &step_md)
+    let (tip, raw, _subject) = read_commit_data(&repo, oid)?;
+    snapshot_from_data(tip, &raw)
 }
 
-fn snapshot_from_data(tip: String, raw: &[u8], step_md: &HashMap<i32, String>) -> Option<BranchSnapshotData> {
+fn snapshot_from_data(tip: String, raw: &[u8]) -> Option<BranchSnapshotData> {
     let parsed: RawList = serde_json::from_slice(raw).ok()?;
-    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]), step_md);
+    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]));
     Some(BranchSnapshotData {
         tip,
         title: parsed.title.unwrap_or_default(),
@@ -364,7 +297,7 @@ pub async fn project_pushed_commit(
     // git2-объекты не Send и блокируют поток → всё git-чтение в spawn_blocking,
     // наружу только owned-данные.
     let bare_read = bare.to_path_buf();
-    let Some((tip, raw, subject, step_md)) =
+    let Some((tip, raw, subject)) =
         tokio::task::spawn_blocking(move || read_tip(&bare_read)).await.map_err(join_err)?
     else {
         return Ok(None);
@@ -386,7 +319,7 @@ pub async fn project_pushed_commit(
         if stripped.trim().is_empty() { "pushed via git".to_string() } else { stripped }
     };
 
-    let steps = parse_steps(steps_raw, &step_md);
+    let steps = parse_steps(steps_raw);
 
     let ver = db::add_version(pool, template_id, &note, &steps).await?;
     // Мета и тег — вторичны: их сбой не отменяет созданную версию, но виден в логе.
@@ -418,9 +351,8 @@ pub async fn project_pushed_commit(
 
 #[cfg(test)]
 mod tests {
-    use super::{ParsedStepMd, RawStep, parse_step_md, parse_steps, strip_v_prefix};
+    use super::{RawStep, parse_steps, readme_from_canon, strip_v_prefix};
     use crate::git::bundle::{SerStep, StepRef};
-    use std::collections::HashMap;
 
     #[test]
     fn strips_vn_prefix() {
@@ -433,8 +365,9 @@ mod tests {
         assert_eq!(strip_v_prefix("v: x"), "v: x"); // «v» без цифр — не префикс версии
     }
 
-    // ── parse_steps: правила набора/фильтрации/оверрайдов (cargo-mutants 2026-07-20
-    // показал, что они не были покрыты напрямую) ──────────────────────────────
+    // ── parse_steps: правила набора/фильтрации ────────────────────────────────
+    // Ф2b: пер-шаговых md-оверрайдов больше нет — steps/*.md удалены из формата,
+    // list.json единственный вход; их тесты ушли вместе с фичей (см. коммит).
 
     fn raw(n: Option<i32>, ty: Option<&str>, title: &str) -> RawStep {
         RawStep {
@@ -459,53 +392,14 @@ mod tests {
     #[test]
     fn parse_steps_filters_untitled_steps_but_keeps_blocks() {
         // Шаг без title — мусор, выбрасывается; text-блок без title валиден.
-        let steps = parse_steps(
-            &[raw(Some(1), None, ""), raw(Some(2), Some("text"), ""), raw(Some(3), None, "Kept")],
-            &HashMap::new(),
-        );
+        let steps = parse_steps(&[
+            raw(Some(1), None, ""),
+            raw(Some(2), Some("text"), ""),
+            raw(Some(3), None, "Kept"),
+        ]);
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].block_type, "text");
         assert_eq!(steps[1].title, "Kept");
-    }
-
-    #[test]
-    fn parse_steps_md_override_keyed_by_orig_n_and_steps_only() {
-        // Ключ оверрайда — номер шага из list.json (n, при отсутствии — позиция+1),
-        // НЕ позиция после фильтрации; на не-step блоки оверрайд не действует.
-        let md = HashMap::from([
-            (3, "---\ntitle: \"Overridden\"\nlevel: required\n---\n\nnew desc\n".to_string()),
-            (2, "---\ntitle: \"Block override must be ignored\"\nlevel: required\n---\n".to_string()),
-        ]);
-        let steps = parse_steps(
-            &[raw(Some(1), None, ""), raw(Some(2), Some("text"), ""), raw(Some(3), None, "Orig")],
-            &md,
-        );
-        assert_eq!(steps.len(), 2);
-        assert_eq!(steps[0].block_type, "text", "блок не тронут оверрайдом");
-        assert_eq!(steps[1].title, "Overridden", "оверрайд нашёл шаг по orig_n=3");
-        assert_eq!(steps[1].desc, "new desc");
-    }
-
-    #[test]
-    fn parse_steps_ignores_empty_md_title_and_missing_fields() {
-        // Пустой title в .md не перекрывает list.json; отсутствующие в .md поля
-        // (command без front-matter-строки) остаются из list.json.
-        let md = HashMap::from([(1, "---\ntitle: \"\"\nlevel: required\n---\n\nonly desc\n".to_string())]);
-        let mut base = raw(Some(1), None, "Keep me");
-        base.command = Some("keep-cmd".into());
-        let steps = parse_steps(&[base], &md);
-        assert_eq!(steps[0].title, "Keep me", "пустой md-title игнорируется");
-        assert_eq!(steps[0].desc, "only desc", "desc из md применён");
-        assert_eq!(steps[0].command, "keep-cmd", "command не тронут (нет в md)");
-    }
-
-    #[test]
-    fn parse_steps_positional_n_when_absent() {
-        // Без поля n ключ оверрайда — позиция в list.json (idx+1).
-        let md =
-            HashMap::from([(2, "---\ntitle: \"Second overridden\"\nlevel: required\n---\n".to_string())]);
-        let steps = parse_steps(&[raw(None, None, "One"), raw(None, None, "Two")], &md);
-        assert_eq!(steps[1].title, "Second overridden");
     }
 
     fn ser(title: &str, desc: &str, command: &str) -> SerStep {
@@ -528,85 +422,8 @@ mod tests {
         }
     }
 
-    // Генерирует контент .md ровно так, как это делает version_files (bundle::step_file).
-    fn gen_md(s: &SerStep) -> String {
-        crate::git::bundle::version_files(&crate::git::bundle::VersionData {
-            version: 1,
-            note: String::new(),
-            ts: 0,
-            title: "L".into(),
-            desc: String::new(),
-            tags: vec![],
-            ordered: true,
-            kind: None,
-            steps: vec![SerStep {
-                n: s.n,
-                block_type: None,
-                content: serde_json::Value::Null,
-                block_id: None,
-                title: s.title.clone(),
-                desc: s.desc.clone(),
-                command: s.command.clone(),
-                image_key: None,
-                level: s.level.clone(),
-                needs_human: false,
-                needs_human_ask: None,
-                why: s.why.clone(),
-                section: s.section.clone(),
-                subtasks: s.subtasks.clone(),
-                refs: s.refs.iter().map(|r| StepRef { label: r.label.clone(), url: r.url.clone() }).collect(),
-            }],
-        })
-        .into_iter()
-        .find(|(p, _)| p.starts_with("steps/"))
-        .unwrap()
-        .1
-    }
-
-    #[test]
-    fn roundtrip_recovers_title_desc_command() {
-        // generate → parse обязан вернуть исходные title/desc/command.
-        let step = ser("Install Redis", "Grab the binary\nand run it", "brew install redis");
-        let md = gen_md(&step);
-        let p = parse_step_md(&md);
-        assert_eq!(p.title.as_deref(), Some("Install Redis"));
-        assert_eq!(p.desc.as_deref(), Some("Grab the binary\nand run it"));
-        assert_eq!(p.command.as_deref(), Some("brew install redis"));
-    }
-
-    #[test]
-    fn roundtrip_stable_without_desc_or_command() {
-        // Пустые desc/command → в файле их нет → parse отдаёт None (берём из list.json).
-        let step = ser("Just a title", "", "");
-        let md = gen_md(&step);
-        let p = parse_step_md(&md);
-        assert_eq!(p.title.as_deref(), Some("Just a title"));
-        assert_eq!(p.desc, None);
-        assert_eq!(p.command, None);
-    }
-
-    #[test]
-    fn modified_md_overrides_listjson() {
-        // Пользователь отредактировал .md: изменённые поля должны отличаться от list.json.
-        let orig = ser("Old title", "old desc", "old cmd");
-        let mut edited = orig;
-        edited.title = "New title".into();
-        edited.desc = "new desc".into();
-        edited.command = "new cmd".into();
-        let p = parse_step_md(&gen_md(&edited));
-        assert_eq!(p.title.as_deref(), Some("New title"));
-        assert_eq!(p.desc.as_deref(), Some("new desc"));
-        assert_eq!(p.command.as_deref(), Some("new cmd"));
-    }
-
-    // ── Разбор list.json: перенос покрытия из TS (parseList) перед Ф0b ──────
-
-    /// Round-trip: сериализованная версия читается обратно тем же составом —
-    /// и шаги, и презентационные блоки с их payload.
-    #[test]
-    fn list_json_round_trips_steps_and_blocks() {
-        use crate::git::bundle::{VersionData, version_files};
-        let v = VersionData {
+    fn ver(steps: Vec<SerStep>) -> crate::git::bundle::VersionData {
+        crate::git::bundle::VersionData {
             version: 4,
             note: String::new(),
             ts: 0,
@@ -615,18 +432,28 @@ mod tests {
             tags: vec!["t".into()],
             ordered: true,
             kind: None,
-            steps: vec![
-                ser("First", "do it", "echo hi"),
-                SerStep {
-                    n: 2,
-                    block_type: Some("text".into()),
-                    content: serde_json::json!({ "md": "note" }),
-                    ..ser("", "", "")
-                },
-            ],
-        };
+            steps,
+        }
+    }
+
+    // ── Разбор list.json: перенос покрытия из TS (parseList) перед Ф0b ──────
+
+    /// Round-trip: сериализованная версия читается обратно тем же составом —
+    /// и шаги, и презентационные блоки с их payload.
+    #[test]
+    fn list_json_round_trips_steps_and_blocks() {
+        use crate::git::bundle::version_files;
+        let v = ver(vec![
+            ser("First", "do it", "echo hi"),
+            SerStep {
+                n: 2,
+                block_type: Some("text".into()),
+                content: serde_json::json!({ "md": "note" }),
+                ..ser("", "", "")
+            },
+        ]);
         let raw = version_files(&v).into_iter().find(|(p, _)| p == "list.json").unwrap().1;
-        let snap = super::snapshot_from_data("sha".into(), raw.as_bytes(), &HashMap::new()).expect("снапшот");
+        let snap = super::snapshot_from_data("sha".into(), raw.as_bytes()).expect("снапшот");
 
         assert_eq!((snap.title.as_str(), snap.desc.as_str(), snap.ordered), ("L", "D", true));
         assert_eq!(snap.tags, vec!["t".to_string()]);
@@ -644,21 +471,44 @@ mod tests {
     /// приехать пушем, и пустой снапшот честнее отказа «ветки нет».
     #[test]
     fn list_json_garbage_is_rejected_but_empty_object_is_empty_snapshot() {
-        assert!(super::snapshot_from_data("s".into(), b"not json", &HashMap::new()).is_none());
-        assert!(
-            super::snapshot_from_data("s".into(), b"[]", &HashMap::new()).is_none(),
-            "массив — не список"
-        );
+        assert!(super::snapshot_from_data("s".into(), b"not json").is_none());
+        assert!(super::snapshot_from_data("s".into(), b"[]").is_none(), "массив — не список");
 
-        let empty = super::snapshot_from_data("s".into(), b"{}", &HashMap::new()).expect("пустой объект");
+        let empty = super::snapshot_from_data("s".into(), b"{}").expect("пустой объект");
         assert!(empty.title.is_empty() && empty.steps.is_empty());
         assert!(empty.ordered, "по умолчанию список упорядоченный");
     }
 
+    // ── Ф2b: витрина из канона ────────────────────────────────────────────────
+
+    /// ПАРИТЕТ ДВУХ ПУТЕЙ README: витрина, пересобранная из канона (пути записи
+    /// готового list.json — ветка, ручной резолв), обязана быть байт-в-байт той
+    /// же, что у материализации версии. Иначе README снова начнёт жить двумя
+    /// жизнями — ровно от этого Ф2b и избавляется.
     #[test]
-    fn parse_handles_unusual_content() {
-        // Мусор/без front-matter → безопасно: title/command None, тело как desc.
-        let p = parse_step_md("no front matter here");
-        assert_eq!(p, ParsedStepMd { title: None, desc: Some("no front matter here".into()), command: None });
+    fn readme_из_канона_совпадает_с_материализацией() {
+        let v = ver(vec![
+            ser("First", "do it", "echo hi"),
+            SerStep {
+                n: 2,
+                block_type: Some("image".into()),
+                content: serde_json::json!({ "ref": "https://img/x.png", "caption": "вид" }),
+                ..ser("", "", "")
+            },
+        ]);
+        let files = crate::git::bundle::version_files(&v);
+        let canon = &files.iter().find(|(p, _)| p == "list.json").unwrap().1;
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert_eq!(
+            readme_from_canon(canon.as_bytes()).as_deref(),
+            Some(readme.as_str()),
+            "две дороги к README обязаны сходиться"
+        );
+    }
+
+    /// Битый канон витрину не трогает (None), а не подменяет её пустышкой.
+    #[test]
+    fn битый_канон_не_даёт_readme() {
+        assert_eq!(readme_from_canon(b"not json"), None);
     }
 }
