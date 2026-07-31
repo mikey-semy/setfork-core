@@ -97,18 +97,28 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
         Err(e) => return Verdict::Unavailable(format!("запрос не собрался: {e}")),
     };
 
-    let resp = match tokio::time::timeout(TIMEOUT, client().request(req)).await {
-        Ok(Ok(r)) => r,
-        Ok(Err(e)) => return Verdict::Unavailable(format!("приложение недоступно: {e}")),
-        Err(_) => return Verdict::Unavailable(format!("приложение не ответило за {TIMEOUT:?}")),
+    // Таймаут накрывает ВЕСЬ обмен, а не только получение заголовков: future от
+    // `client().request()` резолвится, как только пришла «голова» ответа, тело
+    // читается лениво. Если таймаут стоит только на нём, приложение, отдавшее
+    // заголовки и залипшее на теле, держит push бесконечно — и держит репо-лок
+    // вместе с ним (авто-ревью core#71, P1).
+    let exchange = async {
+        let resp = match client().request(req).await {
+            Ok(r) => r,
+            Err(e) => return Verdict::Unavailable(format!("приложение недоступно: {e}")),
+        };
+        let status = resp.status();
+        if !status.is_success() {
+            return Verdict::Unavailable(format!("приложение ответило {status}"));
+        }
+        match resp.into_body().collect().await {
+            Ok(b) => parse_verdict(&b.to_bytes()),
+            Err(e) => Verdict::Unavailable(format!("тело вердикта не прочиталось: {e}")),
+        }
     };
-    let status = resp.status();
-    if !status.is_success() {
-        return Verdict::Unavailable(format!("приложение ответило {status}"));
-    }
-    match resp.into_body().collect().await {
-        Ok(b) => parse_verdict(&b.to_bytes()),
-        Err(e) => Verdict::Unavailable(format!("тело вердикта не прочиталось: {e}")),
+    match tokio::time::timeout(TIMEOUT, exchange).await {
+        Ok(v) => v,
+        Err(_) => Verdict::Unavailable(format!("приложение не ответило за {TIMEOUT:?}")),
     }
 }
 

@@ -27,6 +27,16 @@ struct Stub {
 impl Stub {
     /// `reply` — готовый HTTP-ответ целиком (статус + заголовки + тело).
     fn start(reply: &'static str) -> Stub {
+        Stub::start_inner(reply, false)
+    }
+
+    /// Отдаёт ЗАГОЛОВКИ, обещает тело и залипает, не дослав его. Самый коварный
+    /// вид недоступности: соединение живо, ответ «начался», а конца нет.
+    fn start_stalling(head: &'static str) -> Stub {
+        Stub::start_inner(head, true)
+    }
+
+    fn start_inner(reply: &'static str, stall: bool) -> Stub {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = format!("http://{}", listener.local_addr().expect("addr"));
         let stop = Arc::new(AtomicBool::new(false));
@@ -38,6 +48,11 @@ impl Stub {
                 }
                 let Ok(mut s) = stream else { continue };
                 serve_one(&mut s, reply);
+                if stall {
+                    // Держим соединение открытым дольше таймаута гейта: закрыть
+                    // его значило бы проверить обрыв, а не залипание.
+                    std::thread::sleep(std::time::Duration::from_secs(20));
+                }
             }
         });
         Stub { addr, stop, handle: Some(handle) }
@@ -143,4 +158,25 @@ async fn недоступное_приложение_останавливает_
     };
     let err = ensure_writable_at(&addr, "mike", "list").await.expect_err("недоступность не пропускает");
     assert_eq!(err.code(), tonic::Code::Unavailable);
+}
+
+/// Регрессия P1 авто-ревью core#71: заголовки пришли, тело залипло.
+///
+/// Таймаут стоял только на `client().request()`, а тот резолвится по приходу
+/// «головы» ответа — тело читается лениво. Приложение, отдавшее заголовки и
+/// замолчавшее, держало бы push бесконечно, вместе с репо-локом. Тест ждёт
+/// реальные 5 секунд конфигурации: проверяем настоящее поведение, а не
+/// подкрученное под тест.
+#[tokio::test]
+async fn залипшее_тело_ответа_не_держит_запись_вечно() {
+    let stub = Stub::start_stalling(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n",
+    );
+    let started = std::time::Instant::now();
+    let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("залипание не пропускает");
+    assert_eq!(err.code(), tonic::Code::Unavailable);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(15),
+        "отказ пришёл по таймауту, а не по обрыву"
+    );
 }
