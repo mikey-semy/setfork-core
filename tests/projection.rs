@@ -99,7 +99,10 @@ async fn pushed_commit_projects_new_version_and_tag() {
     });
     std::fs::write(work.join("list.json"), serde_json::to_string_pretty(&list_json).unwrap())
         .expect("write list.json");
-    // md-оверрайд шага 1: title из .md должен перекрыть list.json (правило parse_steps).
+    // Ф2b: steps/*.md удалены из формата. Пользователь может создать такой файл
+    // руками — проекция обязана его ИГНОРИРОВАТЬ (list.json — единственный вход),
+    // а не молча переопределять поля.
+    std::fs::create_dir_all(work.join("steps")).expect("mkdir steps");
     std::fs::write(
         work.join("steps").join("01-first.md"),
         "---\ntitle: \"First (edited)\"\nlevel: required\n---\n\noverridden desc\n",
@@ -136,7 +139,7 @@ async fn pushed_commit_projects_new_version_and_tag() {
     .await
     .expect("steps of v2");
     assert_eq!(steps.len(), 2);
-    assert_eq!(steps[0].1["en"], "First (edited)", "md-оверрайд перекрыл title из list.json");
+    assert_eq!(steps[0].1["en"], "First", "рукотворный steps/*.md игнорируется (Ф2b): title из list.json");
     assert_eq!(steps[1].1["en"], "Second");
     assert_eq!(steps[1].2, "echo 2");
     assert_eq!(steps[1].3, "optional");
@@ -148,7 +151,7 @@ async fn pushed_commit_projects_new_version_and_tag() {
     let snap = project::branch_snapshot(&bare, "refs/heads/main").expect("snapshot");
     assert_eq!(snap.title, "Pushed List v2");
     assert_eq!(snap.steps.len(), 2);
-    assert_eq!(snap.steps[0].title, "First (edited)");
+    assert_eq!(snap.steps[0].title, "First", "снапшот тоже читает только list.json (Ф2b)");
 
     // Повторная проекция того же tip'а — создаёт v3 (семантика reproject:
     // инструмент оператора не проверяет дубли; фиксируем осознанно).

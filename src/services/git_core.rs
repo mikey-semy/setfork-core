@@ -382,6 +382,14 @@ fn commit_resolved(
     let blob = repo.blob(list_json).map_err(internal)?;
     let mut tb = repo.treebuilder(Some(&ours.tree().map_err(internal)?)).map_err(internal)?;
     tb.insert("list.json", blob, 0o100644).map_err(internal)?;
+    // Витрина соответствует канону (Ф2b): README перегенерируется из нового
+    // list.json — раньше он тащился старым блобом и протухал до веб-версии.
+    if let Some(readme) = project::readme_from_canon(list_json) {
+        let rb = repo.blob(readme.as_bytes()).map_err(internal)?;
+        tb.insert("README.md", rb, 0o100644).map_err(internal)?;
+    }
+    let ab = repo.blob(serialize::GITATTRIBUTES.as_bytes()).map_err(internal)?;
+    tb.insert(".gitattributes", ab, 0o100644).map_err(internal)?;
     if tb.get("steps").map_err(internal)?.is_some() {
         tb.remove("steps").map_err(internal)?;
     }
@@ -1306,6 +1314,31 @@ mod squash_tests {
 
         let err = commit_resolved(&repo, "нет-такой", br#"{"steps":[]}"#, true, "x").expect_err("нет ветки");
         assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    /// Ф2b: ручной резолв оставляет витрину свежей — README из нового канона.
+    #[test]
+    fn резолв_перегенерирует_readme_из_канона() {
+        let (_t, repo) = bare();
+        main_and_branch(&repo);
+        let canon = crate::git::serialize::list_json(&crate::git::bundle::VersionData {
+            version: 3,
+            note: String::new(),
+            ts: 0,
+            title: "Resolved title".into(),
+            desc: String::new(),
+            tags: vec![],
+            ordered: true,
+            kind: None,
+            steps: vec![],
+        });
+        let sha = commit_resolved(&repo, "pr-1", canon.as_bytes(), true, "x").expect("резолв");
+        let tree = commit_at(&repo, &sha).tree().expect("tree");
+        let readme = tree.get_path(std::path::Path::new("README.md")).expect("README есть");
+        let readme =
+            String::from_utf8(repo.find_blob(readme.id()).expect("blob").content().to_vec()).expect("utf8");
+        assert!(readme.contains("# Resolved title"), "витрина из нового канона: {readme}");
+        assert!(tree.get_path(std::path::Path::new(".gitattributes")).is_ok());
     }
 
     #[test]

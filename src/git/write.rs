@@ -68,8 +68,17 @@ pub fn commit_list_json(
     let blob = repo.blob(list_json)?;
     let mut tb = repo.treebuilder(Some(&tree))?;
     tb.insert("list.json", blob, 0o100644)?;
-    // steps/ — материализация старой формы. Канон разрешённых шагов — list.json,
-    // и оставленный каталог разошёлся бы с ним (так же поступает merge_resolved).
+    // Витрина обязана соответствовать канону (Ф2b): раньше README тащился старым
+    // блобом и протухал до следующей веб-версии. Битый канон README не трогает —
+    // но наши пути пишут только собранный ядром, он всегда разбирается.
+    if let Some(readme) = super::project::readme_from_canon(list_json) {
+        let rb = repo.blob(readme.as_bytes())?;
+        tb.insert("README.md", rb, 0o100644)?;
+    }
+    let ab = repo.blob(super::serialize::GITATTRIBUTES.as_bytes())?;
+    tb.insert(".gitattributes", ab, 0o100644)?;
+    // steps/ — материализация старой формы (удалена из формата в Ф2b); у старых
+    // деревьев каталог вычищается при первой же записи.
     if tb.get("steps")?.is_some() {
         tb.remove("steps")?;
     }
@@ -212,6 +221,43 @@ mod tests {
         let WriteOutcome::Committed(sha) = out else { panic!("ожидался коммит") };
         let commit = repo.find_commit(git2::Oid::from_str(&sha).expect("oid")).expect("commit");
         assert_eq!(commit.author().email().expect("email"), "m@example.com");
+    }
+
+    /// Ф2b: витрина не протухает — после записи канона в ветку README и
+    /// .gitattributes соответствуют новому list.json, steps/ вычищен.
+    #[test]
+    fn readme_перегенерируется_вместе_с_каноном() {
+        let (_t, repo) = bare();
+        seed(&repo, "pr-1", b"{\"steps\":[]}", true);
+
+        let canon = crate::git::serialize::list_json(&crate::git::bundle::VersionData {
+            version: 2,
+            note: String::new(),
+            ts: 0,
+            title: "Fresh title".into(),
+            desc: String::new(),
+            tags: vec![],
+            ordered: true,
+            kind: None,
+            steps: vec![],
+        });
+        let out = commit_list_json(&repo, "pr-1", canon.as_bytes(), "", "", None).expect("write");
+        let WriteOutcome::Committed(sha) = out else { panic!("ожидался коммит") };
+        let tree = repo.find_commit(git2::Oid::from_str(&sha).unwrap()).unwrap().tree().unwrap();
+
+        let readme_entry = tree.get_path(std::path::Path::new("README.md")).expect("README есть");
+        let readme =
+            String::from_utf8(repo.find_blob(readme_entry.id()).unwrap().content().to_vec()).unwrap();
+        assert!(readme.contains("# Fresh title"), "витрина из НОВОГО канона: {readme}");
+        assert_eq!(
+            readme,
+            crate::git::project::readme_from_canon(canon.as_bytes()).expect("канон читается"),
+            "README в дереве — ровно перегенерированный из канона"
+        );
+        let ga = tree.get_path(std::path::Path::new(".gitattributes")).expect(".gitattributes есть");
+        let ga = String::from_utf8(repo.find_blob(ga.id()).unwrap().content().to_vec()).unwrap();
+        assert!(ga.contains("linguist-generated"), "{ga}");
+        assert!(tree.get_path(std::path::Path::new("steps")).is_err(), "steps/ вычищен");
     }
 
     #[test]
