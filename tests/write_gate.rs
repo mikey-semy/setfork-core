@@ -14,6 +14,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use setfork_core::gate::ensure_writable_at;
+use setfork_core::reason::REASON_KEY;
+
+/// Причина отказа из трейлера — то, по чему клиент различает случаи (И1).
+fn reason_of(s: &tonic::Status) -> Option<&str> {
+    s.metadata().get(REASON_KEY).and_then(|v| v.to_str().ok())
+}
 
 /// Односвязный HTTP-сервер-заглушка: отдаёт заданный ответ и живёт до `stop`.
 /// Свой, а не библиотечный: нужен ровно один эндпоинт и полный контроль над
@@ -117,14 +123,15 @@ async fn причина_отказа_доезжает() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":false,"reason":"frozen"}"#).into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("должен быть отказ");
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
-    assert_eq!(err.message(), "frozen");
+    // Причина — в трейлере (И1); текст сообщения клиент больше не разбирает.
+    assert_eq!(reason_of(&err), Some("FROZEN"));
 }
 
 #[tokio::test]
 async fn архив_отличим_от_заморозки() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":false,"reason":"archived"}"#).into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("отказ");
-    assert_eq!(err.message(), "archived");
+    assert_eq!(reason_of(&err), Some("ARCHIVED"));
 }
 
 #[tokio::test]

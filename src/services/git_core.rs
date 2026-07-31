@@ -2,7 +2,9 @@
 //! ветки/теги/merge, bundle. Обслуживает proto/git.proto (setfork.git.v1).
 use sqlx::postgres::PgPool;
 use std::path::PathBuf;
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
+
+use crate::reason::{self, Reason};
 use uuid::Uuid;
 
 use super::util::{db_status, internal};
@@ -88,7 +90,7 @@ impl GitCoreSvc {
         let (id, _v) = db::resolve_list(&self.pool, owner, slug)
             .await
             .map_err(db_status)?
-            .ok_or_else(|| Status::not_found("list not found"))?;
+            .ok_or_else(|| reason::status(Code::NotFound, Reason::NotFound, "list not found"))?;
         db::load_bundle_data(&self.pool, id).await.map_err(db_status)
     }
 
@@ -107,7 +109,7 @@ impl GitCoreSvc {
         repo::ensure_repo(&self.pool, owner, slug)
             .await
             .map_err(db_status)?
-            .ok_or_else(|| Status::not_found("list not found"))
+            .ok_or_else(|| reason::status(Code::NotFound, Reason::NotFound, "list not found"))
     }
 }
 
@@ -198,17 +200,23 @@ fn merge_sig() -> Result<git2::Signature<'static>, Status> {
 /// CAS честный); NonFastForward под локом означает сломанный инвариант кода.
 fn main_status(e: MainUpdateError) -> Status {
     match e {
-        MainUpdateError::MissingListJson => {
-            Status::failed_precondition("list.json is required at the repo root")
-        }
+        MainUpdateError::MissingListJson => reason::status(
+            Code::FailedPrecondition,
+            Reason::MissingListJson,
+            "list.json is required at the repo root",
+        ),
         // Как и MissingListJson — «пользовательский» случай: дерево собрано не по
         // формату. Текст несёт сам путь, иначе отказ нечего показать человеку.
         // По-английски — как ВСЕ остальные Status в ядре: их читает фронт и
         // переводит сам; язык пользователя ядру неизвестен.
-        MainUpdateError::ForeignPath(p) => Status::failed_precondition(format!(
-            "only README.md, list.json and .gitattributes are allowed in the list tree; foreign path: {p}"
-        )),
-        MainUpdateError::Stale => Status::aborted("main moved concurrently"),
+        MainUpdateError::ForeignPath(p) => reason::status(
+            Code::FailedPrecondition,
+            Reason::ForeignPath,
+            format!(
+                "only README.md, list.json and .gitattributes are allowed in the list tree; foreign path: {p}"
+            ),
+        ),
+        MainUpdateError::Stale => reason::status(Code::Aborted, Reason::Stale, "main moved concurrently"),
         MainUpdateError::NonFastForward => {
             Status::internal("non-fast-forward update of main (invariant breach)")
         }
@@ -421,10 +429,14 @@ fn commit_resolved(
 ) -> Result<String, Status> {
     let branch_tip = repo
         .refname_to_id(&format!("refs/heads/{branch}"))
-        .map_err(|_| Status::not_found("branch not found"))?;
+        .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "branch not found"))?;
     let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
     if main_tip == branch_tip {
-        return Err(Status::failed_precondition("nothing-to-merge"));
+        return Err(reason::status(
+            Code::FailedPrecondition,
+            Reason::NothingToMerge,
+            "branch is not ahead of base",
+        ));
     }
     let ours = repo.find_commit(main_tip).map_err(internal)?;
     let theirs = repo.find_commit(branch_tip).map_err(internal)?;
@@ -554,11 +566,15 @@ impl GitCore for GitCoreSvc {
             metrics::gauge!("repo_bytes").set(size as f64);
             if size > limit {
                 // По-английски — как все Status в ядре (перевод за фронтом).
-                return Err(Status::resource_exhausted(format!(
-                    "list repository is {} MB, over the {} MB limit; pushes are stopped",
-                    size / (1024 * 1024),
-                    limit / (1024 * 1024)
-                )));
+                return Err(reason::status(
+                    Code::ResourceExhausted,
+                    Reason::RepoTooLarge,
+                    format!(
+                        "list repository is {} MB, over the {} MB limit; pushes are stopped",
+                        size / (1024 * 1024),
+                        limit / (1024 * 1024)
+                    ),
+                ));
             }
         }
         let bare_recv = bare.clone();
@@ -592,7 +608,7 @@ impl GitCore for GitCoreSvc {
         let data = repo::bundle_repo(&self.pool, &owner, &slug)
             .await
             .map_err(db_status)?
-            .ok_or_else(|| Status::not_found("list not found"))?;
+            .ok_or_else(|| reason::status(Code::NotFound, Reason::NotFound, "list not found"))?;
         Ok(Response::new(BytesResponse { data }))
     }
 
@@ -641,7 +657,7 @@ impl GitCore for GitCoreSvc {
         let BranchSnapshotRequest { repo, branch } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         if !valid_branch(&branch) {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
         let refname = format!("refs/heads/{branch}");
@@ -664,19 +680,21 @@ impl GitCore for GitCoreSvc {
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         let from = if from.is_empty() { "main".to_string() } else { from };
         if !valid_branch(&name) || !valid_branch(&from) {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
         let tip = with_repo(bare, move |repo| {
             let base = repo
                 .refname_to_id(&format!("refs/heads/{from}"))
-                .map_err(|_| Status::not_found("base branch not found"))?;
+                .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "base branch not found"))?;
             let commit = repo.find_commit(base).map_err(internal)?;
             // force=false: существующая ветка → ошибка (already_exists наружу).
             // .map(|_| ()) сразу дропает Branch<'_> (заимствует repo).
             match repo.branch(&name, &commit, false).map(|_| ()) {
                 Ok(()) => Ok(base.to_string()),
-                Err(e) if e.code() == git2::ErrorCode::Exists => Err(Status::already_exists("branch exists")),
+                Err(e) if e.code() == git2::ErrorCode::Exists => {
+                    Err(reason::status(Code::AlreadyExists, Reason::Exists, "branch exists"))
+                }
                 Err(e) => Err(internal(e)),
             }
         })
@@ -693,16 +711,16 @@ impl GitCore for GitCoreSvc {
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&name) {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         if name == "main" {
-            return Err(Status::failed_precondition("main is protected"));
+            return Err(reason::status(Code::FailedPrecondition, Reason::Protected, "main is protected"));
         }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
         with_repo(bare, move |repo| {
             let mut branch = repo
                 .find_branch(&name, git2::BranchType::Local)
-                .map_err(|_| Status::not_found("branch not found"))?;
+                .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "branch not found"))?;
             branch.delete().map_err(internal)
         })
         .await?;
@@ -719,7 +737,7 @@ impl GitCore for GitCoreSvc {
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&name) || name == "main" {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Merge двигает main → критическая секция с проекцией (как receive_pack).
@@ -727,11 +745,15 @@ impl GitCore for GitCoreSvc {
         let (tip, ff) = with_repo(bare.clone(), move |repo| {
             let branch_tip = repo
                 .refname_to_id(&format!("refs/heads/{name}"))
-                .map_err(|_| Status::not_found("branch not found"))?;
+                .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "branch not found"))?;
             let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
             let (ahead, _behind) = repo.graph_ahead_behind(branch_tip, main_tip).map_err(internal)?;
             if ahead == 0 {
-                return Err(Status::failed_precondition("nothing-to-merge"));
+                return Err(reason::status(
+                    Code::FailedPrecondition,
+                    Reason::NothingToMerge,
+                    "branch is not ahead of base",
+                ));
             }
             // SQUASH: один коммит с ОДНИМ родителем (main). История ветки в main
             // не уезжает — это и есть смысл режима. Вклад авторов не теряется:
@@ -747,7 +769,11 @@ impl GitCore for GitCoreSvc {
                 // и дерево ветки откатило бы чужие изменения.
                 let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
                 if idx.has_conflicts() {
-                    return Err(Status::failed_precondition("conflict"));
+                    return Err(reason::status(
+                        Code::FailedPrecondition,
+                        Reason::Conflict,
+                        "merge does not apply cleanly",
+                    ));
                 }
                 let tree_id = idx.write_tree_to(repo).map_err(internal)?;
                 let tree = repo.find_tree(tree_id).map_err(internal)?;
@@ -774,7 +800,11 @@ impl GitCore for GitCoreSvc {
             let theirs = repo.find_commit(branch_tip).map_err(internal)?;
             let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
             if idx.has_conflicts() {
-                return Err(Status::failed_precondition("conflict"));
+                return Err(reason::status(
+                    Code::FailedPrecondition,
+                    Reason::Conflict,
+                    "merge does not apply cleanly",
+                ));
             }
             let tree_id = idx.write_tree_to(repo).map_err(internal)?;
             let tree = repo.find_tree(tree_id).map_err(internal)?;
@@ -801,7 +831,7 @@ impl GitCore for GitCoreSvc {
         // Гейта записи здесь НЕТ намеренно: это чтение — три материализации для
         // сравнения. Смотреть на замороженный список можно, менять нельзя.
         if !valid_branch(&branch) || branch == "main" {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
         let state = tokio::task::spawn_blocking(move || -> Result<Option<(String, project::BranchSnapshotData, project::BranchSnapshotData, project::BranchSnapshotData)>, String> {
@@ -846,7 +876,7 @@ impl GitCore for GitCoreSvc {
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&branch) || branch == "main" {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Канон собирает ядро: содержимое — из запроса, kind и надстройки блоков
@@ -871,12 +901,12 @@ impl GitCore for GitCoreSvc {
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_tag(&name) {
-            return Err(Status::invalid_argument("bad tag name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad tag name"));
         }
         // Отдельным кодом от «плохого имени»: имя корректно, но принадлежит версиям.
         // Клиенту нужно показать РАЗНЫЕ подсказки, поэтому и сообщения разные.
         if is_version_tag(&name) {
-            return Err(Status::invalid_argument("reserved tag name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::ReservedTagName, "reserved tag name"));
         }
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
         let sha = with_repo(bare, move |repo| {
@@ -933,7 +963,7 @@ impl GitCore for GitCoreSvc {
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&name) || name == "main" {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Под тем же локом, что merge/push: tip ветки нельзя читать до захвата —
@@ -941,12 +971,17 @@ impl GitCore for GitCoreSvc {
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let (tip, ff) = with_repo(bare, move |repo| {
             let branch_ref = format!("refs/heads/{name}");
-            let branch_tip =
-                repo.refname_to_id(&branch_ref).map_err(|_| Status::not_found("branch not found"))?;
+            let branch_tip = repo
+                .refname_to_id(&branch_ref)
+                .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "branch not found"))?;
             let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
             // Ветка уже содержит main → обновлять нечего.
             if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) || branch_tip == main_tip {
-                return Err(Status::failed_precondition("nothing-to-merge"));
+                return Err(reason::status(
+                    Code::FailedPrecondition,
+                    Reason::NothingToMerge,
+                    "branch is not ahead of base",
+                ));
             }
             // Ветка — предок main (в ней нет своих коммитов) → просто двигаем ref.
             if repo.graph_descendant_of(main_tip, branch_tip).unwrap_or(false) {
@@ -965,7 +1000,11 @@ impl GitCore for GitCoreSvc {
             let theirs = repo.find_commit(main_tip).map_err(internal)?;
             let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
             if idx.has_conflicts() {
-                return Err(Status::failed_precondition("conflict"));
+                return Err(reason::status(
+                    Code::FailedPrecondition,
+                    Reason::Conflict,
+                    "merge does not apply cleanly",
+                ));
             }
             let tree_id = idx.write_tree_to(repo).map_err(internal)?;
             let tree = repo.find_tree(tree_id).map_err(internal)?;
@@ -993,7 +1032,7 @@ impl GitCore for GitCoreSvc {
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&branch) || branch == "main" {
-            return Err(Status::invalid_argument("bad branch name"));
+            return Err(reason::status(Code::InvalidArgument, Reason::BadName, "bad branch name"));
         }
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Канон собирает ядро: содержимое — из запроса, kind и надстройки блоков
@@ -1009,8 +1048,14 @@ impl GitCore for GitCoreSvc {
             match write::commit_list_json(repo, &branch, &list_json, &message, &expected_tip, author) {
                 Ok(write::WriteOutcome::Committed(sha)) => Ok((sha, true)),
                 Ok(write::WriteOutcome::Unchanged(sha)) => Ok((sha, false)),
-                Err(write::WriteError::NotFound) => Err(Status::not_found("branch not found")),
-                Err(write::WriteError::Stale) => Err(Status::failed_precondition("stale")),
+                Err(write::WriteError::NotFound) => {
+                    Err(reason::status(Code::NotFound, Reason::NotFound, "branch not found"))
+                }
+                Err(write::WriteError::Stale) => Err(reason::status(
+                    Code::FailedPrecondition,
+                    Reason::Stale,
+                    "branch tip moved since it was read",
+                )),
                 Err(write::WriteError::Git(e)) => Err(Status::internal(e)),
             }
         })
@@ -1455,6 +1500,11 @@ mod squash_tests {
         repo.reference("refs/heads/pr-1", base, true, "ветка на main").expect("ref");
         let err = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, false, "").expect_err("nothing");
         assert_eq!(err.code(), tonic::Code::FailedPrecondition);
-        assert_eq!(err.message(), "nothing-to-merge");
+        // Сверяем ПРИЧИНУ, а не текст (И1): текст — для логов и человека, его
+        // можно менять свободно; контракт с клиентом держит трейлер.
+        assert_eq!(
+            err.metadata().get(crate::reason::REASON_KEY).and_then(|v| v.to_str().ok()),
+            Some("NOTHING_TO_MERGE")
+        );
     }
 }
