@@ -533,6 +533,8 @@ impl GitCore for GitCoreSvc {
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
         let PostRequest { repo, body, git_protocol } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Критическая секция: receive-pack + проекция под одним локом репо
         // (ленивый append не вклинивается между приёмом и проекцией).
@@ -658,6 +660,8 @@ impl GitCore for GitCoreSvc {
     ) -> Result<Response<BranchOpResponse>, Status> {
         let CreateBranchRequest { repo, name, from } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         let from = if from.is_empty() { "main".to_string() } else { from };
         if !valid_branch(&name) || !valid_branch(&from) {
             return Err(Status::invalid_argument("bad branch name"));
@@ -686,6 +690,8 @@ impl GitCore for GitCoreSvc {
     ) -> Result<Response<BranchOpResponse>, Status> {
         let DeleteBranchRequest { repo, name } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&name) {
             return Err(Status::invalid_argument("bad branch name"));
         }
@@ -710,6 +716,8 @@ impl GitCore for GitCoreSvc {
         let MergeBranchRequest { repo, name, mode, message } = req.into_inner();
         let squash = mode == "squash";
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&name) || name == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
@@ -790,6 +798,8 @@ impl GitCore for GitCoreSvc {
     ) -> Result<Response<MergeStateResponse>, Status> {
         let MergeStateRequest { repo, branch } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Гейта записи здесь НЕТ намеренно: это чтение — три материализации для
+        // сравнения. Смотреть на замороженный список можно, менять нельзя.
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
@@ -833,6 +843,8 @@ impl GitCore for GitCoreSvc {
     ) -> Result<Response<MergeBranchResponse>, Status> {
         let MergeResolvedRequest { repo, branch, content, mode, message } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
@@ -856,6 +868,8 @@ impl GitCore for GitCoreSvc {
     async fn create_tag(&self, req: Request<CreateTagRequest>) -> Result<Response<BranchOpResponse>, Status> {
         let CreateTagRequest { repo, name, version } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_tag(&name) {
             return Err(Status::invalid_argument("bad tag name"));
         }
@@ -916,6 +930,8 @@ impl GitCore for GitCoreSvc {
     ) -> Result<Response<UpdateBranchResponse>, Status> {
         let UpdateBranchRequest { repo, name } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&name) || name == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
@@ -974,6 +990,8 @@ impl GitCore for GitCoreSvc {
         let CommitToBranchRequest { repo, branch, message, expected_tip, author_name, author_email, content } =
             req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
+        crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
         if !valid_branch(&branch) || branch == "main" {
             return Err(Status::invalid_argument("bad branch name"));
         }
