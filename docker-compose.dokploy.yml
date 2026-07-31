@@ -21,6 +21,9 @@ services:
       # От инстанса: RU-прод ссылается на себя — чужой домен дал бы молча не
       # работающее автодополнение из-за шейпинга. Файл раздаёт фронт (public/schema).
       SETFORK_SCHEMA_URL: ${SETFORK_SCHEMA_URL:-https://setfork.ru/schema/list.v1.json}
+      # Ф3: общий с фронтом секрет расшифровки токена зеркала (пусто = зеркала
+      # выключены, пуш честно запишет ошибку в статус настроек).
+      SETFORK_MIRROR_SECRET: ${SETFORK_MIRROR_SECRET:-}
     volumes:
       - setfork_git:/data/git
     networks: [dokploy-network]
