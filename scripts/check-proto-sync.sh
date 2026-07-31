@@ -48,6 +48,50 @@ for f in proto/*.proto; do
   sync_file "$f" "$f"
 done
 sync_file schema/list.v1.json public/schema/list.v1.json
+
+# Причины отказа (И1): значения из src/reason.rs — контракт провода, их читает
+# фронт. Байт-в-байт сверить нельзя (там Rust-перечисление, здесь TS-таблица),
+# поэтому сверяем МНОЖЕСТВА значений. Ловим ровно ту поломку, ради которой
+# затевалось: причина добавлена в ядре и забыта во фронте — человек снова видит
+# общую ошибку вместо конкретной.
+check_reasons() {
+  local theirs='src/features/git/core.remote.ts'
+  local front_src
+  if ! front_src=$(git -C "$FRONT" show "$REF:$theirs" 2>/dev/null); then
+    echo "proto-sync: $REF:$theirs не читается — сверка причин пропущена"
+    return 0
+  fi
+  local ours_list front_list
+  ours_list=$(grep -oE 'Reason::[A-Za-z]+ => "[A-Z0-9_]+"' src/reason.rs | grep -oE '"[A-Z0-9_]+"' | tr -d '"' | sort -u)
+  front_list=$(printf '%s
+' "$front_src" | sed -n '/REASON_TO_CODE/,/^}/p' | grep -oE '^  [A-Z0-9_]+:' | tr -d ' :' | sort -u)
+  if [[ -z "$ours_list" ]]; then
+    echo "proto-sync: причины не извлеклись из src/reason.rs — проверка сломана, чини её"
+    fail=1
+    return 0
+  fi
+  local only_core only_front
+  only_core=$(comm -23 <(printf '%s
+' "$ours_list") <(printf '%s
+' "$front_list"))
+  only_front=$(comm -13 <(printf '%s
+' "$ours_list") <(printf '%s
+' "$front_list"))
+  if [[ -n "$only_core" ]]; then
+    echo "proto-sync: причины есть в ядре, но НЕ разбираются фронтом (человек увидит общую ошибку):"
+    printf '  %s
+' $only_core
+    fail=1
+  fi
+  if [[ -n "$only_front" ]]; then
+    echo "proto-sync: фронт ждёт причины, которых ядро не шлёт (мёртвые ветки разбора):"
+    printf '  %s
+' $only_front
+    fail=1
+  fi
+}
+check_reasons
+
 if [[ $fail -eq 0 ]]; then
   echo "proto-sync: OK (идентичны с $FRONT@$REF)"
 fi

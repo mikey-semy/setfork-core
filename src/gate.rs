@@ -26,7 +26,9 @@ use http_body_util::{BodyExt, Full};
 use hyper::Request;
 use hyper_util::client::legacy::{Client, connect::HttpConnector};
 use hyper_util::rt::TokioExecutor;
-use tonic::Status;
+use tonic::{Code, Status};
+
+use crate::reason::{self, Reason};
 
 /// Сколько ждём вердикт. Коротко: это внутрисетевой вызов, и залипший фронт не
 /// должен превращаться в залипший push — лучше быстрый честный отказ.
@@ -147,8 +149,13 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
         Verdict::Allow => Ok(()),
         Verdict::Deny(reason) => {
             metrics::counter!("write_gate_denied_total", "reason" => reason.clone()).increment(1);
+            // Вердикт приложения — уже машиночитаемый код; переводим его в
+            // причину провода, чтобы фронт различал заморозку и архив, а не
+            // получал общий failed_precondition (И1).
             Err(match reason.as_str() {
-                "not-found" => Status::not_found("list not found"),
+                "not-found" => reason::status(Code::NotFound, Reason::NotFound, "list not found"),
+                "frozen" => reason::status(Code::FailedPrecondition, Reason::Frozen, "list is frozen"),
+                "archived" => reason::status(Code::FailedPrecondition, Reason::Archived, "list is archived"),
                 other => Status::failed_precondition(other.to_string()),
             })
         }
@@ -156,7 +163,11 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
             // Громко: это отказ в обслуживании записи, а не рядовая ошибка ввода.
             metrics::counter!("write_gate_denied_total", "reason" => "unavailable").increment(1);
             tracing::error!(owner, slug, why, "вердикт записи не получен — отказываем (fail-closed)");
-            Err(Status::unavailable("write precondition check unavailable"))
+            Err(reason::status(
+                Code::Unavailable,
+                Reason::GateUnavailable,
+                "write precondition check unavailable",
+            ))
         }
     }
 }

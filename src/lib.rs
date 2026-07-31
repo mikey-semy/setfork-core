@@ -8,5 +8,6 @@ pub mod git;
 pub mod pb;
 pub mod pb_domain;
 pub mod ratelimit;
+pub mod reason;
 pub mod services;
 pub mod telemetry;
