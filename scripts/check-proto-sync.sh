@@ -57,12 +57,21 @@ sync_file schema/list.v1.json public/schema/list.v1.json
 check_reasons() {
   local theirs='src/features/git/core.remote.ts'
   local front_src
+  # Сюда мы попадаем, только если клон фронта ЕСТЬ (его отсутствие обработано
+  # выше и там же громко объявлено). Значит нечитаемый файл — это не «нет
+  # окружения», а переименование или удаление, то есть настоящий разъезд
+  # контракта. Молчать нельзя: именно за тихий пропуск этот скрипт уже платил —
+  # гейт выглядел выполненным, а в master уехало расхождение block_id.
   if ! front_src=$(git -C "$FRONT" show "$REF:$theirs" 2>/dev/null); then
-    echo "proto-sync: $REF:$theirs не читается — сверка причин пропущена"
+    echo "proto-sync: $REF:$theirs НЕ ЧИТАЕТСЯ — переименован или удалён?"
+    echo "proto-sync: сверка причин невозможна; поправь путь в check_reasons или верни файл"
+    fail=1
     return 0
   fi
   local ours_list front_list
-  ours_list=$(grep -oE 'Reason::[A-Za-z]+ => "[A-Z0-9_]+"' src/reason.rs | grep -oE '"[A-Z0-9_]+"' | tr -d '"' | sort -u)
+  # Значения объявлены внутри `reasons! { … }` в форме `Variant => "WIRE",`.
+  # Берём только этот блок: то же написание встречается в комментариях и тестах.
+  ours_list=$(sed -n '/^reasons! {/,/^}/p' src/reason.rs | grep -oE '=> "[A-Z0-9_]+"' | grep -oE '[A-Z0-9_]+' | sort -u)
   front_list=$(printf '%s
 ' "$front_src" | sed -n '/REASON_TO_CODE/,/^}/p' | grep -oE '^  [A-Z0-9_]+:' | tr -d ' :' | sort -u)
   if [[ -z "$ours_list" ]]; then

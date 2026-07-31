@@ -32,63 +32,68 @@ use tonic::{Code, Status};
 /// Ключ трейлера с причиной. Строчные буквы и дефис — как принято у gRPC-метаданных.
 pub const REASON_KEY: &str = "sf-reason";
 
-/// Причины, которые фронт различает и показывает человеку по-разному.
+/// Объявляет перечисление, его значения на проводе и полный список `ALL` из
+/// ОДНОГО источника.
 ///
-/// Значения — часть контракта провода: их читает `core.remote.ts`. Менять
-/// значение = ломать клиента, поэтому добавлять новые можно, переименовывать
-/// существующие — только парной правкой.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Reason {
-    /// Имя ветки/тега не проходит валидацию.
-    BadName,
-    /// Ветка с таким именем уже есть.
-    Exists,
-    /// Списка, ветки или базы не существует.
-    NotFound,
-    /// Ветка `main` защищена (удаление, переименование).
-    Protected,
-    /// Слияние не проходит чисто.
-    Conflict,
-    /// Вливать нечего: ветка не впереди базы.
-    NothingToMerge,
-    /// Ветку подвинули между чтением и записью (оптимистичная блокировка).
-    Stale,
-    /// В дереве коммита есть путь вне allowlist'а (Ф0).
-    ForeignPath,
-    /// В дереве коммита нет `list.json` (канон обязателен).
-    MissingListJson,
-    /// Репозиторий списка превысил порог размера (Ф0).
-    RepoTooLarge,
-    /// Список заморожен владельцем (Ф1, вердикт приложения).
-    Frozen,
-    /// Список в архиве (Ф1, вердикт приложения).
-    Archived,
-    /// Предусловие записи спросить не удалось — fail-closed (Ф1).
-    GateUnavailable,
-    /// Имя тега зарезервировано под версии (`vN`).
-    ReservedTagName,
+/// Без макроса список в тесте пришлось бы вести руками, и компилятор не заметил
+/// бы забытый вариант: новая причина молча осталась бы без проверки формата и без
+/// проверки уникальности (авто-ревью core#72, P2). Здесь добавить вариант мимо
+/// `ALL` нельзя по построению.
+macro_rules! reasons {
+    ($( $(#[$doc:meta])* $variant:ident => $wire:literal ),+ $(,)?) => {
+        /// Причины, которые фронт различает и показывает человеку по-разному.
+        ///
+        /// Значения — часть контракта провода: их читает `core.remote.ts`. Менять
+        /// значение = ломать клиента, поэтому добавлять новые можно,
+        /// переименовывать существующие — только парной правкой.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Reason {
+            $( $(#[$doc])* $variant, )+
+        }
+
+        impl Reason {
+            /// Значение на проводе. UPPER_SNAKE_CASE по AIP-193.
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $( Reason::$variant => $wire, )+
+                }
+            }
+
+            /// Все причины — для проверок, полнота которых важна.
+            pub const ALL: &'static [Reason] = &[ $( Reason::$variant, )+ ];
+        }
+    };
 }
 
-impl Reason {
-    /// Значение на проводе. UPPER_SNAKE_CASE по AIP-193.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Reason::BadName => "BAD_NAME",
-            Reason::Exists => "EXISTS",
-            Reason::NotFound => "NOT_FOUND",
-            Reason::Protected => "PROTECTED",
-            Reason::Conflict => "CONFLICT",
-            Reason::NothingToMerge => "NOTHING_TO_MERGE",
-            Reason::Stale => "STALE",
-            Reason::ForeignPath => "FOREIGN_PATH",
-            Reason::MissingListJson => "MISSING_LIST_JSON",
-            Reason::RepoTooLarge => "REPO_TOO_LARGE",
-            Reason::Frozen => "FROZEN",
-            Reason::Archived => "ARCHIVED",
-            Reason::GateUnavailable => "GATE_UNAVAILABLE",
-            Reason::ReservedTagName => "RESERVED_TAG_NAME",
-        }
-    }
+reasons! {
+    /// Имя ветки/тега не проходит валидацию.
+    BadName => "BAD_NAME",
+    /// Ветка с таким именем уже есть.
+    Exists => "EXISTS",
+    /// Списка, ветки или базы не существует.
+    NotFound => "NOT_FOUND",
+    /// Ветка `main` защищена (удаление, переименование).
+    Protected => "PROTECTED",
+    /// Слияние не проходит чисто.
+    Conflict => "CONFLICT",
+    /// Вливать нечего: ветка не впереди базы.
+    NothingToMerge => "NOTHING_TO_MERGE",
+    /// Ветку подвинули между чтением и записью (оптимистичная блокировка).
+    Stale => "STALE",
+    /// В дереве коммита есть путь вне allowlist'а (Ф0).
+    ForeignPath => "FOREIGN_PATH",
+    /// В дереве коммита нет `list.json` (канон обязателен).
+    MissingListJson => "MISSING_LIST_JSON",
+    /// Репозиторий списка превысил порог размера (Ф0).
+    RepoTooLarge => "REPO_TOO_LARGE",
+    /// Список заморожен владельцем (Ф1, вердикт приложения).
+    Frozen => "FROZEN",
+    /// Список в архиве (Ф1, вердикт приложения).
+    Archived => "ARCHIVED",
+    /// Предусловие записи спросить не удалось — fail-closed (Ф1).
+    GateUnavailable => "GATE_UNAVAILABLE",
+    /// Имя тега зарезервировано под версии (`vN`).
+    ReservedTagName => "RESERVED_TAG_NAME",
 }
 
 /// Статус с причиной в трейлере.
@@ -120,28 +125,12 @@ mod tests {
     }
 
     /// Формат из AIP-193: UPPER_SNAKE_CASE, до 63 символов, без ведущих цифр и
-    /// без крайних подчёркиваний. Проверяем ВСЕ значения — вручную такое
-    /// разъезжается при добавлении новой причины.
+    /// без крайних подчёркиваний. Список берём из `Reason::ALL`, который строит
+    /// тот же макрос, что и само перечисление, — забыть новую причину нельзя.
     #[test]
     fn все_причины_по_формату_aip_193() {
-        let all = [
-            Reason::BadName,
-            Reason::Exists,
-            Reason::NotFound,
-            Reason::Protected,
-            Reason::Conflict,
-            Reason::NothingToMerge,
-            Reason::Stale,
-            Reason::ForeignPath,
-            Reason::MissingListJson,
-            Reason::RepoTooLarge,
-            Reason::Frozen,
-            Reason::Archived,
-            Reason::GateUnavailable,
-            Reason::ReservedTagName,
-        ];
         let mut seen = std::collections::HashSet::new();
-        for r in all {
+        for &r in Reason::ALL {
             let s = r.as_str();
             assert!(!s.is_empty() && s.len() <= 63, "{s}: длина");
             assert!(
