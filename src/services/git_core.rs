@@ -201,6 +201,13 @@ fn main_status(e: MainUpdateError) -> Status {
         MainUpdateError::MissingListJson => {
             Status::failed_precondition("list.json is required at the repo root")
         }
+        // Как и MissingListJson — «пользовательский» случай: дерево собрано не по
+        // формату. Текст несёт сам путь, иначе отказ нечего показать человеку.
+        // По-английски — как ВСЕ остальные Status в ядре: их читает фронт и
+        // переводит сам; язык пользователя ядру неизвестен.
+        MainUpdateError::ForeignPath(p) => Status::failed_precondition(format!(
+            "only README.md, list.json and .gitattributes are allowed in the list tree; foreign path: {p}"
+        )),
         MainUpdateError::Stale => Status::aborted("main moved concurrently"),
         MainUpdateError::NonFastForward => {
             Status::internal("non-fast-forward update of main (invariant breach)")
@@ -530,6 +537,28 @@ impl GitCore for GitCoreSvc {
         // Критическая секция: receive-pack + проекция под одним локом репо
         // (ленивый append не вклинивается между приёмом и проекцией).
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
+        // Порог размера репо (Ф0). Per-push потолок (receive.maxInputSize) не мешает
+        // вырастить репозиторий серией мелких пушей, а квоты размера у git нет вовсе —
+        // это уровень приложения (у GitLab так же: «Repository size limit» —
+        // настройка приложения, пуш при превышении отклоняется). Проверяем ДО приёма:
+        // принять и отказать потом значило бы оставить объекты на диске ровно в том
+        // случае, ради которого порог и вводился.
+        let limit = crate::config::repo_limit_bytes();
+        if limit > 0 {
+            let bare_size = bare.clone();
+            let size = tokio::task::spawn_blocking(move || bundle::repo_size_bytes(&bare_size))
+                .await
+                .map_err(internal)?;
+            metrics::gauge!("repo_bytes").set(size as f64);
+            if size > limit {
+                // По-английски — как все Status в ядре (перевод за фронтом).
+                return Err(Status::resource_exhausted(format!(
+                    "list repository is {} MB, over the {} MB limit; pushes are stopped",
+                    size / (1024 * 1024),
+                    limit / (1024 * 1024)
+                )));
+            }
+        }
         let bare_recv = bare.clone();
         // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в

@@ -114,11 +114,35 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
 }
 
 // pre-receive hook (порт store.ts PRE_RECEIVE): main защищён от удаления и
-// non-fast-forward (канон версий; черновики force-push'абельны), плюс каждый
-// пушнутый коммит обязан нести list.json в корне.
-const PRE_RECEIVE: &str = "#!/bin/sh\nzero=0000000000000000000000000000000000000000\nwhile read old new ref; do\n  if [ \"$ref\" = \"refs/heads/main\" ]; then\n    if [ \"$new\" = \"$zero\" ]; then\n      echo \"SetFork: ветка main защищена от удаления\" >&2\n      exit 1\n    fi\n    if [ \"$old\" != \"$zero\" ] && ! git merge-base --is-ancestor \"$old\" \"$new\"; then\n      echo \"SetFork: non-fast-forward push в main запрещён (перезапись истории)\" >&2\n      exit 1\n    fi\n  fi\n  case \"$new\" in *$zero) continue ;; esac\n  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then\n    echo \"SetFork: list.json is required at the repo root\" >&2\n    exit 1\n  fi\ndone\nexit 0\n";
+// non-fast-forward (канон версий; черновики force-push'абельны), каждый
+// пушнутый коммит обязан нести list.json в корне, и состав дерева ограничен
+// allowlist'ом (Ф0 трека git-surface; список путей — serialize::tree_path_allowed,
+// правило одно на два пути записи).
+//
+// Состав проверяется у КАЖДОГО нового коммита, а не только у вершины: чистый tip
+// пропускал бы мусор из промежуточных коммитов, а тот остаётся достижимым из
+// истории и уезжает на зеркало.
+//
+// ⚠️ Перечисляем ПУТИ (`ls-tree -r --name-only` по коммиту), а НЕ объекты.
+// Первая версия брала одну команду `rev-list --objects … --not --all`, и это была
+// дыра (авто-ревью core#70, P1): `--objects` печатает каждый OID ОДИН раз, и если
+// лишний файл содержит те же байты, что разрешённый, его имя не печатается вовсе.
+// Проверено: два одинаковых файла `README.md` и `evil` дают в выводе только
+// `README.md`, то есть `evil` проезжал незамеченным. `ls-tree -r` перечисляет все
+// имена и заодно листает только листья — каталоги в выводе не появляются, а
+// подмодули (gitlink) появляются и потому тоже судятся.
+//
+// Отказ ГОВОРЯЩИЙ и называет сами пути: линза 01 (ledger 28.07, «Угол 1»)
+// показала, что лишний файл сегодня принимается и игнорируется без единого
+// слова — человек узнаёт о потере, только если сам заметит. stderr хука
+// доезжает до клиента строками `remote: …`.
+//
+// `</dev/null` у git-вызовов: stdin хука — это список рефов, который читает
+// `while read`, и дочерний процесс не должен его подъедать.
+const PRE_RECEIVE: &str = "#!/bin/sh\nzero=0000000000000000000000000000000000000000\nwhile read old new ref; do\n  if [ \"$ref\" = \"refs/heads/main\" ]; then\n    if [ \"$new\" = \"$zero\" ]; then\n      echo \"SetFork: ветка main защищена от удаления\" >&2\n      exit 1\n    fi\n    if [ \"$old\" != \"$zero\" ] && ! git merge-base --is-ancestor \"$old\" \"$new\"; then\n      echo \"SetFork: non-fast-forward push в main запрещён (перезапись истории)\" >&2\n      exit 1\n    fi\n  fi\n  case \"$new\" in *$zero) continue ;; esac\n  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then\n    echo \"SetFork: list.json is required at the repo root\" >&2\n    exit 1\n  fi\n  for c in $(git rev-list \"$new\" --not --all </dev/null); do\n    bad=$(git ls-tree -r --name-only \"$c\" </dev/null | grep -v -E '^(README\\.md|list\\.json|\\.gitattributes|steps/[^/]+\\.md)$' | sort -u | head -5)\n    if [ -n \"$bad\" ]; then\n      echo \"SetFork: в дереве списка разрешены только README.md, list.json и .gitattributes.\" >&2\n      echo \"Лишние пути (коммит $c):\" >&2\n      echo \"$bad\" | sed 's/^/  /' >&2\n      echo \"Уберите их из коммита: содержимое списка живёт в list.json.\" >&2\n      exit 1\n    fi\n  done\ndone\nexit 0\n";
 
-/// Ставит pre-receive hook (защита main + обязательный list.json); идемпотентно.
+/// Ставит pre-receive hook (защита main + list.json + состав дерева) и потолок
+/// входящего пака; идемпотентно — обновления правил докатываются до старых репо.
 pub fn install_hook(bare: &Path) -> io::Result<()> {
     let hooks = bare.join("hooks");
     fs::create_dir_all(&hooks)?;
@@ -129,7 +153,56 @@ pub fn install_hook(bare: &Path) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(hooks.join("pre-receive"), fs::Permissions::from_mode(0o755));
     }
+    set_max_input_size(bare);
     Ok(())
+}
+
+/// Потолок входящего пака (`receive.maxInputSize`, SETFORK_MAX_PACK_MB, дефолт 16).
+///
+/// РОДНОЙ механизм git, а не самодельная проверка: receive-pack сверяет размер
+/// потока и отказывает ДО распаковки, то есть мусорный пак не успевает стать
+/// объектами на диске. Своя проверка после приёма такого свойства не даёт.
+/// 0 = без ограничения (семантика самого git).
+///
+/// Это ДРУГАЯ граница, чем потолок gRPC-сообщения: та про транспорт ядро↔фронт,
+/// эта — про продукт («какой пуш мы вообще готовы принять»).
+fn set_max_input_size(bare: &Path) {
+    let mb = std::env::var("SETFORK_MAX_PACK_MB").ok().and_then(|v| v.trim().parse::<u64>().ok());
+    let bytes = mb.unwrap_or(16) * 1024 * 1024;
+    let out = std::process::Command::new("git")
+        .args(["--git-dir", &bare.to_string_lossy(), "config", "receive.maxInputSize", &bytes.to_string()])
+        .output();
+    // Обслуживание, не работа: не записалось — залогируем, но репо остаётся рабочим.
+    match out {
+        Ok(o) if !o.status.success() => {
+            tracing::warn!(repo = %bare.display(), err = %String::from_utf8_lossy(&o.stderr),
+                "receive.maxInputSize не выставлен");
+        }
+        Err(e) => tracing::warn!(repo = %bare.display(), error = %e, "receive.maxInputSize не выставлен"),
+        _ => {}
+    }
+}
+
+/// Размер bare-репо на диске, байты (рекурсивный обход). Нужен метрике и порогу
+/// `SETFORK_REPO_LIMIT_MB`: per-push потолок не мешает вырастить репо серией
+/// мелких пушей, а квоты размера у git нет вовсе — это уровень приложения
+/// Так же устроено у GitLab: «Repository size limit» — настройка приложения
+/// (инстанс/группа/проект), и при превышении пуш ОТКЛОНЯЕТСЯ
+/// (docs.gitlab.com/administration/settings/account_and_limit_settings).
+pub fn repo_size_bytes(bare: &Path) -> u64 {
+    fn walk(dir: &Path, acc: &mut u64) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            match e.file_type() {
+                Ok(t) if t.is_dir() => walk(&e.path(), acc),
+                Ok(t) if t.is_file() => *acc += e.metadata().map(|m| m.len()).unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
+    let mut total = 0;
+    walk(bare, &mut total);
+    total
 }
 
 /// `git gc --auto` на bare: упаковывает loose-объекты при превышении порога

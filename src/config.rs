@@ -20,6 +20,31 @@ pub struct Config {
     pub allow_insecure: bool,
     pub rpm: u32,
     pub rpm_heavy: u32,
+    /// Потолок ПРИНИМАЕМОГО gRPC-сообщения, байты (SETFORK_MAX_RECV_MB, дефолт 32 МБ).
+    ///
+    /// Только приём. Дефолты tonic 0.14.6 асимметричны (сверено с исходником
+    /// `codec/mod.rs`): `DEFAULT_MAX_RECV_MESSAGE_SIZE` = 4 МиБ, а
+    /// `DEFAULT_MAX_SEND_MESSAGE_SIZE` = `usize::MAX`. То есть необъявленный
+    /// потолок есть ровно на входе, и бьёт он по `ReceivePack`: тело пуша едет
+    /// ОДНИМ сообщением, и на 4 МиБ push молча перестал бы проходить.
+    ///
+    /// Отдачу (`max_encoding_message_size`) НЕ трогаем сознательно: сейчас она не
+    /// ограничена, и выставить туда конечное число значило бы СОЗДАТЬ потолок для
+    /// клона и бандла там, где его нет. Памяти это не сэкономило бы: пак и так
+    /// собирается в `Vec<u8>` целиком, лимит лишь уронил бы отправку постфактум.
+    pub max_recv_bytes: usize,
+}
+
+/// Порог размера bare-репо, байты; 0 = без ограничения
+/// (SETFORK_REPO_LIMIT_MB, дефолт 64 МБ). Превышение → отказ приёма пуша.
+///
+/// Не поле `Config`, а ленивый аксессор (как `mirror::mirror_secret`): значение
+/// нужно сервису на пути запроса, а `GitCoreSvc` конструируется от одного пула —
+/// тащить конфиг через него, CLI-режимы и тесты дороже, чем одно чтение env.
+/// Читается ровно раз.
+pub fn repo_limit_bytes() -> u64 {
+    static V: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *V.get_or_init(|| env_u32("SETFORK_REPO_LIMIT_MB", 64) as u64 * 1024 * 1024)
 }
 
 // SETFORK_LOG_JSON читает init_tracing в main напрямую: подписчик логов
@@ -82,6 +107,15 @@ impl Config {
             allow_insecure,
             rpm: env_u32("SETFORK_RPC_RPM", 600),
             rpm_heavy: env_u32("SETFORK_RPC_RPM_HEAVY", 60),
+            // 0 бессмысленен (сообщение нулевого размера не пройдёт вообще) —
+            // трактуем как «оставить дефолт», а не как «запретить всё».
+            max_recv_bytes: match env_u32("SETFORK_MAX_RECV_MB", 32) {
+                0 => {
+                    tracing::warn!("SETFORK_MAX_RECV_MB=0 заблокировал бы все RPC — использую 32");
+                    32 * 1024 * 1024
+                }
+                mb => mb as usize * 1024 * 1024,
+            },
         })
     }
 }

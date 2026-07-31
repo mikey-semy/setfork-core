@@ -11,6 +11,19 @@ use setfork_core::pb::git_core_server::GitCoreServer;
 /// Сериализованные proto-дескрипторы (build.rs) — для gRPC server reflection.
 const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/descriptor.bin"));
 
+/// Сервис с потолком приёма и интерцептором авторизации.
+///
+/// Макрос, а не функция: `max_decoding_message_size` — ИНХЕРЕНТНЫЙ метод каждого
+/// сгенерированного сервера, общего трейта под него нет, поэтому обобщённо его не
+/// вызвать. Тело повторяет то, что делает `with_interceptor` у tonic-build
+/// (`InterceptedService::new(Self::new(inner), interceptor)`), — лимит вставлен
+/// в середину, потому что на самом InterceptedService таких методов уже нет.
+macro_rules! capped {
+    ($server:expr, $limit:expr, $auth:expr $(,)?) => {
+        tonic::service::interceptor::InterceptedService::new($server.max_decoding_message_size($limit), $auth)
+    };
+}
+
 // Материализует репо во временный каталог, выполняет `op` над ним и гарантированно
 // удаляет каталог. `op` синхронна (шелл git) — весь блок идёт в spawn_blocking.
 fn with_materialized<F>(versions: Vec<VersionData>, op: F) -> std::io::Result<Vec<u8>>
@@ -279,6 +292,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if auth_ok(token, got) { Ok(req) } else { Err(Status::unauthenticated("invalid core token")) }
     };
 
+    // Потолок ПРИЁМА — ЯВНО на каждом сервисе. Дефолты tonic асимметричны
+    // (codec/mod.rs 0.14.6): приём 4 МиБ, отдача usize::MAX. Необъявленный
+    // потолок есть ровно на входе и бьёт по ReceivePack — тело пуша едет одним
+    // сообщением, и на 4 МиБ push молча перестал бы проходить.
+    //
+    // Отдачу НЕ ограничиваем сознательно: сейчас она без потолка, и конечное
+    // число СОЗДАЛО бы ограничение клона и бандла там, где его нет. Памяти это
+    // не сэкономит — пак и так собирается в Vec<u8> целиком.
+    let max_recv = cfg.max_recv_bytes;
+    tracing::info!(max_recv_mb = max_recv / (1024 * 1024), "потолок принимаемого gRPC-сообщения");
+
     Server::builder()
         // telemetry — СНАРУЖИ rate-limit: отказы 8/16 тоже попадают в метрики.
         .layer(telemetry::TelemetryLayer)
@@ -286,25 +310,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(health_service)
         .add_service(reflection_v1)
         .add_service(reflection_v1a)
-        .add_service(GitCoreServer::with_interceptor(GitCoreSvc { pool: pool.clone() }, check_auth))
-        .add_service(pb_domain::list_read_server::ListReadServer::with_interceptor(
-            services::list::ListReadSvc { pool: pool.clone() },
+        // capped! навешивает лимит на СГЕНЕРИРОВАННЫЙ сервер: `with_interceptor`
+        // возвращает уже InterceptedService, у которого таких методов нет.
+        // Макрос, а не функция: max_decoding_message_size — ИНХЕРЕНТНЫЙ метод
+        // каждого сгенерированного типа, общего трейта под него нет.
+        .add_service(capped!(GitCoreServer::new(GitCoreSvc { pool: pool.clone() }), max_recv, check_auth))
+        .add_service(capped!(
+            pb_domain::list_read_server::ListReadServer::new(services::list::ListReadSvc {
+                pool: pool.clone(),
+            }),
+            max_recv,
             check_auth,
         ))
-        .add_service(pb_domain::curation_read_server::CurationReadServer::with_interceptor(
-            services::curation::CurationReadSvc { pool: pool.clone() },
+        .add_service(capped!(
+            pb_domain::curation_read_server::CurationReadServer::new(services::curation::CurationReadSvc {
+                pool: pool.clone()
+            },),
+            max_recv,
             check_auth,
         ))
-        .add_service(pb_domain::curation_write_server::CurationWriteServer::with_interceptor(
-            services::curation::CurationWriteSvc { pool: pool.clone() },
+        .add_service(capped!(
+            pb_domain::curation_write_server::CurationWriteServer::new(
+                services::curation::CurationWriteSvc { pool: pool.clone() },
+            ),
+            max_recv,
             check_auth,
         ))
-        .add_service(pb_domain::collab_write_server::CollabWriteServer::with_interceptor(
-            services::collab::CollabWriteSvc { pool: pool.clone() },
+        .add_service(capped!(
+            pb_domain::collab_write_server::CollabWriteServer::new(services::collab::CollabWriteSvc {
+                pool: pool.clone(),
+            }),
+            max_recv,
             check_auth,
         ))
-        .add_service(pb_domain::list_write_server::ListWriteServer::with_interceptor(
-            services::list::ListWriteSvc { pool },
+        .add_service(capped!(
+            pb_domain::list_write_server::ListWriteServer::new(services::list::ListWriteSvc { pool }),
+            max_recv,
             check_auth,
         ))
         .serve_with_shutdown(addr, shutdown)
