@@ -186,7 +186,9 @@ fn set_max_input_size(bare: &Path) {
 /// Размер bare-репо на диске, байты (рекурсивный обход). Нужен метрике и порогу
 /// `SETFORK_REPO_LIMIT_MB`: per-push потолок не мешает вырастить репо серией
 /// мелких пушей, а квоты размера у git нет вовсе — это уровень приложения
-/// (так же устроены квоты у Gitea/GitLab).
+/// Так же устроено у GitLab: «Repository size limit» — настройка приложения
+/// (инстанс/группа/проект), и при превышении пуш ОТКЛОНЯЕТСЯ
+/// (docs.gitlab.com/administration/settings/account_and_limit_settings).
 pub fn repo_size_bytes(bare: &Path) -> u64 {
     fn walk(dir: &Path, acc: &mut u64) {
         let Ok(entries) = fs::read_dir(dir) else { return };
