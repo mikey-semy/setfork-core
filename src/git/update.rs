@@ -11,15 +11,47 @@
 //!
 //! Голосование/субтранзакции Praefect не переносим: это про кворум реплик
 //! кластера Gitaly, у нас одно ядро и один том.
-use git2::{ErrorCode, Oid, Repository};
+use git2::{ErrorCode, Oid, Repository, TreeWalkMode, TreeWalkResult};
 
 use super::MAIN_REF;
+use super::serialize::tree_path_allowed;
+
+/// Первый путь дерева вне allowlist'а (или None — дерево чистое).
+///
+/// Обход pre-order: callback получает префикс каталога и запись, полный путь —
+/// их склейка. Судим только ФАЙЛЫ, в каталоги всегда спускаемся: пустых каталогов
+/// git не хранит, поэтому любой лишний каталог всё равно будет пойман по своему
+/// содержимому — зато в отказе окажется `assets/x.png`, а не голое `assets`,
+/// по которому человеку неясно, что убирать.
+fn first_foreign_path(tree: &git2::Tree<'_>) -> Result<Option<String>, git2::Error> {
+    let mut foreign: Option<String> = None;
+    tree.walk(TreeWalkMode::PreOrder, |dir, entry| {
+        if entry.kind() != Some(git2::ObjectType::Blob) {
+            return TreeWalkResult::Ok;
+        }
+        let path = format!("{dir}{}", entry.name().unwrap_or("<не-utf8>"));
+        if tree_path_allowed(&path) {
+            TreeWalkResult::Ok
+        } else {
+            foreign = Some(path);
+            TreeWalkResult::Abort
+        }
+    })
+    // Abort из callback libgit2 отдаёт как ошибку GIT_EUSER — для нас это не
+    // сбой, а найденная причина отказа; отличаем по уже заполненному foreign.
+    .or_else(|e| if foreign.is_some() { Ok(()) } else { Err(e) })?;
+    Ok(foreign)
+}
 
 /// Почему main не сдвинулся. Каждый вариант — то же правило, что у pre-receive.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MainUpdateError {
     /// В дереве нового tip нет `list.json` — канон обязателен в каждом коммите main.
     MissingListJson,
+    /// В дереве нового tip есть путь вне allowlist'а (Ф0): в git уходит только
+    /// то, что обязано пережить clone и вернуться через push (ADR-0014).
+    /// Несёт сам путь — отказ обязан называть причину, а не только факт.
+    ForeignPath(String),
     /// Новый tip не потомок старого — переписывание истории main запрещено.
     NonFastForward,
     /// main уже не там, где ожидал вызывающий (CAS не сошёлся) — конкурентная запись.
@@ -32,6 +64,10 @@ impl std::fmt::Display for MainUpdateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MainUpdateError::MissingListJson => write!(f, "list.json is required at the repo root"),
+            MainUpdateError::ForeignPath(p) => write!(
+                f,
+                "в дереве списка разрешены только README.md, list.json и .gitattributes; лишний путь: {p}"
+            ),
             MainUpdateError::NonFastForward => write!(f, "non-fast-forward update of main is forbidden"),
             MainUpdateError::Stale => write!(f, "main moved concurrently (stale expected tip)"),
             MainUpdateError::Git(e) => write!(f, "git2: {e}"),
@@ -62,8 +98,14 @@ pub fn update_main(
 ) -> Result<(), MainUpdateError> {
     // Обязательный list.json — правило хука «каждый пушнутый коммит несёт канон».
     let commit = repo.find_commit(new_tip)?;
-    if commit.tree()?.get_path(std::path::Path::new("list.json")).is_err() {
+    let tree = commit.tree()?;
+    if tree.get_path(std::path::Path::new("list.json")).is_err() {
         return Err(MainUpdateError::MissingListJson);
+    }
+    // Состав дерева — второе правило хука, продублированное здесь по той же
+    // причине, что и первое: git2-запись проходит мимо pre-receive.
+    if let Some(path) = first_foreign_path(&tree)? {
+        return Err(MainUpdateError::ForeignPath(path));
     }
 
     // CAS-проверка до записи — чтобы отличить Stale от NonFastForward в ошибке.
