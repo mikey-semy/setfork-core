@@ -34,6 +34,14 @@ tonic-reflection = "0.14.6"
 aes-gcm = "0.11.0"
 sha2 = "0.11.0"
 base64 = "0.23.0"
+# HTTP-клиент для обратного вызова ядро→приложение (ADR-0015, gate.rs). Новых
+# крейтов в дерево НЕ добавляет: hyper/hyper-util/http-body-util/bytes уже пришли
+# транзитивно с tonic — здесь они просто объявлены прямыми, чтобы ими пользоваться.
+# Только http1 и plaintext: вызов идёт внутри docker-сети, TLS там не нужен.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client-legacy", "tokio"] }
+http-body-util = "0.1"
+bytes = "1"
 
 [build-dependencies]
 tonic-prost-build = "0.14"

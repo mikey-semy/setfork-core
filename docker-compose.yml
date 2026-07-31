@@ -30,6 +30,10 @@ services:
       # только localhost). Для прод-подобного локального прогона задайте SETFORK_CORE_TOKEN.
       SETFORK_CORE_TOKEN: ${SETFORK_CORE_TOKEN:-}
       SETFORK_ALLOW_INSECURE: ${SETFORK_ALLOW_INSECURE:-1}
+      # ADR-0015: адрес приложения для вопроса «можно ли писать в этот список».
+      # Пусто + ALLOW_INSECURE=1 → гейт не проверяется (локальный dev, громкий warn
+      # в логе). Задайте адрес, чтобы гонять локально как в проде.
+      SETFORK_APP_URL: ${SETFORK_APP_URL:-}
       # Rate-limit RPC: обычные/тяжёлые методы, запросов в минуту (0 = выкл).
       SETFORK_RPC_RPM: ${SETFORK_RPC_RPM:-600}
       SETFORK_RPC_RPM_HEAVY: ${SETFORK_RPC_RPM_HEAVY:-60}
