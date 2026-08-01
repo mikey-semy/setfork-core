@@ -13,7 +13,21 @@ fn pkt_line(s: &str) -> Vec<u8> {
     out
 }
 
-/// Запуск git с опциональным stdin и GIT_PROTOCOL; возвращает stdout.
+/// Выставляет язык дочернему git — или СНИМАЕТ переменную, если языка нет.
+///
+/// Снимает, а не «оставляет как есть»: пустой язык означает явное «английский».
+/// Если сам сервис запущен с SETFORK_LANG (окружение контейнера, compose, шелл
+/// оператора), дочерний git унаследовал бы его, и человек, не просивший русского,
+/// получил бы русский отказ — одинаково у всех, кто пушит в этот инстанс
+/// (авто-ревью core#74, P2).
+fn apply_lang(cmd: &mut Command, lang: Option<&str>) {
+    match lang.filter(|l| !l.is_empty()) {
+        Some(l) => cmd.env("SETFORK_LANG", l),
+        None => cmd.env_remove("SETFORK_LANG"),
+    };
+}
+
+/// Запуск git с опциональным stdin, GIT_PROTOCOL и языком; возвращает stdout.
 /// Тело пишется в stdin ПАРАЛЛЕЛЬНО чтению stdout (scoped-поток): раньше
 /// запись шла целиком до чтения, и большой push дедлочил оба конца пайпа —
 /// git блокировался на записи sideband-прогресса при полном stdout-пайпе,
@@ -33,13 +47,14 @@ fn run_git_io(
     }
     // Язык доезжает до pre-receive именно так: хук — отдельный процесс, он
     // наследует окружение receive-pack (проверено экспериментом 31.07, см.
-    // HQ tracks/core-i18n.md §2). Пусто — не выставляем вовсе, хук возьмёт
-    // английский по умолчанию.
-    if let Some(l) = lang
-        && !l.is_empty()
-    {
-        cmd.env("SETFORK_LANG", l);
-    }
+    // HQ tracks/core-i18n.md §2).
+    //
+    // Пустой язык означает ЯВНОЕ «английский», а не «не трогать окружение»:
+    // наследование здесь опасно. Если сам сервис запущен с SETFORK_LANG (в
+    // окружении контейнера, в compose, локально в шелле), дочерний git унаследует
+    // его, и человек, не просивший русского, получит русский отказ — причём
+    // одинаково у всех, кто пушит в этот инстанс (авто-ревью core#74, P2).
+    apply_lang(&mut cmd, lang);
     let mut child = cmd.spawn()?;
     let mut stdin = child.stdin.take().expect("stdin piped");
     let out = std::thread::scope(|s| -> io::Result<std::process::Output> {
@@ -111,8 +126,29 @@ pub fn receive_pack_rpc(
 
 #[cfg(test)]
 mod tests {
-    use super::run_git_io;
+    use super::{apply_lang, run_git_io};
+    use std::ffi::OsStr;
     use std::process::Command;
+
+    /// Что реально уедет дочернему процессу. `None` в значении = переменная СНЯТА.
+    fn lang_env(lang: Option<&str>) -> Option<Option<String>> {
+        let mut cmd = Command::new("git");
+        apply_lang(&mut cmd, lang);
+        cmd.get_envs()
+            .find(|(k, _)| *k == OsStr::new("SETFORK_LANG"))
+            .map(|(_, v)| v.map(|v| v.to_string_lossy().to_string()))
+    }
+
+    #[test]
+    fn язык_сервиса_не_протекает_в_дочерний_git() {
+        // Язык запросили — он и уедет.
+        assert_eq!(lang_env(Some("ru")), Some(Some("ru".to_string())));
+        // Языка нет — переменная СНИМАЕТСЯ, а не наследуется от сервиса. Именно
+        // здесь была дыра: «не трогать окружение» означало бы, что SETFORK_LANG
+        // инстанса протечёт всем пушащим.
+        assert_eq!(lang_env(None), Some(None), "переменная должна сниматься явно");
+        assert_eq!(lang_env(Some("")), Some(None), "пустой язык = явный английский");
+    }
 
     // Регрессия дедлока (аудит P1-4): git пишет вывод, ПОКА мы пишем ввод.
     // `cat-file --batch` отвечает строкой на строку: >64КБ в обе стороны
