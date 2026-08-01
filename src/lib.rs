@@ -3,7 +3,6 @@
 pub mod blocks;
 pub mod config;
 pub mod db;
-pub mod debounce;
 pub mod gate;
 pub mod git;
 pub mod pb;
@@ -12,3 +11,4 @@ pub mod ratelimit;
 pub mod reason;
 pub mod services;
 pub mod telemetry;
+pub mod throttle;

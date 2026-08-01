@@ -47,16 +47,16 @@ pub fn repo_limit_bytes() -> u64 {
     *V.get_or_init(|| env_u32("SETFORK_REPO_LIMIT_MB", 64) as u64 * 1024 * 1024)
 }
 
-/// Окно схлопывания фоновых пушей зеркала (SETFORK_MIRROR_DEBOUNCE_SEC, дефолт 10с;
+/// Окно схлопывания фоновых пушей зеркала (SETFORK_MIRROR_THROTTLE_SEC, дефолт 10с;
 /// 0 = не ждать). Ленивый аксессор по той же причине, что `repo_limit_bytes`.
 ///
 /// Смысл величины: это задержка, на которую зеркало отстаёт от истины в обмен на
 /// один пуш вместо пачки. Десять секунд — с запасом больше типичного промежутка
 /// между версиями внутри одной серии правок и заметно меньше того, что человек
 /// сочтёт «зеркало не работает». Ручная «Синхронизация» окно НЕ ждёт.
-pub fn mirror_debounce() -> std::time::Duration {
+pub fn mirror_throttle() -> std::time::Duration {
     static V: std::sync::OnceLock<std::time::Duration> = std::sync::OnceLock::new();
-    *V.get_or_init(|| std::time::Duration::from_secs(env_u32("SETFORK_MIRROR_DEBOUNCE_SEC", 10) as u64))
+    *V.get_or_init(|| std::time::Duration::from_secs(env_u32("SETFORK_MIRROR_THROTTLE_SEC", 10) as u64))
 }
 
 // SETFORK_LOG_JSON читает init_tracing в main напрямую: подписчик логов

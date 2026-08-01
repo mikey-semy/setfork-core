@@ -278,12 +278,12 @@ pub(crate) async fn push_mirror_now(pool: &PgPool, id: Uuid, bare: &std::path::P
 /// Фоновый пуш зеркала после записи в main (fire-and-forget: запись не ждёт
 /// сети; исход виден в статусе настроек и метрике).
 ///
-/// Ф2: вызовы для одного списка схлопываются окном `SETFORK_MIRROR_DEBOUNCE_SEC` —
+/// Ф2: вызовы для одного списка схлопываются окном `SETFORK_MIRROR_THROTTLE_SEC` —
 /// серия версий даёт один пуш, а не пачку одновременных. Безопасно потому, что
-/// пуш гонит текущее состояние ref'ов целиком (подробности — `debounce`).
+/// пуш гонит текущее состояние ref'ов целиком (подробности — `throttle`).
 /// Ручной пуш (RPC MirrorPush) идёт мимо: там человек ждёт ответа.
 pub(crate) fn spawn_mirror(pool: PgPool, id: Uuid, bare: std::path::PathBuf) {
-    crate::debounce::coalesce(id, crate::config::mirror_debounce(), move || {
+    crate::throttle::coalesce(id, crate::config::mirror_throttle(), move || {
         let (pool, bare) = (pool.clone(), bare.clone());
         async move {
             let _ = push_mirror_now(&pool, id, &bare).await;
