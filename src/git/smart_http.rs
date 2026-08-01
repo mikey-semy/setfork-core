@@ -38,6 +38,18 @@ fn run_git_io(
     git_protocol: Option<&str>,
     lang: Option<&str>,
 ) -> io::Result<Vec<u8>> {
+    run_git_io_env(args, input, git_protocol, lang, None)
+}
+
+/// То же плюс ник пушащего для хука (Ф4: магический реф `refs/for/<base>` без
+/// него отвергается — коммиты некуда класть).
+fn run_git_io_env(
+    args: &[&str],
+    input: Option<&[u8]>,
+    git_protocol: Option<&str>,
+    lang: Option<&str>,
+    actor: Option<&str>,
+) -> io::Result<Vec<u8>> {
     let mut cmd = Command::new("git");
     cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(p) = git_protocol
@@ -55,6 +67,12 @@ fn run_git_io(
     // его, и человек, не просивший русского, получит русский отказ — причём
     // одинаково у всех, кто пушит в этот инстанс (авто-ревью core#74, P2).
     apply_lang(&mut cmd, lang);
+    // Снимаем так же, как язык: унаследованный от сервиса ник означал бы, что
+    // чужие коммиты лягут в ветку случайного человека.
+    match actor.filter(|a| !a.is_empty()) {
+        Some(a) => cmd.env("SETFORK_ACTOR", a),
+        None => cmd.env_remove("SETFORK_ACTOR"),
+    };
     let mut child = cmd.spawn()?;
     let mut stdin = child.stdin.take().expect("stdin piped");
     let out = std::thread::scope(|s| -> io::Result<std::process::Output> {
@@ -119,9 +137,10 @@ pub fn receive_pack_rpc(
     body: &[u8],
     git_protocol: Option<&str>,
     lang: Option<&str>,
+    actor: Option<&str>,
 ) -> io::Result<Vec<u8>> {
     let dir = repo_dir.to_string_lossy().to_string();
-    run_git_io(&["receive-pack", "--stateless-rpc", &dir], Some(body), git_protocol, lang)
+    run_git_io_env(&["receive-pack", "--stateless-rpc", &dir], Some(body), git_protocol, lang, actor)
 }
 
 #[cfg(test)]

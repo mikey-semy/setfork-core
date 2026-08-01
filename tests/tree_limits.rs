@@ -334,3 +334,46 @@ fn язык_отказа_переключается_окружением() {
     // Путь называется в любом языке — это данные, а не перевод.
     assert!(ru_err.contains("assets.bin") && err.contains("assets.bin"), "путь потерялся");
 }
+
+/// Ф4: `git push origin HEAD:refs/for/main` — предъявление правки, а не ветка.
+///
+/// Хук здесь решает ДО приёма (отказать задним числом нельзя), поэтому проверяем
+/// его настоящим пушем: без ника — отказ с объяснением, чужая база — отказ,
+/// нормальный случай — подсказка человеку в выводе.
+#[test]
+fn магический_реф_проверяется_хуком() {
+    let root = tmp("magic-hook");
+    let (_bare, work) = repo_pair(&root.0);
+
+    // Без SETFORK_ACTOR: ядро не знает, в чью ветку класть коммиты.
+    let anon = Command::new("git")
+        .current_dir(&work)
+        .args(["push", "origin", "main:refs/for/main"])
+        .output()
+        .expect("git");
+    let anon_err = String::from_utf8_lossy(&anon.stderr);
+    assert!(!anon.status.success(), "без пользователя магический реф не принимается: {anon_err}");
+    assert!(anon_err.contains("authenticated push"), "отказ объясняет причину: {anon_err}");
+
+    // Чужая база: поддерживается только main.
+    let bad = Command::new("git")
+        .current_dir(&work)
+        .env("SETFORK_ACTOR", "mike")
+        .args(["push", "origin", "main:refs/for/other"])
+        .output()
+        .expect("git");
+    let bad_err = String::from_utf8_lossy(&bad.stderr);
+    assert!(!bad.status.success(), "чужая база отвергается: {bad_err}");
+    assert!(bad_err.contains("only refs/for/main"), "отказ называет правило: {bad_err}");
+
+    // Нормальный случай: пуш проходит и человек видит, что дальше.
+    let ok = Command::new("git")
+        .current_dir(&work)
+        .env("SETFORK_ACTOR", "mike")
+        .args(["push", "origin", "main:refs/for/main"])
+        .output()
+        .expect("git");
+    let ok_err = String::from_utf8_lossy(&ok.stderr);
+    assert!(ok.status.success(), "нормальный магический пуш проходит: {ok_err}");
+    assert!(ok_err.contains("change accepted"), "человек видит подсказку: {ok_err}");
+}
