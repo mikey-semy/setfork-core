@@ -3,6 +3,7 @@
 pub mod blocks;
 pub mod config;
 pub mod db;
+pub mod debounce;
 pub mod gate;
 pub mod git;
 pub mod pb;
