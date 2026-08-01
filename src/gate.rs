@@ -39,8 +39,10 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 pub enum BadAppUrl {
     /// Переменная не задана или пуста.
     Missing,
-    /// Есть значение, но это не абсолютный http(s)-адрес.
+    /// Есть значение, но это не абсолютный `http://`-адрес.
     NotAbsolute(String),
+    /// Указан `https://`, а клиент здесь принципиально plaintext (см. ниже).
+    TlsUnsupported(String),
 }
 
 /// Проверенный адрес приложения из строки.
@@ -58,12 +60,18 @@ pub fn parse_app_url(raw: Option<&str>) -> Result<String, BadAppUrl> {
         return Err(BadAppUrl::Missing);
     }
     let url = s.trim_end_matches('/');
+    // https отвергаем ЯВНО и с объяснением, а не молча принимаем: клиент собран
+    // с plaintext-коннектором (`HttpConnector`), TLS он не умеет по построению —
+    // вызов идёт внутри docker-сети, и тянуть ради него rustls незачем. Принять
+    // https на старте значило бы завести ровно ту ловушку, ради которой эта
+    // проверка и появилась: конфиг «валиден», а каждая запись падает в бою
+    // (авто-ревью core#73, P1).
+    if url.starts_with("https://") {
+        return Err(BadAppUrl::TlsUnsupported(url.to_string()));
+    }
     // Схема обязательна: без неё hyper соберёт запрос с пустым authority и
     // получит ошибку соединения на каждом вызове.
-    let rest = url
-        .strip_prefix("http://")
-        .or_else(|| url.strip_prefix("https://"))
-        .ok_or_else(|| BadAppUrl::NotAbsolute(url.to_string()))?;
+    let rest = url.strip_prefix("http://").ok_or_else(|| BadAppUrl::NotAbsolute(url.to_string()))?;
     // Хост непустой и не начинается со слеша (иначе это путь, а не authority).
     let host = rest.split('/').next().unwrap_or("");
     if host.is_empty() {
@@ -248,7 +256,17 @@ mod tests {
         assert_eq!(parse_app_url(Some("http://app:3000")).as_deref(), Ok("http://app:3000"));
         // Хвостовой слеш срезаем: путь эндпоинта дописывается к базе, иначе вышло бы `//api`.
         assert_eq!(parse_app_url(Some("http://app:3000/")).as_deref(), Ok("http://app:3000"));
-        assert_eq!(parse_app_url(Some("  https://setfork.ru  ")).as_deref(), Ok("https://setfork.ru"));
+    }
+
+    /// Регрессия P1 авто-ревью core#73: https проходил валидацию, но клиент
+    /// plaintext — каждая запись падала бы в бою. Отвергаем на старте, с
+    /// объяснением, а не молча.
+    #[test]
+    fn https_отвергается_пока_клиент_plaintext() {
+        assert_eq!(
+            parse_app_url(Some("https://app:3000")),
+            Err(BadAppUrl::TlsUnsupported("https://app:3000".into()))
+        );
     }
 
     #[test]

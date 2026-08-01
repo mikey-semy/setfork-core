@@ -219,6 +219,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             std::process::exit(1);
         }
+        Err(setfork_core::gate::BadAppUrl::TlsUnsupported(got)) => {
+            eprintln!(
+                "setfork-core: ОСТАНОВКА — SETFORK_APP_URL='{got}' использует https, а клиент \
+                 предусловия записи собран без TLS: вызов рассчитан на внутреннюю сеть, где \
+                 шифрование не нужно, и rustls ради него не тянется. Укажите http-адрес сервиса \
+                 внутри docker-сети (например http://setfork-frontend:3000). Если приложение \
+                 действительно доступно ТОЛЬКО по https — это отдельное решение, нужен \
+                 TLS-коннектор в gate.rs."
+            );
+            std::process::exit(1);
+        }
     }
 
     // Отдельный мини-пул под advisory-локи: RepoGuard держит соединение на всё
