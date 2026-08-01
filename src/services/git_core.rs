@@ -241,6 +241,7 @@ pub(crate) async fn push_mirror_now(pool: &PgPool, id: Uuid, bare: &std::path::P
     let Some((url, token_enc)) = db::load_mirror(pool, id).await.map_err(|e| e.to_string())? else {
         return Ok(()); // зеркало не настроено
     };
+    let started = std::time::Instant::now();
     let outcome = match crate::git::mirror::mirror_secret() {
         None => {
             Err("SETFORK_MIRROR_SECRET не задан на сервере — зеркало не может расшифровать токен".to_string())
@@ -252,6 +253,12 @@ pub(crate) async fn push_mirror_now(pool: &PgPool, id: Uuid, bare: &std::path::P
             Some(token) => crate::git::mirror::mirror_push(bare, &url, &token).await,
         },
     };
+    // Ф2: длительность рядом со счётчиком. Счётчик отвечает «сколько сломалось»,
+    // гистограмма — «сколько это занимает»: пуш, доросший до таймаута 60с, до сих
+    // пор выглядел ровно как мгновенный, пока не падал.
+    let result = if outcome.is_ok() { "ok" } else { "error" };
+    metrics::histogram!("mirror_push_duration_seconds", "result" => result)
+        .record(started.elapsed().as_secs_f64());
     match &outcome {
         Ok(()) => {
             metrics::counter!("mirror_push_total", "result" => "ok").increment(1);
@@ -270,9 +277,17 @@ pub(crate) async fn push_mirror_now(pool: &PgPool, id: Uuid, bare: &std::path::P
 
 /// Фоновый пуш зеркала после записи в main (fire-and-forget: запись не ждёт
 /// сети; исход виден в статусе настроек и метрике).
+///
+/// Ф2: вызовы для одного списка схлопываются окном `SETFORK_MIRROR_THROTTLE_SEC` —
+/// серия версий даёт один пуш, а не пачку одновременных. Безопасно потому, что
+/// пуш гонит текущее состояние ref'ов целиком (подробности — `throttle`).
+/// Ручной пуш (RPC MirrorPush) идёт мимо: там человек ждёт ответа.
 pub(crate) fn spawn_mirror(pool: PgPool, id: Uuid, bare: std::path::PathBuf) {
-    tokio::spawn(async move {
-        let _ = push_mirror_now(&pool, id, &bare).await;
+    crate::throttle::coalesce(id, crate::config::mirror_throttle(), move || {
+        let (pool, bare) = (pool.clone(), bare.clone());
+        async move {
+            let _ = push_mirror_now(&pool, id, &bare).await;
+        }
     });
 }
 
