@@ -255,15 +255,15 @@ pub(crate) async fn push_mirror_now(pool: &PgPool, id: Uuid, bare: &std::path::P
     match &outcome {
         Ok(()) => {
             metrics::counter!("mirror_push_total", "result" => "ok").increment(1);
-            tracing::info!(%id, url, "зеркало обновлено");
+            tracing::info!(%id, url, "mirror updated");
         }
         Err(e) => {
             metrics::counter!("mirror_push_total", "result" => "error").increment(1);
-            tracing::warn!(%id, url, error = %e, "пуш зеркала не удался");
+            tracing::warn!(%id, url, error = %e, "mirror push failed");
         }
     }
     if let Err(e) = db::record_mirror_result(pool, id, outcome.as_ref().err().map(|s| s.as_str())).await {
-        tracing::error!(%id, error = %e, "статус зеркала не записан");
+        tracing::error!(%id, error = %e, "mirror status not recorded");
     }
     outcome
 }
@@ -293,7 +293,7 @@ async fn project_main_or_log(
 ) -> i32 {
     let outcome = match project::project_pushed_commit(pool, id, bare).await {
         Err(e) => {
-            tracing::warn!(owner, slug, %id, error = %e, op, "сбой проекции — повтор через 200мс");
+            tracing::warn!(owner, slug, %id, error = %e, op, "projection failed, retrying in 200ms");
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             project::project_pushed_commit(pool, id, bare).await
         }
@@ -305,7 +305,7 @@ async fn project_main_or_log(
             metrics::counter!("projection_failures_total", "op" => format!("{op}_empty")).increment(1);
             tracing::warn!(
                 owner, slug, %id, op,
-                "проекция ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
+                "projection produced nothing (list.json unparsed or without steps): version NOT created"
             );
             0
         }
@@ -313,7 +313,7 @@ async fn project_main_or_log(
             metrics::counter!("projection_failures_total", "op" => op).increment(1);
             tracing::error!(
                 owner, slug, %id, error = %e, op,
-                "ОШИБКА проекции — git принят, версия НЕ создана; восстановление: reproject"
+                "projection FAILED: git accepted, version NOT created; recovery: reproject"
             );
             0
         }

@@ -207,7 +207,7 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
         Verdict::Unavailable(why) => {
             // Громко: это отказ в обслуживании записи, а не рядовая ошибка ввода.
             metrics::counter!("write_gate_denied_total", "reason" => "unavailable").increment(1);
-            tracing::error!(owner, slug, why, "вердикт записи не получен — отказываем (fail-closed)");
+            tracing::error!(owner, slug, why, "write verdict not received, refusing (fail-closed)");
             Err(reason::status(
                 Code::Unavailable,
                 Reason::GateUnavailable,

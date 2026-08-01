@@ -232,9 +232,9 @@ fn set_max_input_size(bare: &Path) {
     match out {
         Ok(o) if !o.status.success() => {
             tracing::warn!(repo = %bare.display(), err = %String::from_utf8_lossy(&o.stderr),
-                "receive.maxInputSize не выставлен");
+                "receive.maxInputSize not set");
         }
-        Err(e) => tracing::warn!(repo = %bare.display(), error = %e, "receive.maxInputSize не выставлен"),
+        Err(e) => tracing::warn!(repo = %bare.display(), error = %e, "receive.maxInputSize not set"),
         _ => {}
     }
 }

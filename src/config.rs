@@ -56,7 +56,7 @@ fn env_u32(name: &str, default: u32) -> u32 {
             Ok(v) => v,
             // Опечатка в конфиге не должна МОЛЧА откатывать значение на дефолт.
             Err(_) => {
-                tracing::warn!(var = name, value = %s, "не число — использую {default}");
+                tracing::warn!(var = name, value = %s, "not a number, using {default}");
                 default
             }
         },
@@ -67,11 +67,11 @@ fn env_u32(name: &str, default: u32) -> u32 {
 impl Config {
     pub fn from_env() -> Result<Config, String> {
         let database_url =
-            std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL не задан (см. .env)".to_string())?;
+            std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL is not set (see .env)".to_string())?;
 
         let pgpool_max = match env_u32("PGPOOL_MAX", 10) {
             0 => {
-                tracing::warn!("PGPOOL_MAX=0 бессмысленен — использую 10");
+                tracing::warn!("PGPOOL_MAX=0 is meaningless, using 10");
                 10
             }
             v => v,
@@ -80,7 +80,7 @@ impl Config {
         let addr_raw = std::env::var("SETFORK_CORE_ADDR").unwrap_or_else(|_| "127.0.0.1:50051".into());
         let addr: SocketAddr = addr_raw
             .parse()
-            .map_err(|e| format!("SETFORK_CORE_ADDR '{addr_raw}' некорректен ({e}) — ожидается host:port"))?;
+            .map_err(|e| format!("SETFORK_CORE_ADDR '{addr_raw}' is invalid ({e}) - expected host:port"))?;
 
         let maddr_raw = std::env::var("SETFORK_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9464".into());
         let metrics_addr = if maddr_raw == "0" || maddr_raw.eq_ignore_ascii_case("off") {
@@ -89,7 +89,7 @@ impl Config {
             Some(
                 maddr_raw
                     .parse::<SocketAddr>()
-                    .map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr_raw}' некорректен ({e})"))?,
+                    .map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr_raw}' is invalid ({e})"))?,
             )
         };
 
@@ -111,7 +111,7 @@ impl Config {
             // трактуем как «оставить дефолт», а не как «запретить всё».
             max_recv_bytes: match env_u32("SETFORK_MAX_RECV_MB", 32) {
                 0 => {
-                    tracing::warn!("SETFORK_MAX_RECV_MB=0 заблокировал бы все RPC — использую 32");
+                    tracing::warn!("SETFORK_MAX_RECV_MB=0 would block every RPC, using 32");
                     32 * 1024 * 1024
                 }
                 mb => mb as usize * 1024 * 1024,

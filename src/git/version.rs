@@ -84,7 +84,7 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
                 Some(v) => {
                     tracing::warn!(
                         %id, version = v,
-                        "main был впереди без тега (непроецированный push) — tip спроецирован (heal)"
+                        "main was ahead without a tag (unprojected push), tip projected (heal)"
                     );
                     return Ok(SyncOutcome::ProjectedTip { version: v });
                 }
@@ -94,7 +94,7 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
                 None => {
                     tracing::warn!(
                         %id, current,
-                        "main впереди тега v{current}, но tip не проецируется (list.json без версии) — оставлен как есть"
+                        "main is ahead of tag v{current} but the tip does not project (list.json without a version), left as is"
                     );
                     return Ok(SyncOutcome::InSync);
                 }
@@ -123,7 +123,7 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
             .map_err(join_err)?
             .map_err(join_err)?;
         metrics::counter!("repo_catchup_versions_total").increment(count);
-        tracing::warn!(%id, from = have + 1, to = current, "git отставал от БД — версии дописаны (догон)");
+        tracing::warn!(%id, from = have + 1, to = current, "git lagged behind db, versions appended (catch-up)");
         return Ok(SyncOutcome::Appended { from: have + 1, to: current });
     }
 
@@ -133,15 +133,16 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
         && tag_on_tip(bare, have).await?
         && let Some(v) = project::project_pushed_commit(pool, id, bare).await?
     {
-        tracing::warn!(%id, version = v, "git был впереди БД на одну версию — tip спроецирован (heal)");
+        tracing::warn!(%id, version = v, "git was one version ahead of db, tip projected (heal)");
         return Ok(SyncOutcome::ProjectedTip { version: v });
     }
 
     metrics::counter!("version_tag_conflicts_total").increment(1);
     tracing::error!(
         %id, have, current,
-        "тег v{have} выше текущей версии {current} и это не хвост записи: имя вида v<число> занято \
-         НЕ версией либо история разошлась — запись остановлена, см. runbook git-projection-catchup"
+        "tag v{have} is above current version {current} and this is not a write tail: a v<number> name is \
+         taken by something other than a version, or history diverged - write stopped, see runbook \
+         git-projection-catchup"
     );
     Ok(SyncOutcome::Conflict { have, current })
 }
@@ -350,7 +351,7 @@ pub async fn commit_web_version(
         metrics::counter!("projection_failures_total", "op" => "web").increment(1);
         tracing::error!(
             %id, version, sha, error = %e,
-            "ОШИБКА проекции веб-версии — git-коммит записан, строк БД нет; восстановление: reproject"
+            "web version projection FAILED: git commit written, db rows missing; recovery: reproject"
         );
         return Err(WebVersionError::ProjectionLost { version, sha, source: e });
     }

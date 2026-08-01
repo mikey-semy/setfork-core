@@ -108,12 +108,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 require_git_data_dir()?;
                 let (owner, slug) = (cli(2), cli(3));
                 let Some((bare, id)) = git::repo::ensure_repo(&pool, &owner, &slug).await? else {
-                    return Err(format!("список {owner}/{slug} не найден").into());
+                    return Err(format!("list {owner}/{slug} not found").into());
                 };
                 match git::project::project_pushed_commit(&pool, id, &bare).await? {
-                    Some(v) => println!("reproject {owner}/{slug}: создана версия v{v}"),
+                    Some(v) => println!("reproject {owner}/{slug}: created version v{v}"),
+                    // Оба случая называем: list.json может РАЗОБРАТЬСЯ и не иметь шагов, и тогда
+                    // «нет валидного list.json» отправило бы починку не туда.
                     None => println!(
-                        "reproject {owner}/{slug}: проецировать нечего (нет валидного list.json/steps)"
+                        "reproject {owner}/{slug}: nothing to project (list.json is invalid or has no steps)"
                     ),
                 }
                 return Ok(());
@@ -140,35 +142,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(git::version::SyncOutcome::InSync) => in_sync += 1,
                         Ok(git::version::SyncOutcome::Bootstrapped { versions }) => {
                             boot += 1;
-                            println!("  {handle}/{slug}: репо создано ({versions} версий)");
+                            println!("  {handle}/{slug}: repo created ({versions} versions)");
                         }
                         Ok(git::version::SyncOutcome::Appended { from, to }) => {
                             appended += 1;
-                            println!("  {handle}/{slug}: догнано v{from}..v{to}");
+                            println!("  {handle}/{slug}: caught up v{from}..v{to}");
                         }
                         Ok(git::version::SyncOutcome::ProjectedTip { version }) => {
                             projected += 1;
-                            println!("  {handle}/{slug}: tip спроецирован в БД → v{version}");
+                            println!("  {handle}/{slug}: tip projected into db -> v{version}");
                         }
                         Ok(git::version::SyncOutcome::Conflict { have, current }) => {
                             conflicts += 1;
                             println!(
-                                "  ⚠ {handle}/{slug}: КОНФЛИКТ git v{have} ↔ db v{current} — руками, \
-                                 см. runbook git-projection-catchup"
+                                "  WARN {handle}/{slug}: CONFLICT git v{have} vs db v{current} - needs hands, \
+                                 see runbook git-projection-catchup"
                             );
                         }
                         Err(e) => {
                             conflicts += 1;
-                            println!("  ⚠ {handle}/{slug}: ошибка — {e}");
+                            println!("  WARN {handle}/{slug}: error - {e}");
                         }
                     }
                 }
                 println!(
-                    "sync-repos: всего {total}; синхронны {in_sync}, созданы {boot}, догнаны {appended}, \
-                     спроецированы {projected}, конфликтов {conflicts}"
+                    "sync-repos: total {total}; in sync {in_sync}, created {boot}, caught up {appended}, \
+                     projected {projected}, conflicts {conflicts}"
                 );
                 if conflicts > 0 {
-                    return Err(format!("{conflicts} репо требуют ручного вмешательства").into());
+                    return Err(format!("{conflicts} repos need manual intervention").into());
                 }
                 return Ok(());
             }
@@ -192,41 +194,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // логах было бы пусто, пока никто не пишет (инцидент .com 01.08 —
     // SETFORK_APP_URL=setfork-frontend-zpyzi8, имя без схемы и порта).
     match setfork_core::gate::parse_app_url(std::env::var("SETFORK_APP_URL").ok().as_deref()) {
-        Ok(url) => tracing::info!(app_url = %url, "предусловие записи спрашиваем здесь"),
+        Ok(url) => tracing::info!(app_url = %url, "write precondition is asked here"),
         Err(e) if cfg.allow_insecure => {
             tracing::warn!(
                 ?e,
-                "SETFORK_APP_URL непригоден — предусловие записи НЕ проверяется \
-                 (замороженный список примет запись). Только локальный dev."
+                "SETFORK_APP_URL is unusable: the write precondition is NOT checked \
+                 (a frozen list will accept writes). Local dev only."
             );
         }
         Err(setfork_core::gate::BadAppUrl::Missing) => {
             eprintln!(
-                "setfork-core: ОСТАНОВКА — SETFORK_APP_URL не задан. Без него ядро не может \
-                 спросить приложение, разрешена ли запись (ADR-0015), и заморозка/архив \
-                 списка перестают действовать на git-путях. Задайте адрес приложения \
-                 (напр. http://app:3000), либо для локального dev выставьте \
-                 SETFORK_ALLOW_INSECURE=1."
+                "setfork-core: STOPPED - SETFORK_APP_URL is not set. Without it the core cannot \
+                 ask the app whether a write is allowed (ADR-0015), so freezing and archiving a \
+                 list stop working on git paths. Set the app address (e.g. http://app:3000), or \
+                 for local dev set SETFORK_ALLOW_INSECURE=1."
             );
             std::process::exit(1);
         }
         Err(setfork_core::gate::BadAppUrl::NotAbsolute(got)) => {
             eprintln!(
-                "setfork-core: ОСТАНОВКА — SETFORK_APP_URL='{got}' не является абсолютным \
-                 адресом. Нужна схема и хост целиком, например http://setfork-frontend:3000 \
-                 (имя сервиса приложения в docker-сети и его порт). С таким значением ядро \
-                 не достучится до приложения, и КАЖДАЯ запись будет отклонена по fail-closed."
+                "setfork-core: STOPPED - SETFORK_APP_URL='{got}' is not an absolute \
+                 address. A scheme and full host are required, e.g. http://setfork-frontend:3000 \
+                 (the app service name in the docker network plus its port). With this value the \
+                 core never reaches the app, and EVERY write is refused by fail-closed."
             );
             std::process::exit(1);
         }
         Err(setfork_core::gate::BadAppUrl::TlsUnsupported(got)) => {
             eprintln!(
-                "setfork-core: ОСТАНОВКА — SETFORK_APP_URL='{got}' использует https, а клиент \
-                 предусловия записи собран без TLS: вызов рассчитан на внутреннюю сеть, где \
-                 шифрование не нужно, и rustls ради него не тянется. Укажите http-адрес сервиса \
-                 внутри docker-сети (например http://setfork-frontend:3000). Если приложение \
-                 действительно доступно ТОЛЬКО по https — это отдельное решение, нужен \
-                 TLS-коннектор в gate.rs."
+                "setfork-core: STOPPED - SETFORK_APP_URL='{got}' uses https, but the \
+                 write precondition client is built without TLS: the call targets the internal \
+                 network where encryption is not needed, and rustls is not pulled in for it. Use \
+                 the http address of the service inside the docker network. If the app really is \
+                 reachable ONLY over https, that needs a TLS connector in gate.rs."
             );
             std::process::exit(1);
         }
@@ -237,7 +237,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     git::repo::set_lock_pool(db::connect_lock_pool(&cfg.database_url).await?);
 
     let n = db::published_count(&pool).await?;
-    tracing::info!(published_lists = n, "подключились к Postgres");
+    tracing::info!(published_lists = n, "connected to Postgres");
 
     let addr = cfg.addr;
 
@@ -247,7 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_http_listener(sock)
             .set_buckets(&[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0])?
             .install()?;
-        tracing::info!("метрики Prometheus: http://{sock}/metrics");
+        tracing::info!("Prometheus metrics: http://{sock}/metrics");
     }
 
     // gRPC health-check (grpc.health.v1) — для проб оркестратора/LB.
@@ -283,10 +283,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if ok != healthy {
                     healthy = ok;
                     if ok {
-                        tracing::info!("БД снова доступна — health SERVING");
+                        tracing::info!("db is reachable again, health SERVING");
                         hr.set_serving::<GitCoreServer<GitCoreSvc>>().await;
                     } else {
-                        tracing::error!("БД недоступна — health NOT_SERVING");
+                        tracing::error!("db unreachable, health NOT_SERVING");
                         hr.set_not_serving::<GitCoreServer<GitCoreSvc>>().await;
                     }
                 }
@@ -313,11 +313,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             wait_for_signal().await;
             shutting.store(true, std::sync::atomic::Ordering::Relaxed);
             health_reporter.set_not_serving::<GitCoreServer<GitCoreSvc>>().await;
-            tracing::info!("получен сигнал остановки — дренаж активных RPC…");
+            tracing::info!("shutdown signal received, draining active RPCs");
         }
     };
 
-    tracing::info!(%addr, "setfork-core git-core слушает");
+    tracing::info!(%addr, "setfork-core git-core listening");
     // Auth канала Next↔ядро: общий Bearer-токен (SETFORK_CORE_TOKEN). Ядро НЕ делает
     // пользовательской авторизации (BFF-модель: весь гейт владения/модерации — на фронте),
     // поэтому токен канала — ЕДИНСТВЕННАЯ граница доступа ко всей записи/чтению контента.
@@ -326,16 +326,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // токена — только с SETFORK_ALLOW_INSECURE=1. Health без авторизации (docker/k8s-пробы).
     if cfg.token.is_none() && !cfg.allow_insecure {
         eprintln!(
-            "setfork-core: ОСТАНОВКА — SETFORK_CORE_TOKEN не задан. Без него канал открыт кому \
-             угодно в сети (полный обход владения и модерации). Задайте токен (тот же — фронту), \
-             либо для локального dev явно выставьте SETFORK_ALLOW_INSECURE=1."
+            "setfork-core: STOPPED - SETFORK_CORE_TOKEN is not set. Without it the channel is \
+             open to anyone on the network (a full bypass of ownership and moderation). Set \
+             the token (the same one for the app), or for local dev set \
+             SETFORK_ALLOW_INSECURE=1."
         );
         std::process::exit(1);
     }
     let token: Option<&'static str> = cfg.token.clone().map(|t| &*format!("Bearer {t}").leak());
     match token {
-        Some(_) => tracing::info!("канал защищён Bearer-токеном"),
-        None => tracing::warn!("SETFORK_ALLOW_INSECURE=1 — канал БЕЗ авторизации (только локальный dev)"),
+        Some(_) => tracing::info!("channel secured with a Bearer token"),
+        None => tracing::warn!("SETFORK_ALLOW_INSECURE=1: channel WITHOUT authorization (local dev only)"),
     }
     let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
         let got = req.metadata().get("authorization").and_then(|v| v.to_str().ok());
@@ -351,7 +352,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // число СОЗДАЛО бы ограничение клона и бандла там, где его нет. Памяти это
     // не сэкономит — пак и так собирается в Vec<u8> целиком.
     let max_recv = cfg.max_recv_bytes;
-    tracing::info!(max_recv_mb = max_recv / (1024 * 1024), "потолок принимаемого gRPC-сообщения");
+    tracing::info!(max_recv_mb = max_recv / (1024 * 1024), "inbound gRPC message limit");
 
     Server::builder()
         // telemetry — СНАРУЖИ rate-limit: отказы 8/16 тоже попадают в метрики.
@@ -400,7 +401,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .serve_with_shutdown(addr, shutdown)
         .await?;
-    tracing::info!("остановлен чисто");
+    tracing::info!("stopped cleanly");
     Ok(())
 }
 
@@ -435,7 +436,7 @@ fn require_git_data_dir() -> Result<(), Box<dyn std::error::Error>> {
     if root.trim().is_empty() {
         return Err("GIT_DATA_DIR не задан (общий с фронтом том git-объектов, см. README)".into());
     }
-    std::fs::create_dir_all(&root).map_err(|e| format!("GIT_DATA_DIR '{root}' недоступен: {e}"))?;
+    std::fs::create_dir_all(&root).map_err(|e| format!("GIT_DATA_DIR '{root}' is not writable: {e}"))?;
     Ok(())
 }
 

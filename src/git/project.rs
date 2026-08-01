@@ -306,7 +306,7 @@ pub async fn project_pushed_commit(
         Ok(p) => p,
         Err(e) => {
             // Пользовательский вход: битый list.json — не сбой сервиса, но след оставляем.
-            tracing::warn!(%template_id, error = %e, "проекция: list.json не парсится — версия не создана");
+            tracing::warn!(%template_id, error = %e, "projection: list.json does not parse, no version created");
             return Ok(None);
         }
     };
@@ -334,16 +334,16 @@ pub async fn project_pushed_commit(
     )
     .await
     {
-        tracing::error!(%template_id, ver, error = %e, "проекция: версия создана, но мета не обновлена");
+        tracing::error!(%template_id, ver, error = %e, "projection: version created but metadata not updated");
     }
     // Тег vN на запушенный коммит (для maxTagVersion/истории). Без тега ensure_repo
     // может повторно досыпать версию поверх (шум истории, не потеря данных).
     let bare_tag = bare.to_path_buf();
     match tokio::task::spawn_blocking(move || tag_version(&bare_tag, ver, &tip)).await {
         Ok(Ok(())) => {}
-        Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, "проекция: тег не поставлен"),
+        Ok(Err(e)) => tracing::error!(%template_id, ver, error = %e, "projection: tag not created"),
         Err(e) => {
-            tracing::error!(%template_id, ver, error = %e, "проекция: тег не поставлен (задача прервана)")
+            tracing::error!(%template_id, ver, error = %e, "projection: tag not created (task aborted)")
         }
     }
     Ok(Some(ver))
