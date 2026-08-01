@@ -112,7 +112,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match git::project::project_pushed_commit(&pool, id, &bare).await? {
                     Some(v) => println!("reproject {owner}/{slug}: created version v{v}"),
-                    None => println!("reproject {owner}/{slug}: nothing to project (no valid list.json)"),
+                    // Оба случая называем: list.json может РАЗОБРАТЬСЯ и не иметь шагов, и тогда
+                    // «нет валидного list.json» отправило бы починку не туда.
+                    None => println!(
+                        "reproject {owner}/{slug}: nothing to project (list.json is invalid or has no steps)"
+                    ),
                 }
                 return Ok(());
             }
