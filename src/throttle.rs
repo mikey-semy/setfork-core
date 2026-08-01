@@ -118,26 +118,39 @@ pub async fn serialized<F, T>(key: Uuid, fut: F) -> T
 where
     F: Future<Output = T>,
 {
+    // Уборка через Drop, а не строчкой в конце: `serialized` могут БРОСИТЬ —
+    // истёк дедлайн gRPC, клиент отвалился, паника выше по стеку. Тогда код
+    // после `await` не выполнится никогда, и запись осталась бы в карте до конца
+    // жизни процесса (авто-ревью core#78). Drop отрабатывает и при отмене, и при
+    // раскрутке паники.
+    //
+    // ⚠️ Порядок объявления значим: локальные переменные дропаются в обратном
+    // порядке, поэтому сначала объявляем уборщика, потом `gate` — иначе уборщик
+    // считал бы ссылки, пока наш собственный клон ещё жив, и не убирал НИКОГДА.
+    let _cleanup = GateCleanup(key);
     let gate = {
         let mut gates = gates().lock().unwrap_or_else(|e| e.into_inner());
         Arc::clone(gates.entry(key).or_default())
     };
-    let out = {
-        let _held = gate.lock().await;
-        fut.await
-    };
-    // Уборка: карта не обязана помнить каждый список, которому когда-либо
-    // пушили. Считать ссылки безопасно ровно под замком карты — новый клон можно
-    // получить только через неё, а `strong_count == 1` означает, что держит
-    // только сама карта.
-    {
+    let _held = gate.lock().await;
+    fut.await
+}
+
+/// Снимает замок из карты, когда им больше никто не пользуется.
+///
+/// `strong_count == 1` означает «держит только сама карта», и проверять это
+/// безопасно ровно под её замком: новый клон можно получить лишь через неё.
+/// Поэтому ждущий в очереди (у него свой клон) не может быть выброшен из карты и
+/// разъехаться с тем, кто зайдёт следом.
+struct GateCleanup(Uuid);
+
+impl Drop for GateCleanup {
+    fn drop(&mut self) {
         let mut gates = gates().lock().unwrap_or_else(|e| e.into_inner());
-        drop(gate);
-        if gates.get(&key).is_some_and(|g| Arc::strong_count(g) == 1) {
-            gates.remove(&key);
+        if gates.get(&self.0).is_some_and(|g| Arc::strong_count(g) == 1) {
+            gates.remove(&self.0);
         }
     }
-    out
 }
 
 #[cfg(test)]
@@ -296,6 +309,29 @@ mod tests {
         let key = Uuid::new_v4();
         serialized(key, async {}).await;
         assert!(!gates().lock().expect("lock").contains_key(&key), "карта замков не растёт вечно");
+    }
+
+    #[tokio::test]
+    async fn брошенный_вызов_тоже_убирает_за_собой() {
+        // У ручного пуша есть дедлайн gRPC: вызов БРОСАЮТ, не доводя до конца, и
+        // код после await не выполняется никогда. Пока уборка была строчкой в
+        // конце функции, запись оставалась в карте до конца жизни процесса.
+        //
+        // Брошенный вызов здесь ЕДИНСТВЕННЫЙ — иначе тест ничего не доказывает:
+        // при живом соседе запись убрал бы он, и старая реализация тоже прошла бы.
+        let key = Uuid::new_v4();
+        let dropped = tokio::time::timeout(
+            Duration::from_millis(30),
+            serialized(key, async {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }),
+        )
+        .await;
+        assert!(dropped.is_err(), "вызов обязан быть брошен на дедлайне — иначе тест проверяет не то");
+        assert!(
+            !gates().lock().expect("lock").contains_key(&key),
+            "запись обязана уйти вместе с брошенным вызовом, а не жить до перезапуска"
+        );
     }
 
     #[tokio::test]
