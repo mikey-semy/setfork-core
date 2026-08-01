@@ -52,7 +52,7 @@ impl RateLimitLayer {
     /// Параметры — из config::Config: env здесь больше не читаем (токен
     /// читался дважды — main и этот модуль; аудит 2026-07-20, P2-14).
     pub fn new(rpm: u32, rpm_heavy: u32, token: Option<&str>) -> Self {
-        tracing::info!(rpm, rpm_heavy, "rate-limit per-метод (0 = выкл)");
+        tracing::info!(rpm, rpm_heavy, "per-method rate limit (0 = off)");
         Self::with(rpm, rpm_heavy, token.map(|t| format!("Bearer {t}")))
     }
 

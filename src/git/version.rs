@@ -123,7 +123,7 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
             .map_err(join_err)?
             .map_err(join_err)?;
         metrics::counter!("repo_catchup_versions_total").increment(count);
-        tracing::warn!(%id, from = have + 1, to = current, "git отставал от БД — версии дописаны (догон)");
+        tracing::warn!(%id, from = have + 1, to = current, "git lagged behind db, versions appended (catch-up)");
         return Ok(SyncOutcome::Appended { from: have + 1, to: current });
     }
 
@@ -133,7 +133,7 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
         && tag_on_tip(bare, have).await?
         && let Some(v) = project::project_pushed_commit(pool, id, bare).await?
     {
-        tracing::warn!(%id, version = v, "git был впереди БД на одну версию — tip спроецирован (heal)");
+        tracing::warn!(%id, version = v, "git was one version ahead of db, tip projected (heal)");
         return Ok(SyncOutcome::ProjectedTip { version: v });
     }
 

@@ -153,7 +153,7 @@ pub async fn ensure_repo_by_id(pool: &PgPool, id: Uuid) -> Result<Option<PathBuf
     // Ошибка выравнивания чтение не роняет: устаревшее репо читаемо, а Conflict
     // уже громко залогирован внутри sync; запись остановит своё предусловие.
     if let Err(e) = super::version::sync_repo_with_db(pool, id, &bare).await {
-        tracing::error!(%id, error = %e, "выравнивание репо с БД не удалось (чтение продолжается)");
+        tracing::error!(%id, error = %e, "repo/db alignment failed (reads continue)");
     }
     Ok(Some(bare))
 }

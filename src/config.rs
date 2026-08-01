@@ -56,7 +56,7 @@ fn env_u32(name: &str, default: u32) -> u32 {
             Ok(v) => v,
             // Опечатка в конфиге не должна МОЛЧА откатывать значение на дефолт.
             Err(_) => {
-                tracing::warn!(var = name, value = %s, "не число — использую {default}");
+                tracing::warn!(var = name, value = %s, "not a number, using {default}");
                 default
             }
         },
@@ -71,7 +71,7 @@ impl Config {
 
         let pgpool_max = match env_u32("PGPOOL_MAX", 10) {
             0 => {
-                tracing::warn!("PGPOOL_MAX=0 бессмысленен — использую 10");
+                tracing::warn!("PGPOOL_MAX=0 is meaningless, using 10");
                 10
             }
             v => v,
@@ -111,7 +111,7 @@ impl Config {
             // трактуем как «оставить дефолт», а не как «запретить всё».
             max_recv_bytes: match env_u32("SETFORK_MAX_RECV_MB", 32) {
                 0 => {
-                    tracing::warn!("SETFORK_MAX_RECV_MB=0 заблокировал бы все RPC — использую 32");
+                    tracing::warn!("SETFORK_MAX_RECV_MB=0 would block every RPC, using 32");
                     32 * 1024 * 1024
                 }
                 mb => mb as usize * 1024 * 1024,
