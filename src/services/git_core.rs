@@ -543,7 +543,7 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BytesResponse { data }))
     }
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
-        let PostRequest { repo, body, git_protocol, lang } = req.into_inner();
+        let PostRequest { repo, body, git_protocol, lang, actor_handle } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
@@ -581,12 +581,29 @@ impl GitCore for GitCoreSvc {
         // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
         // ветку-черновик main не двигает → иначе плодились бы дубли версий.
-        let (data, moved) = tokio::task::spawn_blocking(move || -> std::io::Result<(Vec<u8>, bool)> {
-            let before = main_oid(&bare_recv);
-            let data = smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol), opt(&lang))?;
-            let after = main_oid(&bare_recv);
-            Ok((data, after.is_some() && after != before))
-        })
+        let actor = actor_handle.clone();
+        let (data, moved, magic) = tokio::task::spawn_blocking(
+            move || -> std::io::Result<(Vec<u8>, bool, Vec<crate::git::magic::MagicPush>)> {
+                let before = main_oid(&bare_recv);
+                let data = smart_http::receive_pack_rpc(
+                    &bare_recv,
+                    &body,
+                    opt(&git_protocol),
+                    opt(&lang),
+                    opt(&actor),
+                )?;
+                let after = main_oid(&bare_recv);
+                // Ф4: магические рефы разбираем ВНУТРИ той же критической секции,
+                // что и приём — между ними не должно вклиниться чужое чтение
+                // рефов, иначе кто-то увидит refs/for/* как настоящую ветку.
+                let magic = match git2::Repository::open_bare(&bare_recv) {
+                    Ok(r) => crate::git::magic::take_magic_pushes(&r, &actor)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?,
+                    Err(e) => return Err(std::io::Error::other(e.to_string())),
+                };
+                Ok((data, after.is_some() && after != before, magic))
+            },
+        )
         .await
         .map_err(internal)?
         .map_err(internal)?;
@@ -600,7 +617,14 @@ impl GitCore for GitCoreSvc {
         } else {
             0
         };
-        Ok(Response::new(ReceivePackResponse { data, new_version }))
+        Ok(Response::new(ReceivePackResponse {
+            data,
+            new_version,
+            magic: magic
+                .into_iter()
+                .map(|m| crate::pb::MagicPush { base: m.base, branch: m.branch, tip_sha: m.tip_sha })
+                .collect(),
+        }))
     }
     async fn create_bundle(&self, req: Request<RepoRef>) -> Result<Response<BytesResponse>, Status> {
         let RepoRef { owner, slug } = req.into_inner();

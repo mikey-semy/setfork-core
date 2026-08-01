@@ -69,6 +69,21 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         en: "Remove them from the commit: list content lives in list.json.",
         ru: "Уберите их из коммита: содержимое списка живёт в list.json.",
     },
+    HookMessage {
+        key: "magic_needs_actor",
+        en: "SetFork: refs/for/... requires an authenticated push (no user in this request)",
+        ru: "SetFork: refs/for/... требует авторизованного пуша (в запросе нет пользователя)",
+    },
+    HookMessage {
+        key: "magic_bad_base",
+        en: "SetFork: only refs/for/main is supported; got %s",
+        ru: "SetFork: поддерживается только refs/for/main; получено %s",
+    },
+    HookMessage {
+        key: "magic_accepted",
+        en: "SetFork: change accepted, the suggestion will appear on the list page",
+        ru: "SetFork: правка принята, предложение появится на странице списка",
+    },
 ];
 
 /// Шелл-функция `msg <ключ> [аргументы…]`, печатающая строку на языке `$SETFORK_LANG`.

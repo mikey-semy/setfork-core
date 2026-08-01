@@ -149,7 +149,23 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
 ///
 /// Тексты сюда не пишутся: только `msg <ключ>` — оба языка живут в `messages`.
 const PRE_RECEIVE_BODY: &[&str] = &[
+    "actor=\"${SETFORK_ACTOR:-}\"",
     "while read old new ref; do",
+    // Ф4, магический реф: `refs/for/<base>` значит «это не ветка, это
+    // предложение к base». Отказы тут, а не после приёма: отвергнуть пуш
+    // задним числом уже нельзя, а молча проглотить — тем более.
+    "  case \"$ref\" in",
+    "    refs/for/*)",
+    "      if [ -z \"$actor\" ]; then",
+    "        msg magic_needs_actor >&2",
+    "        exit 1",
+    "      fi",
+    "      if [ \"$ref\" != \"refs/for/main\" ]; then",
+    "        msg magic_bad_base \"$ref\" >&2",
+    "        exit 1",
+    "      fi",
+    "      ;;",
+    "  esac",
     "  if [ \"$ref\" = \"refs/heads/main\" ]; then",
     "    if [ \"$new\" = \"$zero\" ]; then",
     "      msg main_no_delete >&2",
@@ -178,6 +194,7 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     "      exit 1",
     "    fi",
     "  done",
+    "  case \"$ref\" in refs/for/*) msg magic_accepted >&2 ;; esac",
     "done",
     "exit 0",
 ];
