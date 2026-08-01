@@ -139,14 +139,70 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
 //
 // `</dev/null` у git-вызовов: stdin хука — это список рефов, который читает
 // `while read`, и дочерний процесс не должен его подъедать.
-const PRE_RECEIVE: &str = "#!/bin/sh\nzero=0000000000000000000000000000000000000000\nwhile read old new ref; do\n  if [ \"$ref\" = \"refs/heads/main\" ]; then\n    if [ \"$new\" = \"$zero\" ]; then\n      echo \"SetFork: ветка main защищена от удаления\" >&2\n      exit 1\n    fi\n    if [ \"$old\" != \"$zero\" ] && ! git merge-base --is-ancestor \"$old\" \"$new\"; then\n      echo \"SetFork: non-fast-forward push в main запрещён (перезапись истории)\" >&2\n      exit 1\n    fi\n  fi\n  case \"$new\" in *$zero) continue ;; esac\n  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then\n    echo \"SetFork: list.json is required at the repo root\" >&2\n    exit 1\n  fi\n  for c in $(git rev-list \"$new\" --not --all </dev/null); do\n    bad=$(git ls-tree -r --name-only \"$c\" </dev/null | grep -v -E '^(README\\.md|list\\.json|\\.gitattributes|steps/[^/]+\\.md)$' | sort -u | head -5)\n    if [ -n \"$bad\" ]; then\n      echo \"SetFork: в дереве списка разрешены только README.md, list.json и .gitattributes.\" >&2\n      echo \"Лишние пути (коммит $c):\" >&2\n      echo \"$bad\" | sed 's/^/  /' >&2\n      echo \"Уберите их из коммита: содержимое списка живёт в list.json.\" >&2\n      exit 1\n    fi\n  done\ndone\nexit 0\n";
+/// Тело хука ПОСТРОЧНО.
+///
+/// Раньше это была одна строка с экранированными переводами строк, и в неё же
+/// попадал регэксп с обратными слешами: правка превращалась в подсчёт уровней
+/// экранирования, а ошибка вылезала уже в шелле.
+/// Массив строк читается как обычный shell и не требует ничего экранировать
+/// сверх самих кавычек.
+///
+/// Тексты сюда не пишутся: только `msg <ключ>` — оба языка живут в `messages`.
+const PRE_RECEIVE_BODY: &[&str] = &[
+    "while read old new ref; do",
+    "  if [ \"$ref\" = \"refs/heads/main\" ]; then",
+    "    if [ \"$new\" = \"$zero\" ]; then",
+    "      msg main_no_delete >&2",
+    "      exit 1",
+    "    fi",
+    "    if [ \"$old\" != \"$zero\" ] && ! git merge-base --is-ancestor \"$old\" \"$new\"; then",
+    "      msg main_no_force >&2",
+    "      exit 1",
+    "    fi",
+    "  fi",
+    "  case \"$new\" in *$zero) continue ;; esac",
+    "  if ! git cat-file -e \"$new:list.json\" 2>/dev/null; then",
+    "    msg list_json_required >&2",
+    "    exit 1",
+    "  fi",
+    // Перечисляем ПУТИ по каждому новому коммиту, а не объекты: `rev-list --objects`
+    // печатает каждый OID один раз, и лишний файл с байтами разрешённого не
+    // появлялся в выводе вовсе (авто-ревью core#70, P1).
+    "  for c in $(git rev-list \"$new\" --not --all </dev/null); do",
+    r#"    bad=$(git ls-tree -r --name-only "$c" </dev/null | grep -v -E '^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md)$' | sort -u | head -5)"#,
+    "    if [ -n \"$bad\" ]; then",
+    "      msg tree_allowlist >&2",
+    "      msg tree_foreign_header \"$c\" >&2",
+    r#"      echo "$bad" | sed 's/^/  /' >&2"#,
+    "      msg tree_foreign_hint >&2",
+    "      exit 1",
+    "    fi",
+    "  done",
+    "done",
+    "exit 0",
+];
+
+/// Полный текст хука: шапка + сгенерированная `msg()` + тело.
+fn pre_receive() -> String {
+    format!(
+        "#!/bin/sh
+zero=0000000000000000000000000000000000000000
+{}{}
+",
+        super::messages::shell_msg_fn(),
+        PRE_RECEIVE_BODY.join(
+            "
+"
+        )
+    )
+}
 
 /// Ставит pre-receive hook (защита main + list.json + состав дерева) и потолок
 /// входящего пака; идемпотентно — обновления правил докатываются до старых репо.
 pub fn install_hook(bare: &Path) -> io::Result<()> {
     let hooks = bare.join("hooks");
     fs::create_dir_all(&hooks)?;
-    fs::write(hooks.join("pre-receive"), PRE_RECEIVE)?;
+    fs::write(hooks.join("pre-receive"), pre_receive())?;
     // executable bit — только на unix; на Windows git-for-windows берёт хук через sh.
     #[cfg(unix)]
     {

@@ -531,7 +531,7 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BytesResponse { data }))
     }
     async fn upload_pack(&self, req: Request<PostRequest>) -> Result<Response<BytesResponse>, Status> {
-        let PostRequest { repo, body, git_protocol } = req.into_inner();
+        let PostRequest { repo, body, git_protocol, .. } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         let (bare, _id) = self.ensure(&repo.owner, &repo.slug).await?;
         let data = tokio::task::spawn_blocking(move || {
@@ -543,7 +543,7 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BytesResponse { data }))
     }
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
-        let PostRequest { repo, body, git_protocol } = req.into_inner();
+        let PostRequest { repo, body, git_protocol, lang } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
@@ -583,7 +583,7 @@ impl GitCore for GitCoreSvc {
         // ветку-черновик main не двигает → иначе плодились бы дубли версий.
         let (data, moved) = tokio::task::spawn_blocking(move || -> std::io::Result<(Vec<u8>, bool)> {
             let before = main_oid(&bare_recv);
-            let data = smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol))?;
+            let data = smart_http::receive_pack_rpc(&bare_recv, &body, opt(&git_protocol), opt(&lang))?;
             let after = main_oid(&bare_recv);
             Ok((data, after.is_some() && after != before))
         })
