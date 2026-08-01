@@ -50,13 +50,40 @@ pub fn author_branch(handle: &str, base: &str) -> String {
     format!("u/{handle}/{base}")
 }
 
+/// Снимок магических рефов ДО приёма пака: имя → вершина.
+///
+/// Нужен, чтобы отличить «этот пуш создал» от «лежало раньше». Без снимка
+/// разбор присваивал бы ЧУЖОЙ брошенный `refs/for/main` следующему пушащему, и
+/// его коммиты уехали бы в чужое предложение (авто-ревью core#76, P1). Взяться
+/// такому рефу есть откуда: до Ф4 хук пропускал произвольные не-main рефы, и
+/// сервис мог упасть между приёмом пака и уборкой.
+pub fn snapshot(repo: &Repository) -> Result<Vec<(String, git2::Oid)>, git2::Error> {
+    let mut out = Vec::new();
+    for name in repo.references_glob(&format!("{MAGIC_PREFIX}*"))?.names().flatten() {
+        let name = name.to_string();
+        if let Ok(oid) = repo.refname_to_id(&name) {
+            out.push((name, oid));
+        }
+    }
+    Ok(out)
+}
+
 /// Разбирает магические рефы после приёма пака: переносит вершину в ветку
 /// автора и УДАЛЯЕТ сам магический реф.
 ///
-/// Возвращает по записи на каждый обработанный реф. Пустой `handle` сюда не
-/// доходит — такой пуш отвергает хук, у которого есть текст для человека;
-/// здесь это лишь страховка от вызова мимо хука.
-pub fn take_magic_pushes(repo: &Repository, handle: &str) -> Result<Vec<MagicPush>, git2::Error> {
+/// Обрабатывает ТОЛЬКО то, что создал или сдвинул этот пуш (сверка с `before`).
+/// Реф, лежавший до пуша с той же вершиной, — мусор от прошлого сбоя: его
+/// удаляем, но НЕ присваиваем текущему автору. Тихо оставить его нельзя — он
+/// присвоится следующему; приписать этому — значит подсунуть человеку чужие
+/// коммиты в его предложение.
+///
+/// Пустой `handle` сюда не доходит — такой пуш отвергает хук, у которого есть
+/// текст для человека; здесь это лишь страховка от вызова мимо хука.
+pub fn take_magic_pushes(
+    repo: &Repository,
+    handle: &str,
+    before: &[(String, git2::Oid)],
+) -> Result<Vec<MagicPush>, git2::Error> {
     if handle.is_empty() {
         return Ok(Vec::new());
     }
@@ -72,6 +99,13 @@ pub fn take_magic_pushes(repo: &Repository, handle: &str) -> Result<Vec<MagicPus
     for name in names {
         let Some(base) = name.strip_prefix(MAGIC_PREFIX) else { continue };
         let tip = repo.refname_to_id(&name)?;
+        // Лежал до пуша и не двигался → не наш. Убираем мусор молча для клиента,
+        // но громко для оператора: он значит, что кто-то падал на полпути.
+        if before.iter().any(|(n, o)| n == &name && o == &tip) {
+            tracing::warn!(ref_name = %name, "stale magic ref from an earlier failed push, removing");
+            repo.find_reference(&name)?.delete()?;
+            continue;
+        }
         let branch = author_branch(handle, base);
         let target = format!("refs/heads/{branch}");
         // force = true: ветка автора обязана догонять предъявленное. Это не
@@ -117,7 +151,7 @@ mod tests {
         let (_t, repo, oid) = repo_with_commit();
         repo.reference("refs/for/main", oid, true, "push").expect("magic ref");
 
-        let got = take_magic_pushes(&repo, "mike").expect("разбор");
+        let got = take_magic_pushes(&repo, "mike", &[]).expect("разбор");
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].base, "main");
         assert_eq!(got[0].branch, "u/mike/main");
@@ -133,7 +167,7 @@ mod tests {
     fn повторный_пуш_двигает_ту_же_ветку() {
         let (_t, repo, first) = repo_with_commit();
         repo.reference("refs/for/main", first, true, "push").expect("ref");
-        take_magic_pushes(&repo, "mike").expect("первый");
+        take_magic_pushes(&repo, "mike", &[]).expect("первый");
 
         // Вторая ревизия того же предложения.
         let sig =
@@ -141,12 +175,30 @@ mod tests {
         let parent = repo.find_commit(first).expect("parent");
         let second =
             repo.commit(None, &sig, &sig, "c2", &parent.tree().expect("tree"), &[&parent]).expect("commit");
+        // Снимок берётся ДО пуша — как в жизни (ядро делает его перед приёмом пака).
+        let before = snapshot(&repo).expect("снимок до пуша");
         repo.reference("refs/for/main", second, true, "push").expect("ref");
 
-        let got = take_magic_pushes(&repo, "mike").expect("второй");
+        let got = take_magic_pushes(&repo, "mike", &before).expect("второй");
         assert_eq!(got.len(), 1, "одна запись");
         assert_eq!(got[0].branch, "u/mike/main", "та же ветка — значит то же предложение");
         assert_eq!(repo.refname_to_id("refs/heads/u/mike/main").expect("ветка"), second);
+    }
+
+    /// Регрессия P1 авто-ревью core#76: брошенный чужой реф не должен
+    /// присваиваться следующему пушащему.
+    #[test]
+    fn чужой_брошенный_реф_не_присваивается() {
+        let (_t, repo, oid) = repo_with_commit();
+        repo.reference("refs/for/main", oid, true, "чужой пуш, сервис упал").expect("ref");
+        // Снимок сделан ДО «нашего» пуша — значит реф не наш.
+        let before = snapshot(&repo).expect("снимок");
+
+        let got = take_magic_pushes(&repo, "anna", &before).expect("разбор");
+        assert!(got.is_empty(), "чужие коммиты не попадают в предложение anna");
+        assert!(repo.refname_to_id("refs/heads/u/anna/main").is_err(), "ветка anna не создана");
+        // Мусор при этом убран: оставь его — присвоится следующему.
+        assert!(repo.refname_to_id("refs/for/main").is_err(), "мусорный реф не убран");
     }
 
     #[test]
@@ -159,7 +211,7 @@ mod tests {
     fn без_ника_ничего_не_трогаем() {
         let (_t, repo, oid) = repo_with_commit();
         repo.reference("refs/for/main", oid, true, "push").expect("ref");
-        assert!(take_magic_pushes(&repo, "").expect("пусто").is_empty());
+        assert!(take_magic_pushes(&repo, "", &[]).expect("пусто").is_empty());
         // Реф остался на месте: решение об отказе принимает хук, у которого есть
         // текст для человека, а не молчаливая уборка здесь.
         assert!(repo.refname_to_id("refs/for/main").is_ok());

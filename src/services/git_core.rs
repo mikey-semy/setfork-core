@@ -585,6 +585,12 @@ impl GitCore for GitCoreSvc {
         let (data, moved, magic) = tokio::task::spawn_blocking(
             move || -> std::io::Result<(Vec<u8>, bool, Vec<crate::git::magic::MagicPush>)> {
                 let before = main_oid(&bare_recv);
+                // Снимок магических рефов ДО приёма: без него чужой брошенный
+                // refs/for/* присвоился бы текущему пушащему (авто-ревью, P1).
+                let magic_before = match git2::Repository::open_bare(&bare_recv) {
+                    Ok(r) => crate::git::magic::snapshot(&r).unwrap_or_default(),
+                    Err(e) => return Err(std::io::Error::other(e.to_string())),
+                };
                 let data = smart_http::receive_pack_rpc(
                     &bare_recv,
                     &body,
@@ -597,7 +603,7 @@ impl GitCore for GitCoreSvc {
                 // что и приём — между ними не должно вклиниться чужое чтение
                 // рефов, иначе кто-то увидит refs/for/* как настоящую ветку.
                 let magic = match git2::Repository::open_bare(&bare_recv) {
-                    Ok(r) => crate::git::magic::take_magic_pushes(&r, &actor)
+                    Ok(r) => crate::git::magic::take_magic_pushes(&r, &actor, &magic_before)
                         .map_err(|e| std::io::Error::other(e.to_string()))?,
                     Err(e) => return Err(std::io::Error::other(e.to_string())),
                 };
