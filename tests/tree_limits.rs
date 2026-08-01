@@ -290,3 +290,47 @@ fn install_hook_выставляет_потолок_пака() {
     let got: u64 = String::from_utf8_lossy(&v.stdout).trim().parse().expect("число");
     assert_eq!(got, 16 * 1024 * 1024, "дефолт 16 МБ");
 }
+
+/// И2: язык отказа выбирается переменной окружения, которую ядро выставляет
+/// процессу `receive-pack` — хук её наследует.
+///
+/// Проверяем ПОВЕДЕНИЕМ через настоящий push: сам факт, что оба набора лежат в
+/// скрипте, ещё не значит, что выбор работает — ошибиться можно и в шаблоне
+/// `case`, и в порядке ветвей.
+#[test]
+fn язык_отказа_переключается_окружением() {
+    let root = tmp("tree-lang");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("assets.bin"), b"x").expect("blob");
+    git_ok(&work, &["add", "-A"]);
+    git_ok(&work, &["commit", "-q", "-m", "мусор"]);
+
+    // Английский по умолчанию: переменной нет вовсе (решение владельца 31.07 —
+    // git-инструментарий англоязычен, незнакомый язык читается как поломка).
+    let out = git(&work, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("only README.md"), "по умолчанию английский: {err}");
+
+    // Русский — по явному сигналу.
+    let ru = Command::new("git")
+        .current_dir(&work)
+        .env("SETFORK_LANG", "ru")
+        .args(["push", "origin", "main"])
+        .output()
+        .expect("git");
+    let ru_err = String::from_utf8_lossy(&ru.stderr);
+    assert!(ru_err.contains("разрешены только"), "русский по SETFORK_LANG: {ru_err}");
+
+    // Незнакомый язык — английский, а не пусто: молчаливый отказ читается как сбой.
+    let xx = Command::new("git")
+        .current_dir(&work)
+        .env("SETFORK_LANG", "xx")
+        .args(["push", "origin", "main"])
+        .output()
+        .expect("git");
+    let xx_err = String::from_utf8_lossy(&xx.stderr);
+    assert!(xx_err.contains("only README.md"), "неизвестный язык → английский: {xx_err}");
+
+    // Путь называется в любом языке — это данные, а не перевод.
+    assert!(ru_err.contains("assets.bin") && err.contains("assets.bin"), "путь потерялся");
+}
