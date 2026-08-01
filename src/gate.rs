@@ -34,17 +34,62 @@ use crate::reason::{self, Reason};
 /// должен превращаться в залипший push — лучше быстрый честный отказ.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Адрес приложения (`SETFORK_APP_URL`, напр. `http://app:3000`). None — не задан.
-/// Читается один раз; сервер без него не стартует (см. main::require_app_url).
+/// Почему адрес приложения непригоден. Текст идёт человеку в сообщение остановки.
+#[derive(Debug, PartialEq, Eq)]
+pub enum BadAppUrl {
+    /// Переменная не задана или пуста.
+    Missing,
+    /// Есть значение, но это не абсолютный `http://`-адрес.
+    NotAbsolute(String),
+    /// Указан `https://`, а клиент здесь принципиально plaintext (см. ниже).
+    TlsUnsupported(String),
+}
+
+/// Проверенный адрес приложения из строки.
+///
+/// Проверяем ФОРМУ, а не только непустоту. Прод 01.08 показал, зачем: там стояло
+/// `SETFORK_APP_URL=setfork-frontend-zpyzi8` — имя без схемы и порта, да ещё и не
+/// то. Ядро стартовало молча, а каждая запись отклонялась бы по fail-closed, и
+/// причина нашлась бы не сразу: в логах пусто, пока никто не пишет.
+///
+/// Это ровно то, от чего fail-fast и заводился (аудит 2026-07-20, P1-7): ошибку
+/// конфигурации ловим на старте, а не первым отказом в бою.
+pub fn parse_app_url(raw: Option<&str>) -> Result<String, BadAppUrl> {
+    let s = raw.map(str::trim).unwrap_or("");
+    if s.is_empty() {
+        return Err(BadAppUrl::Missing);
+    }
+    let url = s.trim_end_matches('/');
+    // https отвергаем ЯВНО и с объяснением, а не молча принимаем: клиент собран
+    // с plaintext-коннектором (`HttpConnector`), TLS он не умеет по построению —
+    // вызов идёт внутри docker-сети, и тянуть ради него rustls незачем. Принять
+    // https на старте значило бы завести ровно ту ловушку, ради которой эта
+    // проверка и появилась: конфиг «валиден», а каждая запись падает в бою
+    // (авто-ревью core#73, P1).
+    if url.starts_with("https://") {
+        return Err(BadAppUrl::TlsUnsupported(url.to_string()));
+    }
+    // Схема обязательна: без неё hyper соберёт запрос с пустым authority и
+    // получит ошибку соединения на каждом вызове.
+    let rest = url.strip_prefix("http://").ok_or_else(|| BadAppUrl::NotAbsolute(url.to_string()))?;
+    // Хост непустой и не начинается со слеша (иначе это путь, а не authority).
+    let host = rest.split('/').next().unwrap_or("");
+    if host.is_empty() {
+        return Err(BadAppUrl::NotAbsolute(url.to_string()));
+    }
+    // Значение обязано разбираться как URI — последняя проверка тем же кодом,
+    // который потом соберёт запрос.
+    if url.parse::<hyper::Uri>().is_err() {
+        return Err(BadAppUrl::NotAbsolute(url.to_string()));
+    }
+    Ok(url.to_string())
+}
+
+/// Адрес приложения (`SETFORK_APP_URL`, напр. `http://app:3000`). None — не задан
+/// ЛИБО задан непригодно; сервер в обоих случаях не стартует (проверка в main).
 pub fn app_url() -> Option<&'static str> {
     static V: OnceLock<Option<String>> = OnceLock::new();
-    V.get_or_init(|| {
-        std::env::var("SETFORK_APP_URL")
-            .ok()
-            .map(|s| s.trim().trim_end_matches('/').to_string())
-            .filter(|s| !s.is_empty())
-    })
-    .as_deref()
+    V.get_or_init(|| parse_app_url(std::env::var("SETFORK_APP_URL").ok().as_deref()).ok()).as_deref()
 }
 
 type HttpClient = Client<HttpConnector, Full<Bytes>>;
@@ -184,6 +229,43 @@ mod tests {
             parse_verdict(br#"{"allow":false}"#),
             Verdict::Deny("denied".into()),
             "отказ без причины остаётся отказом"
+        );
+    }
+
+    /// Регрессия инцидента .com 01.08: в проде стояло имя контейнера без схемы и
+    /// порта. Ядро стартовало молча, а каждая запись отклонялась бы по fail-closed
+    /// — в логах при этом пусто, пока никто не пишет, и причина ищется долго.
+    #[test]
+    fn мусорный_адрес_приложения_не_проходит_старт() {
+        assert_eq!(parse_app_url(None), Err(BadAppUrl::Missing));
+        assert_eq!(parse_app_url(Some("   ")), Err(BadAppUrl::Missing));
+        for bad in [
+            "setfork-frontend-zpyzi8", // ровно то, что стояло на проде
+            "setfork-frontend:3000",   // хост с портом, но без схемы
+            "//setfork-frontend:3000", // без схемы
+            "ftp://app:3000",          // не http(s)
+            "http://",                 // пустой хост
+            "http:///api",             // хост подменён путём
+        ] {
+            assert!(matches!(parse_app_url(Some(bad)), Err(BadAppUrl::NotAbsolute(_))), "{bad:?} прошёл");
+        }
+    }
+
+    #[test]
+    fn годный_адрес_нормализуется() {
+        assert_eq!(parse_app_url(Some("http://app:3000")).as_deref(), Ok("http://app:3000"));
+        // Хвостовой слеш срезаем: путь эндпоинта дописывается к базе, иначе вышло бы `//api`.
+        assert_eq!(parse_app_url(Some("http://app:3000/")).as_deref(), Ok("http://app:3000"));
+    }
+
+    /// Регрессия P1 авто-ревью core#73: https проходил валидацию, но клиент
+    /// plaintext — каждая запись падала бы в бою. Отвергаем на старте, с
+    /// объяснением, а не молча.
+    #[test]
+    fn https_отвергается_пока_клиент_plaintext() {
+        assert_eq!(
+            parse_app_url(Some("https://app:3000")),
+            Err(BadAppUrl::TlsUnsupported("https://app:3000".into()))
         );
     }
 
