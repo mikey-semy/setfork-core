@@ -305,7 +305,7 @@ async fn project_main_or_log(
             metrics::counter!("projection_failures_total", "op" => format!("{op}_empty")).increment(1);
             tracing::warn!(
                 owner, slug, %id, op,
-                "проекция ничего не создала (list.json не разобран или без steps) — версия НЕ создана"
+                "projection produced nothing (list.json unparsed or without steps): version NOT created"
             );
             0
         }
@@ -313,7 +313,7 @@ async fn project_main_or_log(
             metrics::counter!("projection_failures_total", "op" => op).increment(1);
             tracing::error!(
                 owner, slug, %id, error = %e, op,
-                "ОШИБКА проекции — git принят, версия НЕ создана; восстановление: reproject"
+                "projection FAILED: git accepted, version NOT created; recovery: reproject"
             );
             0
         }

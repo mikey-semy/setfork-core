@@ -151,8 +151,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(git::version::SyncOutcome::Conflict { have, current }) => {
                             conflicts += 1;
                             println!(
-                                "  ⚠ {handle}/{slug}: КОНФЛИКТ git v{have} ↔ db v{current} — руками, \
-                                 см. runbook git-projection-catchup"
+                                "  WARN {handle}/{slug}: CONFLICT git v{have} vs db v{current} - needs hands, \
+                                 see runbook git-projection-catchup"
                             );
                         }
                         Err(e) => {
@@ -162,8 +162,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 println!(
-                    "sync-repos: всего {total}; синхронны {in_sync}, созданы {boot}, догнаны {appended}, \
-                     спроецированы {projected}, конфликтов {conflicts}"
+                    "sync-repos: total {total}; in sync {in_sync}, created {boot}, caught up {appended}, \
+                     projected {projected}, conflicts {conflicts}"
                 );
                 if conflicts > 0 {
                     return Err(format!("{conflicts} repos need manual intervention").into());
@@ -194,8 +194,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) if cfg.allow_insecure => {
             tracing::warn!(
                 ?e,
-                "SETFORK_APP_URL непригоден — предусловие записи НЕ проверяется \
-                 (замороженный список примет запись). Только локальный dev."
+                "SETFORK_APP_URL is unusable: the write precondition is NOT checked \
+                 (a frozen list will accept writes). Local dev only."
             );
         }
         Err(setfork_core::gate::BadAppUrl::Missing) => {

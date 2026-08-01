@@ -67,7 +67,7 @@ fn env_u32(name: &str, default: u32) -> u32 {
 impl Config {
     pub fn from_env() -> Result<Config, String> {
         let database_url =
-            std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL не задан (см. .env)".to_string())?;
+            std::env::var("DATABASE_URL").map_err(|_| "DATABASE_URL is not set (see .env)".to_string())?;
 
         let pgpool_max = match env_u32("PGPOOL_MAX", 10) {
             0 => {
@@ -80,7 +80,7 @@ impl Config {
         let addr_raw = std::env::var("SETFORK_CORE_ADDR").unwrap_or_else(|_| "127.0.0.1:50051".into());
         let addr: SocketAddr = addr_raw
             .parse()
-            .map_err(|e| format!("SETFORK_CORE_ADDR '{addr_raw}' некорректен ({e}) — ожидается host:port"))?;
+            .map_err(|e| format!("SETFORK_CORE_ADDR '{addr_raw}' is invalid ({e}) - expected host:port"))?;
 
         let maddr_raw = std::env::var("SETFORK_METRICS_ADDR").unwrap_or_else(|_| "127.0.0.1:9464".into());
         let metrics_addr = if maddr_raw == "0" || maddr_raw.eq_ignore_ascii_case("off") {
@@ -89,7 +89,7 @@ impl Config {
             Some(
                 maddr_raw
                     .parse::<SocketAddr>()
-                    .map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr_raw}' некорректен ({e})"))?,
+                    .map_err(|e| format!("SETFORK_METRICS_ADDR '{maddr_raw}' is invalid ({e})"))?,
             )
         };
 
