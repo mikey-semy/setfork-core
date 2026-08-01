@@ -186,19 +186,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // здесь означает «запись никто не проверяет». Поэтому не предупреждение, а
     // остановка: молча деградировать до открытой двери нельзя. Явный локальный
     // dev — тем же опт-аутом, что и для токена канала.
-    if setfork_core::gate::app_url().is_none() {
-        if cfg.allow_insecure {
+    //
+    // Проверяем ФОРМУ адреса, а не только его наличие: мусорное значение
+    // стартовало бы молча и отклоняло КАЖДУЮ запись по fail-closed, причём в
+    // логах было бы пусто, пока никто не пишет (инцидент .com 01.08 —
+    // SETFORK_APP_URL=setfork-frontend-zpyzi8, имя без схемы и порта).
+    match setfork_core::gate::parse_app_url(std::env::var("SETFORK_APP_URL").ok().as_deref()) {
+        Ok(url) => tracing::info!(app_url = %url, "предусловие записи спрашиваем здесь"),
+        Err(e) if cfg.allow_insecure => {
             tracing::warn!(
-                "SETFORK_APP_URL не задан — предусловие записи НЕ проверяется \
+                ?e,
+                "SETFORK_APP_URL непригоден — предусловие записи НЕ проверяется \
                  (замороженный список примет запись). Только локальный dev."
             );
-        } else {
+        }
+        Err(setfork_core::gate::BadAppUrl::Missing) => {
             eprintln!(
                 "setfork-core: ОСТАНОВКА — SETFORK_APP_URL не задан. Без него ядро не может \
                  спросить приложение, разрешена ли запись (ADR-0015), и заморозка/архив \
                  списка перестают действовать на git-путях. Задайте адрес приложения \
                  (напр. http://app:3000), либо для локального dev выставьте \
                  SETFORK_ALLOW_INSECURE=1."
+            );
+            std::process::exit(1);
+        }
+        Err(setfork_core::gate::BadAppUrl::NotAbsolute(got)) => {
+            eprintln!(
+                "setfork-core: ОСТАНОВКА — SETFORK_APP_URL='{got}' не является абсолютным \
+                 адресом. Нужна схема и хост целиком, например http://setfork-frontend:3000 \
+                 (имя сервиса приложения в docker-сети и его порт). С таким значением ядро \
+                 не достучится до приложения, и КАЖДАЯ запись будет отклонена по fail-closed."
             );
             std::process::exit(1);
         }
