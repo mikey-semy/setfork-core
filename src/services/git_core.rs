@@ -18,8 +18,8 @@ use crate::pb::{
     Commit, CommitToBranchRequest, CommitToBranchResponse, CommitsResponse, CreateBranchRequest,
     CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListCommitsRequest, ListContent,
     MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse,
-    MirrorPushResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag,
-    TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
+    MirrorCheckResponse, MirrorPushResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef,
+    SnapshotStep, Tag, TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -1131,6 +1131,37 @@ impl GitCore for GitCoreSvc {
             Ok(()) => Ok(Response::new(MirrorPushResponse { ok: true, error: String::new() })),
             Err(e) => Ok(Response::new(MirrorPushResponse { ok: false, error: e })),
         }
+    }
+
+    /// Ф2: проверка доступа к зеркалу БЕЗ пуша — кнопка «Проверить доступ».
+    ///
+    /// Статус зеркала здесь НЕ трогаем, в отличие от пуша: проверка ничего не
+    /// меняет на фордже и не имеет права выдавать себя за попытку синхронизации.
+    /// Иначе «проверил и ушёл» отодвигало бы настоящий повтор (подметальщик
+    /// считает паузу от времени последней попытки) и сбивало счётчик неудач.
+    async fn mirror_check(&self, req: Request<RepoRef>) -> Result<Response<MirrorCheckResponse>, Status> {
+        let RepoRef { owner, slug } = req.into_inner();
+        let (bare, id) = self.ensure(&owner, &slug).await?;
+        // Исход — в теле, как у пуша: «токен не подошёл» это legitimate ответ
+        // владельцу, а не сбой RPC.
+        let body = |error: Option<String>| {
+            Ok(Response::new(match error {
+                None => MirrorCheckResponse { ok: true, error: String::new() },
+                Some(e) => MirrorCheckResponse { ok: false, error: e },
+            }))
+        };
+        let Some((url, token_enc)) = db::load_mirror(&self.pool, id).await.map_err(db_status)? else {
+            return body(Some("зеркало не настроено".to_string()));
+        };
+        let Some(secret) = crate::git::mirror::mirror_secret() else {
+            return body(Some("SETFORK_MIRROR_SECRET не задан на сервере".to_string()));
+        };
+        let Some(token) = crate::git::mirror::decrypt_token(&token_enc, secret) else {
+            return body(Some(
+                "токен зеркала не расшифровался (секрет сменён?) — сохраните заново".to_string(),
+            ));
+        };
+        body(crate::git::mirror::mirror_check(&bare, &url, &token).await.err())
     }
 
     /// Коммиты рефа (свежие первыми). `not_in` скрывает достижимое из базы —

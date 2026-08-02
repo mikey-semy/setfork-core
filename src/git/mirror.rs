@@ -126,24 +126,36 @@ fn redact(text: &str, token: &str) -> String {
     result
 }
 
-/// Пуш зеркала: main + все теги, с force и prune, таймаут 60с.
-/// Ok(()) — зеркало догнало истину; Err(text) — текст БЕЗ кредов (для статуса).
-pub async fn mirror_push(bare: &Path, url: &str, token: &str) -> Result<(), String> {
+/// Аргументы `git push` одной строкой — отдельно от запуска, чтобы их можно было
+/// проверить тестом. Проверять есть что: разница между пушем и проверкой держится
+/// ровно на этом списке.
+fn push_args(bare: &str, pushurl: &str, flags: &[&str], refspecs: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = vec!["--git-dir".into(), bare.into(), "push".into()];
+    args.extend(flags.iter().map(|f| (*f).to_string()));
+    args.push(pushurl.into());
+    args.extend(refspecs.iter().map(|r| (*r).to_string()));
+    args
+}
+
+/// Общий запуск `git push` с кредами в URL: и для настоящего пуша, и для
+/// проверки доступа. Одна функция сознательно — иначе проверка и пуш однажды
+/// разъедутся в кредах, таймауте или сокрытии токена, и «доступ есть» перестанет
+/// значить «пуш пройдёт».
+async fn run_push(
+    bare: &Path,
+    url: &str,
+    token: &str,
+    flags: &[&str],
+    refspecs: &[&str],
+) -> Result<(), String> {
     if !valid_mirror_url(url) {
         return Err("mirror URL must be https://host/owner/repo (без кредов в URL)".to_string());
     }
     let pushurl = url_with_token(url, token).ok_or("bad mirror URL")?;
     let bare_s = bare.to_string_lossy().to_string();
+    let args = push_args(&bare_s, &pushurl, flags, refspecs);
     let child = tokio::process::Command::new("git")
-        .args([
-            "--git-dir",
-            &bare_s,
-            "push",
-            "--prune",
-            &pushurl,
-            "+refs/heads/main:refs/heads/main",
-            "+refs/tags/*:refs/tags/*",
-        ])
+        .args(&args)
         // Никаких интерактивных запросов кредов: лучше быстрая ошибка в статус.
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(std::process::Stdio::piped())
@@ -163,6 +175,50 @@ pub async fn mirror_push(bare: &Path, url: &str, token: &str) -> Result<(), Stri
             err.lines().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
         Err(redact(tail.trim(), token))
     }
+}
+
+/// Пуш зеркала: main + все теги, с force и prune, таймаут 60с.
+/// Ok(()) — зеркало догнало истину; Err(text) — текст БЕЗ кредов (для статуса).
+pub async fn mirror_push(bare: &Path, url: &str, token: &str) -> Result<(), String> {
+    run_push(
+        bare,
+        url,
+        token,
+        &["--prune"],
+        &["+refs/heads/main:refs/heads/main", "+refs/tags/*:refs/tags/*"],
+    )
+    .await
+}
+
+/// Имя рефа, которого заведомо нет на зеркале. Участвует ТОЛЬКО в refspec'е
+/// удаления под `--dry-run`, то есть не создаётся и не удаляется; имя выбрано
+/// говорящим, чтобы человек, увидевший его в журнале форджи, понял, что это.
+const ACCESS_PROBE_REF: &str = ":refs/heads/setfork-access-check-do-not-create";
+
+/// Ф2: проверка доступа к зеркалу БЕЗ пуша — «Проверить доступ» в настройках.
+///
+/// Почему не `git ls-remote`, как просилось изначально: он проверяет ЧТЕНИЕ.
+/// Проверено на живом GitHub — с заведомо мусорным токеном на публичном
+/// репозитории `ls-remote` возвращает exit 0. Кнопка обещала бы доступ там, где
+/// пуш откажет, а именно так и ведёт себя read-only токен.
+///
+/// `git push --dry-run` идёт по пути ЗАПИСИ: аутентифицируется на receive-pack
+/// (у GitHub и GitLab этот эндпоинт требует прав на запись) и на этом
+/// останавливается — команды обновления не отправляются, поэтому на фордже не
+/// меняется ничего.
+///
+/// Refspec — УДАЛЕНИЕ несуществующего рефа, а не пуш `main`. Так проверка
+/// работает и до первой публикации: у пустого репозитория `main` ещё нет, а
+/// обычный refspec отваливается на локальном разборе, не доходя до сети
+/// (проверено: «src refspec ... does not match any» приходит раньше соединения).
+/// У refspec'а удаления локального источника нет, поэтому git идёт в сеть сразу.
+///
+/// ⚠️ `--prune` здесь БЫТЬ НЕ ДОЛЖНО, в отличие от настоящего пуша: с одним
+/// refspec'ом удаления он означает «снести на зеркале всё, что не названо», то
+/// есть весь репозиторий. Сейчас это спасал бы только `--dry-run`, а страховка в
+/// один флаг — не страховка. Список аргументов держит тест.
+pub async fn mirror_check(bare: &Path, url: &str, token: &str) -> Result<(), String> {
+    run_push(bare, url, token, &["--dry-run"], &[ACCESS_PROBE_REF]).await
 }
 
 #[cfg(test)]
@@ -209,6 +265,44 @@ mod tests {
             url_with_token("https://forge.example/u/r.git", "T").as_deref(),
             Some("https://git:T@forge.example/u/r.git")
         );
+    }
+
+    /// Разница между «проверить» и «запушить» — это ровно список аргументов,
+    /// поэтому он и проверяется. Цена ошибки несимметрична: лишний `--prune` у
+    /// проверки означает refspec «снести на зеркале всё, что не названо», и
+    /// удерживал бы репозиторий от смерти один-единственный `--dry-run`.
+    #[test]
+    fn проверка_доступа_ничего_не_меняет_на_фордже() {
+        let args =
+            push_args("/repo.git", "https://u:t@github.com/o/r.git", &["--dry-run"], &[ACCESS_PROBE_REF]);
+        assert!(args.contains(&"--dry-run".to_string()), "без dry-run это уже не проверка: {args:?}");
+        assert!(
+            !args.contains(&"--prune".to_string()),
+            "prune с удаляющим refspec снёс бы зеркало: {args:?}"
+        );
+        assert!(
+            args.iter().all(|a| !a.starts_with('+')),
+            "силовых refspec'ов у проверки быть не должно: {args:?}"
+        );
+        // Реф пробы — только в форме удаления (ведущее ':'), то есть создать его
+        // не может даже опечатка.
+        assert!(ACCESS_PROBE_REF.starts_with(':'), "проба обязана быть refspec'ом удаления");
+    }
+
+    #[test]
+    fn пуш_зеркала_остаётся_силовым_и_с_prune() {
+        let args = push_args(
+            "/repo.git",
+            "https://u:t@github.com/o/r.git",
+            &["--prune"],
+            &["+refs/heads/main:refs/heads/main", "+refs/tags/*:refs/tags/*"],
+        );
+        assert!(args.contains(&"--prune".to_string()), "{args:?}");
+        assert!(!args.contains(&"--dry-run".to_string()), "настоящий пуш не может быть холостым: {args:?}");
+        // URL идёт ПЕРЕД refspec'ами — иначе git примет его за refspec.
+        let url_at = args.iter().position(|a| a.starts_with("https://")).expect("url");
+        let first_spec = args.iter().position(|a| a.starts_with('+')).expect("refspec");
+        assert!(url_at < first_spec, "{args:?}");
     }
 
     #[test]
