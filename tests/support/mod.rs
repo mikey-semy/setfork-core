@@ -48,6 +48,8 @@ create table templates (
   mirror_token text,
   mirror_synced_at timestamptz,
   mirror_error text,
+  -- Ф2: неудач подряд; ведёт ядро, читает подметальщик ретраев во фронте.
+  mirror_attempts integer not null default 0,
   -- Тип списка (ADR-0010); во фронт-схеме text nullable, БЕЗ enum (Ф2a).
   list_kind text,
   current_version integer not null default 1,

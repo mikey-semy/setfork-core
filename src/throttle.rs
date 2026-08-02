@@ -32,7 +32,7 @@
 //! (вторая половина Ф2), а не удержанием состояния в ядре.
 use std::collections::HashMap;
 use std::future::Future;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use uuid::Uuid;
@@ -94,10 +94,68 @@ where
     });
 }
 
+/// Ключ → замок. Живёт, пока замком кто-то пользуется (см. уборку в `serialized`).
+fn gates() -> &'static Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>> {
+    static GATES: std::sync::OnceLock<Mutex<HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>>> =
+        std::sync::OnceLock::new();
+    GATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Выполнить `fut` так, чтобы для одного `key` в каждый момент шёл ровно один —
+/// остальные ЖДУТ, а не пропускаются (в отличие от `coalesce`).
+///
+/// Зачем отдельно от схлопывания. Схлопывание годится там, где лишний прогон
+/// просто не нужен; здесь другое — прогоны нужны все, но их РЕЗУЛЬТАТЫ пишутся в
+/// одну строку, и порядок записи обязан совпадать с порядком выполнения.
+/// Конкретный случай (авто-ревью core#78): фоновый пуш зеркала висит в сетевом
+/// таймауте, владелец жмёт «Синхронизировать», ручной пуш успевает и обнуляет
+/// счётчик неудач — а следом падает старый фоновый и снова помечает зеркало
+/// сломанным. Синхронизированное зеркало выглядело бы упавшим, и подметальщик
+/// повторял бы пуш, который не нужен.
+///
+/// Ждать безопасно: время удержания ограничено таймаутом самого пуша.
+pub async fn serialized<F, T>(key: Uuid, fut: F) -> T
+where
+    F: Future<Output = T>,
+{
+    // Уборка через Drop, а не строчкой в конце: `serialized` могут БРОСИТЬ —
+    // истёк дедлайн gRPC, клиент отвалился, паника выше по стеку. Тогда код
+    // после `await` не выполнится никогда, и запись осталась бы в карте до конца
+    // жизни процесса (авто-ревью core#78). Drop отрабатывает и при отмене, и при
+    // раскрутке паники.
+    //
+    // ⚠️ Порядок объявления значим: локальные переменные дропаются в обратном
+    // порядке, поэтому сначала объявляем уборщика, потом `gate` — иначе уборщик
+    // считал бы ссылки, пока наш собственный клон ещё жив, и не убирал НИКОГДА.
+    let _cleanup = GateCleanup(key);
+    let gate = {
+        let mut gates = gates().lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(gates.entry(key).or_default())
+    };
+    let _held = gate.lock().await;
+    fut.await
+}
+
+/// Снимает замок из карты, когда им больше никто не пользуется.
+///
+/// `strong_count == 1` означает «держит только сама карта», и проверять это
+/// безопасно ровно под её замком: новый клон можно получить лишь через неё.
+/// Поэтому ждущий в очереди (у него свой клон) не может быть выброшен из карты и
+/// разъехаться с тем, кто зайдёт следом.
+struct GateCleanup(Uuid);
+
+impl Drop for GateCleanup {
+    fn drop(&mut self) {
+        let mut gates = gates().lock().unwrap_or_else(|e| e.into_inner());
+        if gates.get(&self.0).is_some_and(|g| Arc::strong_count(g) == 1) {
+            gates.remove(&self.0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn counting() -> (Arc<AtomicUsize>, impl Fn() -> std::future::Ready<()> + Send + Clone) {
@@ -165,6 +223,115 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert_eq!(n.load(Ordering::SeqCst), 3, "разные списки — разные пуши");
+    }
+
+    // ── serialized ────────────────────────────────────────────────────────
+    // Гонка, ради которой это заведено: результаты пишутся в одну строку, и
+    // порядок записи обязан совпадать с порядком выполнения.
+
+    #[tokio::test]
+    async fn два_прогона_одного_ключа_не_накладываются() {
+        let key = Uuid::new_v4();
+        let inside = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut tasks = Vec::new();
+        for _ in 0..4 {
+            let (inside, peak) = (inside.clone(), peak.clone());
+            tasks.push(tokio::spawn(async move {
+                serialized(key, async {
+                    let n = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(n, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(30)).await;
+                    inside.fetch_sub(1, Ordering::SeqCst);
+                })
+                .await
+            }));
+        }
+        for t in tasks {
+            t.await.expect("join");
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 1, "одновременных прогонов быть не должно");
+    }
+
+    #[tokio::test]
+    async fn порядок_завершения_совпадает_с_порядком_входа() {
+        // Ради этого всё и делается: старый исход не имеет права записаться
+        // ПОСЛЕ нового и объявить синхронизированное зеркало сломанным.
+        let key = Uuid::new_v4();
+        let order = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let first = {
+            let order = order.clone();
+            tokio::spawn(async move {
+                serialized(key, async {
+                    tokio::time::sleep(Duration::from_millis(60)).await;
+                    order.lock().expect("lock").push(1);
+                })
+                .await
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(10)).await; // второй входит позже
+        let second = {
+            let order = order.clone();
+            tokio::spawn(async move {
+                serialized(key, async {
+                    order.lock().expect("lock").push(2);
+                })
+                .await
+            })
+        };
+        first.await.expect("join");
+        second.await.expect("join");
+        assert_eq!(*order.lock().expect("lock"), vec![1, 2], "быстрый второй не обгоняет медленный первый");
+    }
+
+    #[tokio::test]
+    async fn разные_ключи_идут_одновременно() {
+        let started = Arc::new(tokio::sync::Barrier::new(2));
+        let mut tasks = Vec::new();
+        for _ in 0..2 {
+            let started = started.clone();
+            let key = Uuid::new_v4();
+            tasks.push(tokio::spawn(async move { serialized(key, async { started.wait().await }).await }));
+        }
+        // Барьер разойдётся только если оба зашли внутрь одновременно; замок на
+        // разные списки не имеет права их выстроить в очередь.
+        let both = tokio::time::timeout(Duration::from_secs(2), async {
+            for t in tasks {
+                t.await.expect("join");
+            }
+        })
+        .await;
+        assert!(both.is_ok(), "замки разных списков не должны мешать друг другу");
+    }
+
+    #[tokio::test]
+    async fn замок_не_течёт() {
+        let key = Uuid::new_v4();
+        serialized(key, async {}).await;
+        assert!(!gates().lock().expect("lock").contains_key(&key), "карта замков не растёт вечно");
+    }
+
+    #[tokio::test]
+    async fn брошенный_вызов_тоже_убирает_за_собой() {
+        // У ручного пуша есть дедлайн gRPC: вызов БРОСАЮТ, не доводя до конца, и
+        // код после await не выполняется никогда. Пока уборка была строчкой в
+        // конце функции, запись оставалась в карте до конца жизни процесса.
+        //
+        // Брошенный вызов здесь ЕДИНСТВЕННЫЙ — иначе тест ничего не доказывает:
+        // при живом соседе запись убрал бы он, и старая реализация тоже прошла бы.
+        let key = Uuid::new_v4();
+        let dropped = tokio::time::timeout(
+            Duration::from_millis(30),
+            serialized(key, async {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }),
+        )
+        .await;
+        assert!(dropped.is_err(), "вызов обязан быть брошен на дедлайне — иначе тест проверяет не то");
+        assert!(
+            !gates().lock().expect("lock").contains_key(&key),
+            "запись обязана уйти вместе с брошенным вызовом, а не жить до перезапуска"
+        );
     }
 
     #[tokio::test]
