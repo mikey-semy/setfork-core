@@ -59,9 +59,14 @@ fn ver(version: i32, note: &str, steps: Vec<SerStep>) -> VersionData {
 }
 
 /// Запуск git в каталоге `cwd`; паника со stderr при ненулевом коде. Возвращает stdout (trim).
+///
+/// Роль владельца: сквозной сценарий «клон → правка → пуш» — это сценарий
+/// ВЛАДЕЛЬЦА. С Ф5 отсутствие роли означает «посторонний», и main для него
+/// закрыт; дефолт безопасный, но тест обязан назвать роль, которую изображает.
 fn git(cwd: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .current_dir(cwd)
+        .env("SETFORK_ROLE", "owner")
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("spawn git {args:?}: {e}"));

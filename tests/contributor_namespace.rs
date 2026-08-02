@@ -1,0 +1,184 @@
+//! Ф5: посторонний пишет только в СВОЁ пространство.
+//!
+//! Правило исполняет хук, а не приложение, и проверять его надо настоящим пушем:
+//! отвергнуть приём задним числом нельзя, а «разрешено ли» решается ровно в тот
+//! момент, когда git читает список рефов.
+//!
+//! Разделение обязанностей (ADR-0011 §2): КТО может пушить, решает фронт и
+//! присылает готовую роль; ядро исполняет механическое следствие роли. Здесь
+//! проверяется только следствие.
+//!
+//! Без БД: чистый git. Обычный `cargo test`.
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+use setfork_core::git::bundle;
+
+struct Tmp(PathBuf);
+impl Drop for Tmp {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+fn tmp(prefix: &str) -> Tmp {
+    let p = std::env::temp_dir().join(format!("setfork-{prefix}-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&p).expect("create tmp");
+    Tmp(p)
+}
+
+/// Пуш с явными ником и ролью — ровно то, что ядро выставляет receive-pack.
+fn push_as(work: &Path, actor: &str, role: &str, refspec: &str) -> Output {
+    Command::new("git")
+        .current_dir(work)
+        .env("SETFORK_ACTOR", actor)
+        .env("SETFORK_ROLE", role)
+        .args(["push", "origin", refspec])
+        .output()
+        .expect("git запустился")
+}
+
+fn git_ok(dir: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .env("SETFORK_ROLE", "owner") // подготовка идёт от владельца
+        .args(args)
+        .output()
+        .expect("git запустился");
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// Bare с установленным хуком + рабочая копия с одной версией в main.
+fn repo_pair(root: &Path) -> (PathBuf, PathBuf) {
+    let bare = root.join("bare.git");
+    git_ok(root, &["init", "-q", "--bare", "--initial-branch=main", bare.to_str().unwrap()]);
+    bundle::install_hook(&bare).expect("hooks");
+
+    let work = root.join("work");
+    git_ok(root, &["init", "-q", "--initial-branch=main", work.to_str().unwrap()]);
+    git_ok(&work, &["config", "user.email", "t@setfork.com"]);
+    git_ok(&work, &["config", "user.name", "T"]);
+    std::fs::write(work.join("list.json"), br#"{"title":"L","steps":[]}"#).expect("list.json");
+    git_ok(&work, &["add", "-A"]);
+    git_ok(&work, &["commit", "-qm", "v1"]);
+    git_ok(&work, &["remote", "add", "origin", bare.to_str().unwrap()]);
+    git_ok(&work, &["push", "-q", "origin", "main"]);
+    (bare, work)
+}
+
+#[test]
+fn посторонний_не_трогает_main() {
+    let root = tmp("f5-main");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("list.json"), br#"{"title":"L2","steps":[]}"#).expect("edit");
+    git_ok(&work, &["commit", "-aqm", "v2"]);
+
+    let out = push_as(&work, "outsider", "contributor", "main");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "посторонний не пишет в main: {err}");
+    // Отказ обязан назвать правило и путь наружу, иначе человек решит, что
+    // доступа нет вовсе, и уйдёт.
+    assert!(err.contains("not yours"), "отказ называет причину: {err}");
+    assert!(err.contains("refs/for/main"), "отказ показывает, куда можно: {err}");
+}
+
+#[test]
+fn посторонний_не_трогает_чужую_ветку() {
+    let root = tmp("f5-alien");
+    let (_bare, work) = repo_pair(&root.0);
+
+    let out = push_as(&work, "outsider", "contributor", "main:refs/heads/u/mike/idea");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "чужое пространство закрыто: {err}");
+    assert!(err.contains("not yours"), "{err}");
+}
+
+#[test]
+fn посторонний_пишет_в_своё_пространство_и_предъявляет_правку() {
+    let root = tmp("f5-own");
+    let (_bare, work) = repo_pair(&root.0);
+
+    let own = push_as(&work, "outsider", "contributor", "main:refs/heads/u/outsider/idea");
+    assert!(own.status.success(), "своё пространство открыто: {}", String::from_utf8_lossy(&own.stderr));
+
+    let magic = push_as(&work, "outsider", "contributor", "main:refs/for/main");
+    let magic_err = String::from_utf8_lossy(&magic.stderr);
+    assert!(magic.status.success(), "предложение принимается: {magic_err}");
+    assert!(magic_err.contains("change accepted"), "человек видит, что дальше: {magic_err}");
+}
+
+#[test]
+fn ветка_похожая_на_чужую_не_проходит() {
+    let root = tmp("f5-prefix");
+    let (_bare, work) = repo_pair(&root.0);
+
+    // `u/outsiderX/*` начинается с ника, но пространство ДРУГОЕ. Сравнение
+    // обязано идти по границе сегмента, а не по началу строки.
+    let out = push_as(&work, "outsider", "contributor", "main:refs/heads/u/outsiderX/idea");
+    assert!(
+        !out.status.success(),
+        "префикс — не то же, что сегмент: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // И пустой хвост тоже не пространство: `u/<ник>` без имени ветки.
+    let bare_ns = push_as(&work, "outsider", "contributor", "main:refs/heads/u/outsider");
+    assert!(!bare_ns.status.success(), "голое пространство без имени — не ветка");
+}
+
+#[test]
+fn владелец_и_соавтор_пишут_куда_угодно() {
+    let root = tmp("f5-owner");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("list.json"), br#"{"title":"L3","steps":[]}"#).expect("edit");
+    git_ok(&work, &["commit", "-aqm", "v3"]);
+
+    let owner = push_as(&work, "mike", "owner", "main");
+    assert!(owner.status.success(), "владелец пишет в main: {}", String::from_utf8_lossy(&owner.stderr));
+
+    let collab = push_as(&work, "kate", "collaborator", "main:refs/heads/shared-idea");
+    assert!(
+        collab.status.success(),
+        "соавтор ведёт общие ветки: {}",
+        String::from_utf8_lossy(&collab.stderr)
+    );
+}
+
+/// Забытая роль обязана ЗАКРЫВАТЬ дверь. Это и есть причина, по которой пустое
+/// значение трактуется как «посторонний»: старый фронт, не знающий про Ф5,
+/// получит понятный отказ, а не тихо выданные права владельца.
+#[test]
+fn отсутствие_роли_трактуется_строго() {
+    let root = tmp("f5-norole");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("list.json"), br#"{"title":"L4","steps":[]}"#).expect("edit");
+    git_ok(&work, &["commit", "-aqm", "v4"]);
+
+    let out = Command::new("git")
+        .current_dir(&work)
+        .env("SETFORK_ACTOR", "mike")
+        .env_remove("SETFORK_ROLE")
+        .args(["push", "origin", "main"])
+        .output()
+        .expect("git");
+    assert!(!out.status.success(), "без роли в main нельзя: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// Посторонний без ника не может ничего: пространство определяется ником, и без
+/// него правило неисполнимо. Молчать в этом случае нельзя — отказ объясняет.
+#[test]
+fn посторонний_без_ника_получает_объяснение() {
+    let root = tmp("f5-noactor");
+    let (_bare, work) = repo_pair(&root.0);
+
+    let out = Command::new("git")
+        .current_dir(&work)
+        .env_remove("SETFORK_ACTOR")
+        .env("SETFORK_ROLE", "contributor")
+        .args(["push", "origin", "main:refs/heads/u/x/idea"])
+        .output()
+        .expect("git");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "без ника пространство неопределимо: {err}");
+    assert!(err.contains("cannot tell who is pushing"), "отказ объясняет: {err}");
+}

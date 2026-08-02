@@ -572,7 +572,7 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BytesResponse { data }))
     }
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
-        let PostRequest { repo, body, git_protocol, lang, actor_handle } = req.into_inner();
+        let PostRequest { repo, body, git_protocol, lang, actor_handle, actor_role } = req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
@@ -611,6 +611,10 @@ impl GitCore for GitCoreSvc {
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
         // ветку-черновик main не двигает → иначе плодились бы дубли версий.
         let actor = actor_handle.clone();
+        // Ф5: роль едет в хук как есть. Пустую НЕ подменяем на «владельца» —
+        // хук трактует её как «посторонний», и это единственный безопасный
+        // дефолт: забытое поле обязано закрывать дверь.
+        let role = actor_role.clone();
         let (data, moved, magic) = tokio::task::spawn_blocking(
             move || -> std::io::Result<(Vec<u8>, bool, Vec<crate::git::magic::MagicPush>)> {
                 let before = main_oid(&bare_recv);
@@ -626,6 +630,7 @@ impl GitCore for GitCoreSvc {
                     opt(&git_protocol),
                     opt(&lang),
                     opt(&actor),
+                    opt(&role),
                 )?;
                 let after = main_oid(&bare_recv);
                 // Ф4: магические рефы разбираем ВНУТРИ той же критической секции,

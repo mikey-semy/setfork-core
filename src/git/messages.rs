@@ -84,6 +84,25 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         en: "SetFork: change accepted, the suggestion will appear on the list page",
         ru: "SetFork: правка принята, предложение появится на странице списка",
     },
+    // Ф5: посторонний пишет только в своё пространство. Текст обязан объяснить
+    // ПРАВИЛО, а не просто отказать: человеку, которому нельзя в main, нужно
+    // отсюда узнать, куда можно, — иначе он решит, что доступа нет вовсе.
+    HookMessage {
+        key: "contributor_namespace",
+        en: "SetFork: you may not push to %s — this list is not yours",
+        ru: "SetFork: в %s писать нельзя — список не ваш",
+    },
+    HookMessage {
+        key: "contributor_namespace_hint",
+        // Без апострофов намеренно: текст уезжает в одинарные кавычки шелла.
+        en: "Propose a change by pushing to refs/for/main, or keep a draft in refs/heads/u/%s/<name>.",
+        ru: "Предложите правку пушем в refs/for/main или держите черновик в refs/heads/u/%s/<имя>.",
+    },
+    HookMessage {
+        key: "contributor_needs_actor",
+        en: "SetFork: cannot tell who is pushing — re-authenticate with your API token",
+        ru: "SetFork: непонятно, кто пушит — повторите вход со своим API-токеном",
+    },
 ];
 
 /// Шелл-функция `msg <ключ> [аргументы…]`, печатающая строку на языке `$SETFORK_LANG`.
