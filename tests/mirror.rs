@@ -24,7 +24,9 @@ fn tmp_root(prefix: &str) -> Tmp {
 }
 
 fn git(args: &[&str]) -> (bool, String) {
-    let out = Command::new("git").args(args).output().expect("spawn git");
+    // Ф5: зеркало пушит в СВОЙ bare без хука SetFork, но тесты гоняют и обычные
+    // репозитории — роль владельца не мешает и снимает зависимость от умолчания.
+    let out = Command::new("git").env("SETFORK_ROLE", "owner").args(args).output().expect("spawn git");
     (
         out.status.success(),
         format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)),
