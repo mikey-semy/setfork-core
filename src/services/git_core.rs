@@ -589,7 +589,7 @@ impl GitCore for GitCoreSvc {
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
         // `actor_handle` не читаем СОЗНАТЕЛЬНО: ник в логике не участвует (Ф5), поле
         // переходное и живёт ради старого ядра в окно выкатки — см. proto.
-        let PostRequest { repo, body, git_protocol, lang, actor_handle: _, actor_id, actor_role } =
+        let PostRequest { repo, body, git_protocol, lang, actor_handle, actor_id, actor_role } =
             req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
@@ -628,7 +628,13 @@ impl GitCore for GitCoreSvc {
         // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
         // ветку-черновик main не двигает → иначе плодились бы дубли версий.
-        let actor = actor_id.clone();
+        // ПЕРЕХОДНОЕ (снять вместе с полем `actor_handle`): фронт старше Ф5 шлёт
+        // только ник. Без запасного пути такое ядро отвергало бы КАЖДЫЙ магический
+        // пуш до выката фронта — то есть при обратном порядке выкатки функция
+        // ложится ровно так же, как ложилась бы у старого ядра без переходного
+        // поля (авто-ревью fe#662). Ник здесь работает как имя ветки, и это
+        // сегодняшнее прод-поведение: новое ничего не ломает, а старое доживает.
+        let actor = if actor_id.is_empty() { actor_handle.clone() } else { actor_id.clone() };
         // Ф5: роль едет в хук как есть.
         //
         // Пустая означает «фронт старше Ф5»: он ролей не шлёт — и посторонних не
