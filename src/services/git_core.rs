@@ -611,9 +611,20 @@ impl GitCore for GitCoreSvc {
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
         // ветку-черновик main не двигает → иначе плодились бы дубли версий.
         let actor = actor_handle.clone();
-        // Ф5: роль едет в хук как есть. Пустую НЕ подменяем на «владельца» —
-        // хук трактует её как «посторонний», и это единственный безопасный
-        // дефолт: забытое поле обязано закрывать дверь.
+        // Ф5: роль едет в хук как есть.
+        //
+        // Пустая означает «фронт старше Ф5»: он ролей не шлёт — и посторонних не
+        // впускает, поэтому правило пространства имён к нему неприменимо. Это
+        // нормальное состояние ОКНА ВЫКАТКИ, но оно не должно быть тихим: пока
+        // строка есть в логах, ограничение для посторонних фактически не
+        // работает, и включать им доступ во фронте рано.
+        if actor_role.is_empty() {
+            tracing::warn!(
+                owner = %repo.owner,
+                slug = %repo.slug,
+                "push without a role: frontend predates Ф5, contributor namespace rule is not applied"
+            );
+        }
         let role = actor_role.clone();
         let (data, moved, magic) = tokio::task::spawn_blocking(
             move || -> std::io::Result<(Vec<u8>, bool, Vec<crate::git::magic::MagicPush>)> {
