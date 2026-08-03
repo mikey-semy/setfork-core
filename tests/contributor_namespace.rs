@@ -175,3 +175,26 @@ fn посторонний_без_ника_получает_объяснение(
     assert!(!out.status.success(), "без ника пространство неопределимо: {err}");
     assert!(err.contains("cannot tell who is pushing"), "отказ объясняет: {err}");
 }
+
+/// Незнакомое значение роли обязано ОГРАНИЧИВАТЬ, а не открывать.
+///
+/// Поле приходит строкой и протоколом не проверяется: опечатка, новая роль во
+/// фронте, мусор — всё это «не contributor». Пока условие звучало как
+/// «ограничиваем ровно contributor», любое такое значение давало право писать в
+/// main (авто-ревью core#80). Судим по белому списку.
+#[test]
+fn незнакомая_роль_ограничивается() {
+    let root = tmp("f5-unknown-role");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("list.json"), br#"{"title":"L-unknown","steps":[]}"#).expect("edit");
+    git_ok(&work, &["commit", "-aqm", "v2"]);
+
+    for role in ["contributer", "guest", "Owner", "мусор"] {
+        let out = push_as(&work, "someone-id", role, "main");
+        assert!(
+            !out.status.success(),
+            "роль {role:?} не в белом списке — писать в main нельзя: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
