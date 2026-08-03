@@ -13,7 +13,7 @@ use std::path::Path;
 use setfork_core::db::{Level, StepRow};
 use setfork_core::git::bundle::{self, SerStep, VersionData};
 use setfork_core::git::serialize::{list_json, schema_url};
-use setfork_core::git::version::commit_web_version;
+use setfork_core::git::version::{WebEdit, commit_web_version};
 use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
@@ -221,10 +221,14 @@ async fn kind_переживает_полный_цикл() {
     .expect("bootstrap B");
 
     // Веб-версия на A: канон несёт kind.
-    let out =
-        commit_web_version(&pool, a_id, &bare_a, "web", None, vec![step_row("Second")], Default::default())
-            .await
-            .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out = commit_web_version(
+        &pool,
+        a_id,
+        &bare_a,
+        WebEdit::new("web", None, vec![step_row("Second")], Default::default()),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     assert_eq!(out.version, 2);
     let canon = tip_list_json(&bare_a);
     let parsed: serde_json::Value = serde_json::from_slice(&canon).expect("json");
@@ -398,9 +402,14 @@ async fn мета_едет_вместе_с_версией_и_попадает_в
         tags: Some(vec!["baking".into(), "flour".into()]),
         ordered: Some(false),
     };
-    let out = commit_web_version(&pool, list_id, &bare, "with meta", None, vec![step_row("Mix")], meta)
-        .await
-        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out = commit_web_version(
+        &pool,
+        list_id,
+        &bare,
+        WebEdit::new("with meta", None, vec![step_row("Mix")], meta),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     assert_eq!(out.version, 2);
 
     // Канон коммита сразу несёт свежую мету (en-проекция).
@@ -425,7 +434,7 @@ async fn мета_едет_вместе_с_версией_и_попадает_в
         title: Some(serde_json::json!({ "en": "  " })),
         ..Default::default()
     };
-    commit_web_version(&pool, list_id, &bare, "empty title", None, vec![step_row("Mix")], bad)
+    commit_web_version(&pool, list_id, &bare, WebEdit::new("empty title", None, vec![step_row("Mix")], bad))
         .await
         .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     let title: serde_json::Value = sqlx::query_scalar("select title from templates where id = $1")

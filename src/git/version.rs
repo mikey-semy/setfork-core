@@ -205,6 +205,9 @@ pub struct WebVersion {
 pub enum WebVersionError {
     /// Списка нет.
     NotFound,
+    /// Правка основана не на текущей версии: пока её готовили, список успел
+    /// уйти вперёд. Ничего не записано — писавшему нужно перечитать и повторить.
+    VersionConflict { expected: i32, current: i32 },
     /// Репо и БД разошлись так, что чинить руками (см. sync_repo_with_db).
     OutOfSync { have: i32, current: i32 },
     /// Сбой БД ДО git-коммита — ничего не записано.
@@ -222,6 +225,35 @@ impl From<sqlx::Error> for WebVersionError {
     }
 }
 
+/// Одна веб-правка: что записываем и на чём она основана.
+///
+/// Раньше это были пять параметров подряд, два из них `Option`, — такие ряды
+/// путаются местами при вызове и молча компилируются.
+pub struct WebEdit<'a> {
+    pub note: &'a str,
+    /// Автор версии; None — фоновые и git-пути, где автора нет.
+    pub author_id: Option<Uuid>,
+    pub rows: Vec<StepRow>,
+    /// Патч меты списка, применяемый той же транзакцией (Ф2a-довесок).
+    pub meta: MetaPatch,
+    /// Версия, НА КОТОРОЙ основана правка. Задано — сверяется с текущей внутри
+    /// транзакции, где строка уже взята `for update`; расхождение = отказ, ничего
+    /// не записано. None — прежнее поведение (последняя запись побеждает).
+    pub expected_version: Option<i32>,
+}
+
+impl<'a> WebEdit<'a> {
+    /// Правка без предусловия по версии — как писали до появления сверки.
+    pub fn new(note: &'a str, author_id: Option<Uuid>, rows: Vec<StepRow>, meta: MetaPatch) -> Self {
+        WebEdit { note, author_id, rows, meta, expected_version: None }
+    }
+    /// То же, но основанное на конкретной версии (оптимистичная блокировка).
+    pub fn based_on(mut self, expected_version: Option<i32>) -> Self {
+        self.expected_version = expected_version;
+        self
+    }
+}
+
 /// Создаёт версию git-first: коммит vN на main (через единую точку обновления,
 /// внутри `bundle::append_versions`) + проекция строк в Postgres — одна операция
 /// под уже взятым репо-локом. Этим путём идёт ЛЮБАЯ веб-правка (сайт, MCP,
@@ -233,11 +265,9 @@ pub async fn commit_web_version(
     pool: &PgPool,
     id: Uuid,
     bare: &Path,
-    note: &str,
-    author_id: Option<Uuid>,
-    rows: Vec<StepRow>,
-    meta: MetaPatch,
+    edit: WebEdit<'_>,
 ) -> Result<WebVersion, WebVersionError> {
+    let WebEdit { note, author_id, rows, meta, expected_version } = edit;
     // Предусловие: git-tip соответствует current_version. Отставшие репо догоняются
     // здесь же (иначе новый коммит оставил бы дыру в истории), убежавшие — лечатся
     // проекцией tip; глубокое расхождение — отказ, а не тихая порча.
@@ -262,6 +292,13 @@ pub async fn commit_web_version(
     let Some((current, title, desc, tags, ordered, kind)) = row else {
         return Err(WebVersionError::NotFound);
     };
+    // Сверка «правка основана на текущей версии» — ЗДЕСЬ, а не у вызывающего:
+    // строка списка уже взята `for update` этой же транзакцией, поэтому между
+    // сравнением и коммитом чужая версия лечь не может. Проверка снаружи (в
+    // приложении) такого обещания не даёт — там между чтением и записью окно.
+    if let Some(expected) = expected_version.filter(|e| *e != current) {
+        return Err(WebVersionError::VersionConflict { expected, current });
+    }
     // Патч меты — В ЭТОЙ ЖЕ транзакции, ДО сборки канона: коммит версии сразу
     // несёт свежие title/desc/tags/ordered, а сбой RPC не оставляет мету
     // записанной без версии (Ф2a-довесок). Пустой title игнорируется —

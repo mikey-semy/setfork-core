@@ -11,7 +11,7 @@ use std::path::Path;
 
 use setfork_core::db::{Level, StepRow};
 use setfork_core::git::bundle::{self, SerStep, VersionData};
-use setfork_core::git::version::{SyncOutcome, commit_web_version, sync_repo_with_db};
+use setfork_core::git::version::{SyncOutcome, WebEdit, commit_web_version, sync_repo_with_db};
 use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
@@ -185,10 +185,7 @@ async fn непроецированный_push_замечается_и_прое�
         &pool,
         list_id,
         &bare,
-        "after heal",
-        None,
-        vec![step_row("Third")],
-        Default::default(),
+        WebEdit::new("after heal", None, vec![step_row("Third")], Default::default()),
     )
     .await
     .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
@@ -216,10 +213,7 @@ async fn битый_tip_не_блокирует_запись() {
         &pool,
         list_id,
         &bare,
-        "over broken",
-        None,
-        vec![step_row("Recovered")],
-        Default::default(),
+        WebEdit::new("over broken", None, vec![step_row("Recovered")], Default::default()),
     )
     .await
     .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
@@ -321,10 +315,7 @@ async fn список_без_истории_принимает_первую_ве
         &pool,
         list_id,
         &bare,
-        "first real",
-        None,
-        vec![step_row("Первый")],
-        Default::default(),
+        WebEdit::new("first real", None, vec![step_row("Первый")], Default::default()),
     )
     .await
     .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));

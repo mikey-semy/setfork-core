@@ -217,6 +217,7 @@ async fn add_version_bumps_current_and_orders_desc() {
 
     let v2 = write
         .add_version(Request::new(AddVersionRequest {
+            expected_version: None,
             list_id: created.id.clone(),
             note: "second".into(),
             steps: vec![step("Only")],
@@ -255,6 +256,7 @@ async fn add_version_unknown_list_is_not_found() {
     let write = ListWriteSvc { pool: pool.clone() };
     let err = write
         .add_version(Request::new(AddVersionRequest {
+            expected_version: None,
             list_id: uuid::Uuid::new_v4().to_string(),
             note: String::new(),
             steps: vec![],
