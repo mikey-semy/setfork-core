@@ -21,6 +21,8 @@ use uuid::Uuid;
 fn git(cwd: &Path, args: &[&str]) {
     let out = Command::new("git")
         .current_dir(cwd)
+        // Ф5: от лица ВЛАДЕЛЬЦА — без роли хук считает пушащего посторонним.
+        .env("SETFORK_ROLE", "owner")
         .args(["-c", "user.email=test@setfork.com", "-c", "user.name=Tester"])
         .args(args)
         .output()

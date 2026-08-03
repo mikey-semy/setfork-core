@@ -15,11 +15,12 @@ use crate::git::{MAIN_REF, bundle, history, project, repo, serialize, smart_http
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
-    Commit, CommitToBranchRequest, CommitToBranchResponse, CommitsResponse, CreateBranchRequest,
-    CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListCommitsRequest, ListContent,
-    MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse,
-    MirrorCheckResponse, MirrorPushResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef,
-    SnapshotStep, Tag, TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
+    CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest, CommitToBranchResponse,
+    CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
+    ListCommitsRequest, ListContent, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest,
+    MergeStateRequest, MergeStateResponse, MirrorCheckResponse, MirrorPushResponse, PostRequest,
+    ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest,
+    UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -530,6 +531,20 @@ fn canon_list_json(
 
 #[tonic::async_trait]
 impl GitCore for GitCoreSvc {
+    /// Что умеет это ядро (Ф5). Подробности решения — в комментарии к
+    /// `CapabilitiesResponse` в proto.
+    ///
+    /// Признак — константа, а не настройка: он описывает КОД, а не конфигурацию.
+    /// Настройкой он был бы бесполезен ровно там, где нужен: оператор, забывший
+    /// выставить её после выката, получил бы ту самую пару «новый фронт, ядро без
+    /// правила», от которой признак и защищает.
+    async fn get_capabilities(
+        &self,
+        _req: Request<CapabilitiesRequest>,
+    ) -> Result<Response<CapabilitiesResponse>, Status> {
+        Ok(Response::new(CapabilitiesResponse { enforces_push_roles: true }))
+    }
+
     async fn info_refs_upload_pack(
         &self,
         req: Request<InfoRefsRequest>,
@@ -572,7 +587,10 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BytesResponse { data }))
     }
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
-        let PostRequest { repo, body, git_protocol, lang, actor_handle } = req.into_inner();
+        // `actor_handle` не читаем СОЗНАТЕЛЬНО: ник в логике не участвует (Ф5), поле
+        // переходное и живёт ради старого ядра в окно выкатки — см. proto.
+        let PostRequest { repo, body, git_protocol, lang, actor_handle, actor_id, actor_role } =
+            req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
@@ -580,6 +598,20 @@ impl GitCore for GitCoreSvc {
         // Критическая секция: receive-pack + проекция под одним локом репо
         // (ленивый append не вклинивается между приёмом и проекцией).
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
+        // Хук ставится ЗАНОВО, уже под локом. `ensure` выше его тоже ставит, но
+        // свой лок отпускает — и в зазор между ними чужой процесс успевает
+        // переписать общий файл хука на диске. Так бывает, когда рядом работает
+        // ядро ДРУГОЙ версии (общий GIT_DATA_DIR в момент выкатки): её хук правила
+        // ролей не знает, а это ядро тем временем отвечает `enforces_push_roles:
+        // true` — то есть обещает защиту, которой на диске уже нет (авто-ревью
+        // core#80, P1). Под локом зазора не остаётся: чтобы переписать хук, чужой
+        // процесс обязан взять тот же advisory-лок, а его держим мы — до конца
+        // приёма пака. Запись идемпотентна и на фоне пака ничего не стоит.
+        let bare_hook = bare.clone();
+        tokio::task::spawn_blocking(move || bundle::install_hook(&bare_hook))
+            .await
+            .map_err(internal)?
+            .map_err(internal)?;
         // Порог размера репо (Ф0). Per-push потолок (receive.maxInputSize) не мешает
         // вырастить репозиторий серией мелких пушей, а квоты размера у git нет вовсе —
         // это уровень приложения (у GitLab так же: «Repository size limit» —
@@ -610,7 +642,39 @@ impl GitCore for GitCoreSvc {
         // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в
         // ветку-черновик main не двигает → иначе плодились бы дубли версий.
-        let actor = actor_handle.clone();
+        // ПЕРЕХОДНОЕ (снять вместе с полем `actor_handle`): фронт старше Ф5 шлёт
+        // только ник. Без запасного пути такое ядро отвергало бы КАЖДЫЙ магический
+        // пуш до выката фронта — то есть при обратном порядке выкатки функция
+        // ложится ровно так же, как ложилась бы у старого ядра без переходного
+        // поля (авто-ревью fe#662). Ник здесь работает как имя ветки, и это
+        // сегодняшнее прод-поведение: новое ничего не ломает, а старое доживает.
+        //
+        // Признак «фронт старше» — ПУСТАЯ РОЛЬ, а не пустой идентификатор. Иначе
+        // запасной путь ловил бы и запрос от нового фронта, где `actor_id` забыт
+        // по ошибке: ветка называлась бы по сменяемому нику, и после смены ника
+        // чужой человек перезаписал бы предъявленное (авто-ревью core#80). Новый
+        // фронт без идентификатора — это неисправность, и магический реф обязан
+        // отвергнуться, как обещает протокол.
+        let actor = match (actor_id.as_str(), actor_role.as_str()) {
+            ("", "") => actor_handle.clone(),
+            ("", _) => String::new(),
+            (id, _) => id.to_string(),
+        };
+        // Ф5: роль едет в хук как есть.
+        //
+        // Пустая означает «фронт старше Ф5»: он ролей не шлёт — и посторонних не
+        // впускает, поэтому правило пространства имён к нему неприменимо. Это
+        // нормальное состояние ОКНА ВЫКАТКИ, но оно не должно быть тихим: пока
+        // строка есть в логах, ограничение для посторонних фактически не
+        // работает, и включать им доступ во фронте рано.
+        if actor_role.is_empty() {
+            tracing::warn!(
+                owner = %repo.owner,
+                slug = %repo.slug,
+                "push without a role: frontend predates Ф5, contributor namespace rule is not applied"
+            );
+        }
+        let role = actor_role.clone();
         let (data, moved, magic) = tokio::task::spawn_blocking(
             move || -> std::io::Result<(Vec<u8>, bool, Vec<crate::git::magic::MagicPush>)> {
                 let before = main_oid(&bare_recv);
@@ -626,6 +690,7 @@ impl GitCore for GitCoreSvc {
                     opt(&git_protocol),
                     opt(&lang),
                     opt(&actor),
+                    opt(&role),
                 )?;
                 let after = main_oid(&bare_recv);
                 // Ф4: магические рефы разбираем ВНУТРИ той же критической секции,

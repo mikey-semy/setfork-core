@@ -20,6 +20,10 @@ use uuid::Uuid;
 fn git(cwd: &Path, args: &[&str]) {
     let out = Command::new("git")
         .current_dir(cwd)
+        // Ф5: пуши здесь — от лица ВЛАДЕЛЬЦА. Отсутствие роли хук трактует как
+        // «посторонний» и в main не пускает; дефолт безопасный, но тест обязан
+        // назвать роль, которую изображает.
+        .env("SETFORK_ROLE", "owner")
         .args(["-c", "user.email=test@setfork.com", "-c", "user.name=Tester"])
         .args(args)
         .output()

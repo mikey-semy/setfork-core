@@ -38,17 +38,19 @@ fn run_git_io(
     git_protocol: Option<&str>,
     lang: Option<&str>,
 ) -> io::Result<Vec<u8>> {
-    run_git_io_env(args, input, git_protocol, lang, None)
+    run_git_io_env(args, input, git_protocol, lang, None, None)
 }
 
-/// То же плюс ник пушащего для хука (Ф4: магический реф `refs/for/<base>` без
-/// него отвергается — коммиты некуда класть).
+/// То же плюс контекст пушащего для хука: ник (Ф4 — магический реф
+/// `refs/for/<base>` без него отвергается, коммиты некуда класть) и роль
+/// (Ф5 — правило пространства имён для посторонних).
 fn run_git_io_env(
     args: &[&str],
     input: Option<&[u8]>,
     git_protocol: Option<&str>,
     lang: Option<&str>,
     actor: Option<&str>,
+    role: Option<&str>,
 ) -> io::Result<Vec<u8>> {
     let mut cmd = Command::new("git");
     cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -72,6 +74,18 @@ fn run_git_io_env(
     match actor.filter(|a| !a.is_empty()) {
         Some(a) => cmd.env("SETFORK_ACTOR", a),
         None => cmd.env_remove("SETFORK_ACTOR"),
+    };
+    // Ф5: роль пушащего. РЕШАЕТ приложение (сессия, allowFrom, модерация — это
+    // пользовательская авторизация, и по ADR-0011 §2 она остаётся там), ядро лишь
+    // МЕХАНИЧЕСКИ исполняет правило пространства имён.
+    //
+    // Снимается так же, как ник и язык, и по той же причине, только цена ошибки
+    // тут выше: унаследованная от сервиса роль владельца дала бы постороннему
+    // право писать в main. Отсутствие переменной хук трактует как «посторонний» —
+    // строгая сторона по умолчанию.
+    match role.filter(|r| !r.is_empty()) {
+        Some(r) => cmd.env("SETFORK_ROLE", r),
+        None => cmd.env_remove("SETFORK_ROLE"),
     };
     let mut child = cmd.spawn()?;
     let mut stdin = child.stdin.take().expect("stdin piped");
@@ -138,9 +152,10 @@ pub fn receive_pack_rpc(
     git_protocol: Option<&str>,
     lang: Option<&str>,
     actor: Option<&str>,
+    role: Option<&str>,
 ) -> io::Result<Vec<u8>> {
     let dir = repo_dir.to_string_lossy().to_string();
-    run_git_io_env(&["receive-pack", "--stateless-rpc", &dir], Some(body), git_protocol, lang, actor)
+    run_git_io_env(&["receive-pack", "--stateless-rpc", &dir], Some(body), git_protocol, lang, actor, role)
 }
 
 #[cfg(test)]

@@ -27,8 +27,18 @@ fn tmp(prefix: &str) -> Tmp {
     Tmp(p)
 }
 
+/// Git от лица ВЛАДЕЛЬЦА списка: подготовка репозитория и пуши в main.
+///
+/// Ф5 сделала роль значимой: её отсутствие хук трактует как «посторонний» и в
+/// main не пускает. Это и есть безопасный дефолт, но тест, изображающий
+/// владельца, обязан теперь сказать об этом вслух — раньше хватало умолчания.
 fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new("git").current_dir(dir).args(args).output().expect("git запустился")
+    Command::new("git")
+        .current_dir(dir)
+        .env("SETFORK_ROLE", "owner")
+        .args(args)
+        .output()
+        .expect("git запустился")
 }
 
 fn git_ok(dir: &Path, args: &[&str]) {
@@ -313,6 +323,7 @@ fn язык_отказа_переключается_окружением() {
 
     // Русский — по явному сигналу.
     let ru = Command::new("git")
+        .env("SETFORK_ROLE", "owner")
         .current_dir(&work)
         .env("SETFORK_LANG", "ru")
         .args(["push", "origin", "main"])
@@ -323,6 +334,7 @@ fn язык_отказа_переключается_окружением() {
 
     // Незнакомый язык — английский, а не пусто: молчаливый отказ читается как сбой.
     let xx = Command::new("git")
+        .env("SETFORK_ROLE", "owner")
         .current_dir(&work)
         .env("SETFORK_LANG", "xx")
         .args(["push", "origin", "main"])
@@ -347,6 +359,7 @@ fn магический_реф_проверяется_хуком() {
 
     // Без SETFORK_ACTOR: ядро не знает, в чью ветку класть коммиты.
     let anon = Command::new("git")
+        .env("SETFORK_ROLE", "owner")
         .current_dir(&work)
         .args(["push", "origin", "main:refs/for/main"])
         .output()
@@ -357,6 +370,7 @@ fn магический_реф_проверяется_хуком() {
 
     // Чужая база: поддерживается только main.
     let bad = Command::new("git")
+        .env("SETFORK_ROLE", "owner")
         .current_dir(&work)
         .env("SETFORK_ACTOR", "mike")
         .args(["push", "origin", "main:refs/for/other"])
@@ -368,6 +382,7 @@ fn магический_реф_проверяется_хуком() {
 
     // Нормальный случай: пуш проходит и человек видит, что дальше.
     let ok = Command::new("git")
+        .env("SETFORK_ROLE", "owner")
         .current_dir(&work)
         .env("SETFORK_ACTOR", "mike")
         .args(["push", "origin", "main:refs/for/main"])
