@@ -12,7 +12,9 @@ use std::process::Command;
 
 use setfork_core::db::{Level, StepRow};
 use setfork_core::git::bundle::{self, SerStep, VersionData};
-use setfork_core::git::version::{SyncOutcome, WebVersionError, commit_web_version, sync_repo_with_db};
+use setfork_core::git::version::{
+    SyncOutcome, WebEdit, WebVersionError, commit_web_version, sync_repo_with_db,
+};
 use sqlx::postgres::PgPool;
 use uuid::Uuid;
 
@@ -180,9 +182,10 @@ async fn веб_версия_коммитится_git_first_и_проециру�
     bundle::bootstrap_bare(&[v1], &bare).expect("bootstrap");
 
     let rows = vec![step_row("First", "", Level::Required), step_row("Second", "echo 2", Level::Optional)];
-    let out = commit_web_version(&pool, list_id, &bare, "add second", None, rows, Default::default())
-        .await
-        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out =
+        commit_web_version(&pool, list_id, &bare, WebEdit::new("add second", None, rows, Default::default()))
+            .await
+            .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
 
     assert_eq!(out.version, 2);
     // Git: main сдвинут, тег v2 на tip, sha из ответа — настоящий tip.
@@ -233,9 +236,10 @@ async fn веб_правка_и_push_дают_одинаковый_резуль�
 
     // A: веб-правка (git-first).
     let rows = vec![step_row("First", "", Level::Required), step_row("Second", "echo 2", Level::Optional)];
-    let out = commit_web_version(&pool, a_id, &bare_a, "same edit", None, rows, Default::default())
-        .await
-        .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let out =
+        commit_web_version(&pool, a_id, &bare_a, WebEdit::new("same edit", None, rows, Default::default()))
+            .await
+            .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
     assert_eq!(out.version, 2);
     let canon_a = tip_list_json(&bare_a);
 
@@ -313,10 +317,7 @@ async fn отставшее_репо_догоняется_перед_комми�
         &pool,
         list_id,
         &bare,
-        "third",
-        None,
-        vec![step_row("Third", "", Level::Required)],
-        Default::default(),
+        WebEdit::new("third", None, vec![step_row("Third", "", Level::Required)], Default::default()),
     )
     .await
     .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
@@ -358,10 +359,7 @@ async fn убежавший_вперёд_git_лечится_проекцией()
         &pool,
         list_id,
         &bare,
-        "third",
-        None,
-        vec![step_row("Third", "", Level::Required)],
-        Default::default(),
+        WebEdit::new("third", None, vec![step_row("Third", "", Level::Required)], Default::default()),
     )
     .await
     .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
@@ -401,10 +399,7 @@ async fn постороннее_имя_версии_останавливает_�
         &pool,
         list_id,
         &bare,
-        "won't happen",
-        None,
-        vec![step_row("Nope", "", Level::Required)],
-        Default::default(),
+        WebEdit::new("won't happen", None, vec![step_row("Nope", "", Level::Required)], Default::default()),
     )
     .await
     .expect_err("запись обязана остановиться");
@@ -425,6 +420,75 @@ async fn постороннее_имя_версии_останавливает_�
     // Диагностика для sync-repos: тот же случай виден как Conflict.
     let sync = sync_repo_with_db(&pool, list_id, &bare).await.expect("sync");
     assert_eq!(sync, SyncOutcome::Conflict { have: 20, current: 1 });
+}
+
+/// ПРАВКА НА УСТАРЕВШЕЙ ВЕРСИИ НЕ ВЫТЕСНЯЕТ ЧУЖУЮ: писавший назвал версию, на
+/// которой основывался, и пока он готовил правку, список ушёл вперёд. Сверка
+/// живёт в той же транзакции, где строка уже взята `for update`, — снаружи такое
+/// обещание недостижимо (между чужой проверкой и записью есть окно).
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn правка_на_устаревшей_версии_отклоняется() {
+    let pool = support::pool_with_schema().await;
+    let list_id = seed_list(&pool, "casper", "cas", "CAS List").await;
+
+    let root = tmp_root("cas");
+    let bare = root.0.join("repo.git");
+    bundle::bootstrap_bare(&[v1_data(&pool, list_id, "CAS List").await], &bare).expect("bootstrap");
+
+    // Чужая правка успела лечь: список теперь на v2.
+    commit_web_version(
+        &pool,
+        list_id,
+        &bare,
+        WebEdit::new("theirs", None, vec![step_row("Theirs", "", Level::Required)], Default::default()),
+    )
+    .await
+    .expect("чужая версия");
+
+    // Наша правка готовилась на v1 — её обязаны отклонить.
+    let err = commit_web_version(
+        &pool,
+        list_id,
+        &bare,
+        WebEdit::new(
+            "mine, based on v1",
+            None,
+            vec![step_row("Mine", "", Level::Required)],
+            Default::default(),
+        )
+        .based_on(Some(1)),
+    )
+    .await
+    .expect_err("устаревшая правка обязана быть отклонена");
+
+    match err {
+        WebVersionError::VersionConflict { expected, current } => assert_eq!((expected, current), (1, 2)),
+        other => panic!("ожидался VersionConflict, получено {other:?}"),
+    }
+
+    // Ничего не записано: ни версия, ни коммит — чужая правка на месте.
+    let cur: i32 = sqlx::query_scalar("select current_version from templates where id = $1")
+        .bind(list_id)
+        .fetch_one(&pool)
+        .await
+        .expect("current");
+    assert_eq!(cur, 2, "версия не выросла");
+    assert_eq!(bundle::max_tag_version(&bare), 2, "git-канон не тронут");
+    let steps = db_steps(&pool, list_id, 2).await;
+    assert_eq!(steps[0].2["en"], "Theirs", "содержимое осталось чужим");
+
+    // Та же правка на актуальной версии проходит.
+    let ok = commit_web_version(
+        &pool,
+        list_id,
+        &bare,
+        WebEdit::new("mine, rebased", None, vec![step_row("Mine", "", Level::Required)], Default::default())
+            .based_on(Some(2)),
+    )
+    .await
+    .expect("правка на актуальной версии");
+    assert_eq!(ok.version, 3);
 }
 
 /// ЧИТАЮЩИЙ ПУТЬ ТОЖЕ ВЫРАВНИВАЕТ ЛЕГАСИ: ensure_repo_by_id догоняет отставшее

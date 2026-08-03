@@ -15,7 +15,7 @@
 //! updated_at — всё в ОДНОЙ транзакции.
 use sqlx::Row;
 use sqlx::postgres::PgPool;
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 use uuid::Uuid;
 
 use super::util::{db_status, loc_json, loc_map, parse_id, refs_json};
@@ -302,6 +302,17 @@ fn step_row(s: &NewStep) -> db::StepRow {
 fn web_version_status(e: version::WebVersionError) -> Status {
     match e {
         version::WebVersionError::NotFound => Status::not_found("list not found"),
+        // ABORTED — код конфликта конкурентной записи (AIP-154, google.rpc.Code):
+        // не invalid_argument (запрос корректен) и не failed_precondition (состояние
+        // системы исправно). Причина STALE — та же, что у веток: объект подвинули
+        // между чтением и записью, клиент перечитывает и повторяет.
+        version::WebVersionError::VersionConflict { expected, current } => crate::reason::status(
+            Code::Aborted,
+            crate::reason::Reason::Stale,
+            format!(
+                "list moved on: it is at v{current}, the edit is based on v{expected} — read it again and re-apply"
+            ),
+        ),
         version::WebVersionError::OutOfSync { have, current } => Status::failed_precondition(format!(
             "repo out of sync (git v{have}, db v{current}) — см. runbook git-projection-catchup"
         )),
@@ -321,7 +332,7 @@ impl ListWrite for ListWriteSvc {
     /// точку обновления с валидацией), затем строки БД как проекция — одна
     /// операция под репо-локом. БД здесь read-model: git не откатывается.
     async fn add_version(&self, req: Request<AddVersionRequest>) -> Result<Response<Version>, Status> {
-        let AddVersionRequest { list_id, note, steps, author_id, meta } = req.into_inner();
+        let AddVersionRequest { list_id, note, steps, author_id, meta, expected_version } = req.into_inner();
         let tid = parse_id(&list_id)?;
         // author_id: '' = null (фоновые/git-пути автора не знают).
         let author = if author_id.is_empty() { None } else { Some(parse_id(&author_id)?) };
@@ -344,9 +355,9 @@ impl ListWrite for ListWriteSvc {
             .ok_or_else(|| Status::not_found("list not found"))?;
         // Коммит + проекция — критическая секция, как у push/merge.
         let _guard = repo::repo_guard(&self.pool, tid).await.map_err(db_status)?;
-        let out = version::commit_web_version(&self.pool, tid, &bare, &note, author, rows, meta)
-            .await
-            .map_err(web_version_status)?;
+        let edit = version::WebEdit::new(&note, author, rows, meta).based_on(expected_version);
+        let out =
+            version::commit_web_version(&self.pool, tid, &bare, edit).await.map_err(web_version_status)?;
         // Ф3: зеркало догоняет истину после каждой версии (фоново).
         super::git_core::spawn_mirror(self.pool.clone(), tid, bare);
 
