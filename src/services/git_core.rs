@@ -15,11 +15,12 @@ use crate::git::{MAIN_REF, bundle, history, project, repo, serialize, smart_http
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
-    Commit, CommitToBranchRequest, CommitToBranchResponse, CommitsResponse, CreateBranchRequest,
-    CreateTagRequest, DeleteBranchRequest, InfoRefsRequest, ListCommitsRequest, ListContent,
-    MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest, MergeStateResponse,
-    MirrorCheckResponse, MirrorPushResponse, PostRequest, ReceivePackResponse, RepoRef, SnapshotRef,
-    SnapshotStep, Tag, TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
+    CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest, CommitToBranchResponse,
+    CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
+    ListCommitsRequest, ListContent, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest,
+    MergeStateRequest, MergeStateResponse, MirrorCheckResponse, MirrorPushResponse, PostRequest,
+    ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest,
+    UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -530,6 +531,20 @@ fn canon_list_json(
 
 #[tonic::async_trait]
 impl GitCore for GitCoreSvc {
+    /// Что умеет это ядро (Ф5). Подробности решения — в комментарии к
+    /// `CapabilitiesResponse` в proto.
+    ///
+    /// Признак — константа, а не настройка: он описывает КОД, а не конфигурацию.
+    /// Настройкой он был бы бесполезен ровно там, где нужен: оператор, забывший
+    /// выставить её после выката, получил бы ту самую пару «новый фронт, ядро без
+    /// правила», от которой признак и защищает.
+    async fn get_capabilities(
+        &self,
+        _req: Request<CapabilitiesRequest>,
+    ) -> Result<Response<CapabilitiesResponse>, Status> {
+        Ok(Response::new(CapabilitiesResponse { enforces_push_roles: true }))
+    }
+
     async fn info_refs_upload_pack(
         &self,
         req: Request<InfoRefsRequest>,
