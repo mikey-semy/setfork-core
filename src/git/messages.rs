@@ -95,8 +95,8 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
     HookMessage {
         key: "contributor_namespace_hint",
         // Без апострофов намеренно: текст уезжает в одинарные кавычки шелла.
-        en: "Propose a change by pushing to refs/for/main, or keep a draft in refs/heads/u/%s/<name>.",
-        ru: "Предложите правку пушем в refs/for/main или держите черновик в refs/heads/u/%s/<имя>.",
+        en: "Propose a change instead: git push origin HEAD:refs/for/main",
+        ru: "Предложите правку: git push origin HEAD:refs/for/main",
     },
     HookMessage {
         key: "contributor_needs_actor",

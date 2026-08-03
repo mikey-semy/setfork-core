@@ -1,4 +1,4 @@
-//! Ф5: посторонний пишет только в СВОЁ пространство.
+//! Ф5: посторонний может только ПРЕДЪЯВИТЬ правку.
 //!
 //! Правило исполняет хук, а не приложение, и проверять его надо настоящим пушем:
 //! отвергнуть приём задним числом нельзя, а «разрешено ли» решается ровно в тот
@@ -73,7 +73,7 @@ fn посторонний_не_трогает_main() {
     std::fs::write(work.join("list.json"), br#"{"title":"L2","steps":[]}"#).expect("edit");
     git_ok(&work, &["commit", "-aqm", "v2"]);
 
-    let out = push_as(&work, "outsider", "contributor", "main");
+    let out = push_as(&work, "outsider-id", "contributor", "main");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "посторонний не пишет в main: {err}");
     // Отказ обязан назвать правило и путь наружу, иначе человек решит, что
@@ -83,47 +83,31 @@ fn посторонний_не_трогает_main() {
 }
 
 #[test]
-fn посторонний_не_трогает_чужую_ветку() {
+fn посторонний_не_заводит_веток_вообще() {
     let root = tmp("f5-alien");
     let (_bare, work) = repo_pair(&root.0);
 
-    let out = push_as(&work, "outsider", "contributor", "main:refs/heads/u/mike/idea");
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(!out.status.success(), "чужое пространство закрыто: {err}");
-    assert!(err.contains("not yours"), "{err}");
+    // Ни чужую, ни «свою» — именованных веток у постороннего нет совсем. Имя
+    // ветки для его правки придумывает сервер, и человек его не набирает.
+    for refspec in ["main:refs/heads/u/mike/idea", "main:refs/heads/u/outsider/idea", "main:refs/heads/idea"]
+    {
+        let out = push_as(&work, "outsider-id", "contributor", refspec);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "{refspec} должен быть закрыт: {err}");
+        assert!(err.contains("not yours"), "{refspec}: {err}");
+        assert!(err.contains("refs/for/main"), "{refspec}: отказ показывает, что делать: {err}");
+    }
 }
 
 #[test]
-fn посторонний_пишет_в_своё_пространство_и_предъявляет_правку() {
+fn посторонний_предъявляет_правку() {
     let root = tmp("f5-own");
     let (_bare, work) = repo_pair(&root.0);
 
-    let own = push_as(&work, "outsider", "contributor", "main:refs/heads/u/outsider/idea");
-    assert!(own.status.success(), "своё пространство открыто: {}", String::from_utf8_lossy(&own.stderr));
-
-    let magic = push_as(&work, "outsider", "contributor", "main:refs/for/main");
+    let magic = push_as(&work, "outsider-id", "contributor", "main:refs/for/main");
     let magic_err = String::from_utf8_lossy(&magic.stderr);
     assert!(magic.status.success(), "предложение принимается: {magic_err}");
     assert!(magic_err.contains("change accepted"), "человек видит, что дальше: {magic_err}");
-}
-
-#[test]
-fn ветка_похожая_на_чужую_не_проходит() {
-    let root = tmp("f5-prefix");
-    let (_bare, work) = repo_pair(&root.0);
-
-    // `u/outsiderX/*` начинается с ника, но пространство ДРУГОЕ. Сравнение
-    // обязано идти по границе сегмента, а не по началу строки.
-    let out = push_as(&work, "outsider", "contributor", "main:refs/heads/u/outsiderX/idea");
-    assert!(
-        !out.status.success(),
-        "префикс — не то же, что сегмент: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-
-    // И пустой хвост тоже не пространство: `u/<ник>` без имени ветки.
-    let bare_ns = push_as(&work, "outsider", "contributor", "main:refs/heads/u/outsider");
-    assert!(!bare_ns.status.success(), "голое пространство без имени — не ветка");
 }
 
 #[test]
