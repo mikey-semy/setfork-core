@@ -587,7 +587,10 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(BytesResponse { data }))
     }
     async fn receive_pack(&self, req: Request<PostRequest>) -> Result<Response<ReceivePackResponse>, Status> {
-        let PostRequest { repo, body, git_protocol, lang, actor_id, actor_role } = req.into_inner();
+        // `actor_handle` не читаем СОЗНАТЕЛЬНО: ник в логике не участвует (Ф5), поле
+        // переходное и живёт ради старого ядра в окно выкатки — см. proto.
+        let PostRequest { repo, body, git_protocol, lang, actor_handle: _, actor_id, actor_role } =
+            req.into_inner();
         let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
         // Предусловие записи (ADR-0015): спрашиваем приложение ДО любой работы.
         crate::gate::ensure_writable(&repo.owner, &repo.slug).await?;
