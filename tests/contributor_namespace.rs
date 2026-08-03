@@ -198,3 +198,43 @@ fn незнакомая_роль_ограничивается() {
         );
     }
 }
+
+/// Правило обязано пережить чужой хук на диске.
+///
+/// Ядро отвечает `enforces_push_roles: true` — то есть ОБЕЩАЕТ, что посторонний
+/// в main не запишет. Хук при этом файл на общем диске, и рядом может работать
+/// ядро другой версии (окно выкатки): его хук правила ролей не знает. Поэтому
+/// хук переустанавливается вплотную к приёму пака, под тем же локом.
+///
+/// Здесь проверяется само свойство установки: подменённый хук восстанавливается
+/// и снова отвергает пуш постороннего в main.
+#[test]
+fn подменённый_хук_восстанавливается() {
+    let root = tmp("f5-hook-replace");
+    let (bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("list.json"), br#"{"title":"L-hook","steps":[]}"#).expect("edit");
+    git_ok(&work, &["commit", "-aqm", "v2"]);
+
+    // Чужое ядро переписало хук на «пропускать всё».
+    let hook = bare.join("hooks").join("pre-receive");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh
+exit 0
+",
+    )
+    .expect("подмена хука");
+    let out = push_as(&work, "outsider-id", "contributor", "main");
+    assert!(out.status.success(), "подменённый хук пропускает — иначе тест ничего не проверяет");
+
+    // Ядро ставит свой обратно (то же, что делает receive_pack под локом).
+    bundle::install_hook(&bare).expect("переустановка");
+    std::fs::write(work.join("list.json"), br#"{"title":"L-hook-2","steps":[]}"#).expect("edit");
+    git_ok(&work, &["commit", "-aqm", "v3"]);
+    let out = push_as(&work, "outsider-id", "contributor", "main");
+    assert!(
+        !out.status.success(),
+        "правило вернулось — посторонний в main не пишет: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
