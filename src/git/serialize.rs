@@ -169,6 +169,34 @@ fn ref_item(r: &StepRef) -> String {
 }
 
 /// README.md — точный порт serialize.ts readme().
+/// Блок кода, который НЕЛЬЗЯ закрыть изнутри.
+///
+/// Ограждение из трёх кавычек закрывалось содержимым: команду пишет автор списка,
+/// и `` ``` `` внутри неё превращали остаток README в размеченный текст. По
+/// CommonMark §4.5 закрывающее ограждение не короче открывающего — значит открываем
+/// длиннее самой длинной цепочки кавычек внутри, и закрыть его содержимым нельзя.
+///
+/// Отступ получает КАЖДАЯ строка: раньше его видела только первая, и многострочная
+/// команда со второй строки вываливалась из пункта списка.
+fn code_block(code: &str, indent: &str, lang: &str) -> Vec<String> {
+    let normalized = code.replace("\r\n", "\n").replace('\r', "\n");
+    let mut longest = 0usize;
+    let mut run = 0usize;
+    for ch in normalized.chars() {
+        if ch == '`' {
+            run += 1;
+            longest = longest.max(run);
+        } else {
+            run = 0;
+        }
+    }
+    let fence = "`".repeat(longest.max(2) + 1);
+    let mut out = vec![format!("{}{}{}", indent, fence, lang)];
+    out.extend(normalized.lines().map(|l| format!("{}{}", indent, l)));
+    out.push(format!("{}{}", indent, fence));
+    out
+}
+
 fn readme(v: &VersionData) -> String {
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!("# {}", v.title));
@@ -234,9 +262,7 @@ fn readme(v: &VersionData) -> String {
         }
         if !s.command.is_empty() {
             lines.push(String::new());
-            lines.push("   ```sh".to_string());
-            lines.push(format!("   {}", s.command));
-            lines.push("   ```".to_string());
+            lines.extend(code_block(&s.command, "   ", "sh"));
         }
         if !s.why.is_empty() {
             lines.push(format!("   > why: {}", s.why));
@@ -417,6 +443,47 @@ mod tests {
         let lj = &files.iter().find(|(p, _)| p == "list.json").unwrap().1;
         assert!(!lj.contains("\"type\""), "no type key for step");
         assert!(!lj.contains("\"content\""), "no content key for step");
+    }
+
+    /// Регрессия: команду пишет автор списка, и она не имеет права закрыть
+    /// ограждение — иначе остаток README перестаёт быть кодом (карточка export/001
+    /// во фронте; здесь тот же README собирает ядро).
+    #[test]
+    fn command_cannot_close_the_code_fence() {
+        let mut s = step(1, "Run");
+        s.command = "echo ok\n```\n<img src=x onerror=alert(1)>".into();
+        let files = version_files(&ver(vec![s]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+
+        let lines: Vec<&str> = readme.lines().collect();
+        let open = lines.iter().position(|l| l.trim().starts_with("```")).unwrap();
+        let fence_len = lines[open].trim().chars().take_while(|c| *c == '`').count();
+        assert!(fence_len > 3, "ограждение длиннее содержимого: {}", lines[open]);
+
+        // Закрывающее — первая последующая строка ТОЛЬКО из кавычек нужной длины.
+        let close = open
+            + 1
+            + lines[open + 1..]
+                .iter()
+                .position(|l| {
+                    let t = l.trim();
+                    !t.is_empty() && t.chars().all(|c| c == '`') && t.len() >= fence_len
+                })
+                .unwrap();
+        let inside = &lines[open + 1..close];
+        assert!(inside.iter().any(|l| l.contains("<img src=x onerror=alert(1)>")));
+        assert!(inside.iter().any(|l| l.trim() == "```"));
+    }
+
+    /// Многострочная команда обязана целиком остаться в отступе пункта.
+    #[test]
+    fn multiline_command_keeps_list_indent() {
+        let mut s = step(1, "Run");
+        s.command = "cd /tmp\nmake all".into();
+        let files = version_files(&ver(vec![s]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("   cd /tmp"), "{}", readme);
+        assert!(readme.contains("   make all"), "{}", readme);
     }
 
     #[test]
