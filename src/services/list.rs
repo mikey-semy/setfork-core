@@ -380,9 +380,21 @@ impl ListWrite for ListWriteSvc {
             Some(Uuid::parse_str(&r.forked_from_id).map_err(|_| Status::invalid_argument("bad fork uuid"))?)
         };
 
+        // Состояние публикации — часть ВСТАВКИ. Отдельный update после create оставлял бы
+        // окно, в котором список уже виден всем: между коммитом транзакции и апдейтом (и
+        // навсегда, если апдейт не случился). Пустое значение = active — сборка фронта,
+        // которая поля ещё не шлёт, пишет как раньше.
+        let moderation = if r.moderation.is_empty() { "active" } else { r.moderation.as_str() };
+        if !matches!(moderation, "active" | "pending" | "flagged" | "hidden") {
+            return Err(Status::invalid_argument("bad moderation"));
+        }
+
         let mut tx = self.pool.begin().await.map_err(db_status)?;
-        let row: (Uuid, i64, i64) = sqlx::query_as(
-            "insert into templates (owner_id, slug, title, \"desc\", tags, ordered, visibility, status,                                     origin, forked_from_id, current_version)              values ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::list_visibility, $8::list_status,                      $9::template_origin, $10, 1)              returning id, floor(extract(epoch from created_at) * 1000)::bigint,                        floor(extract(epoch from updated_at) * 1000)::bigint",
+        // moderation возвращается ИЗ СТРОКИ, а не подставляется из запроса: по этому полю
+        // вызывающий проверяет, что его решение доехало (сборки фронта и ядра выкатываются
+        // порознь). Ответ, собранный из входа, на такой вопрос отвечает всегда «да».
+        let row: (Uuid, String, i64, i64) = sqlx::query_as(
+            "insert into templates (owner_id, slug, title, \"desc\", tags, ordered, visibility, status,                                     origin, forked_from_id, moderation, current_version)              values ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::list_visibility, $8::list_status,                      $9::template_origin, $10, $11::moderation_status, 1)              returning id, moderation::text,                        floor(extract(epoch from created_at) * 1000)::bigint,                        floor(extract(epoch from updated_at) * 1000)::bigint",
         )
         .bind(owner)
         .bind(&r.slug)
@@ -394,10 +406,11 @@ impl ListWrite for ListWriteSvc {
         .bind(if r.status.is_empty() { "published" } else { &r.status })
         .bind(if r.origin.is_empty() { "authored" } else { &r.origin })
         .bind(forked_from)
+        .bind(moderation)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_status)?;
-        let (tid, created_ms, updated_ms) = row;
+        let (tid, stored_moderation, created_ms, updated_ms) = row;
 
         let ver_id: Uuid = sqlx::query_scalar(
             "insert into template_versions (template_id, version, note, author_id) values ($1, 1, $2, $3) returning id",
@@ -422,7 +435,7 @@ impl ListWrite for ListWriteSvc {
             ordered: r.ordered,
             status: if r.status.is_empty() { "published".into() } else { r.status },
             visibility: if r.visibility.is_empty() { "public".into() } else { r.visibility },
-            moderation: "active".into(),
+            moderation: stored_moderation,
             moderation_reason: String::new(),
             verified: false,
             pinned: false,

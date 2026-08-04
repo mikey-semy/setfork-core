@@ -17,7 +17,10 @@ create type step_level as enum ('required','recommended','optional');
 create type list_visibility as enum ('public','private');
 create type list_status as enum ('draft','published');
 create type template_origin as enum ('authored','forked','ai_draft');
-create type list_moderation as enum ('active','flagged','hidden');
+-- Имя и состав ровно как в drizzle-схеме фронта (moderation_status, четыре значения):
+-- снимок с именем list_moderation и без 'pending' разъехался с источником правды, а
+-- ядро с 04.08 пишет это состояние вставкой и обязано попадать в НАСТОЯЩИЙ тип.
+create type moderation_status as enum ('active','pending','flagged','hidden');
 create type issue_status as enum ('open','closed');
 create type suggestion_status as enum ('open','accepted','rejected');
 
@@ -37,7 +40,7 @@ create table templates (
   ordered boolean not null default true,
   status list_status not null default 'published',
   visibility list_visibility not null default 'public',
-  moderation list_moderation not null default 'active',
+  moderation moderation_status not null default 'active',
   moderation_reason text,
   verified boolean not null default false,
   pinned boolean not null default false,

@@ -65,6 +65,7 @@ fn create_req(owner_id: &str, slug: &str) -> CreateListRequest {
         forked_from_id: String::new(),
         note: "initial".into(),
         steps: vec![step("Install"), text_block("intro **md**"), step("Configure")],
+        moderation: String::new(), // дефолт active
     }
 }
 
@@ -145,6 +146,44 @@ async fn needs_human_survives_git_projection() {
         .into_inner();
     assert!(ver.steps[0].needs_human, "push НЕ должен стирать пометку — переносится по block_id");
     assert_eq!(ver.steps[0].needs_human_ask.as_ref().unwrap().v["en"], "Сколько стоит у вас?");
+}
+
+/// Состояние публикации задаётся ВСТАВКОЙ, а не апдейтом после неё. Пока его ставили
+/// вторым шагом, список недоверенного автора существовал видимым между create и этим
+/// шагом — и оставался видимым навсегда, если шаг не случился.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn create_writes_moderation_with_the_row() {
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "moderated").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+
+    let mut req = create_req(&owner.to_string(), "gated-list");
+    req.moderation = "pending".into();
+    let created = write.create(Request::new(req)).await.expect("create").into_inner();
+    assert_eq!(created.moderation, "pending", "ответ отдаёт записанное состояние, а не константу");
+
+    let in_db: String = sqlx::query_scalar("select moderation::text from templates where id = $1")
+        .bind(uuid::Uuid::parse_str(&created.id).expect("uuid"))
+        .fetch_one(&pool)
+        .await
+        .expect("select moderation");
+    assert_eq!(in_db, "pending", "строка рождается pending — публичного окна не существует");
+
+    // Пустое поле = прежнее поведение: сборка фронта без этого поля пишет как раньше.
+    let plain = write
+        .create(Request::new(create_req(&owner.to_string(), "plain-list")))
+        .await
+        .expect("create")
+        .into_inner();
+    assert_eq!(plain.moderation, "active");
+
+    // Значение вне enum'а схемы отвергается на границе — с внятной причиной, а не
+    // ошибкой Postgres из середины транзакции.
+    let mut bad = create_req(&owner.to_string(), "bad-list");
+    bad.moderation = "whatever".into();
+    let err = write.create(Request::new(bad)).await.expect_err("должно отказать");
+    assert_eq!(err.code(), tonic::Code::InvalidArgument);
 }
 
 #[tokio::test]
