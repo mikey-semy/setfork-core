@@ -488,12 +488,19 @@ mod tests {
     fn trailing_newline_in_command_is_preserved() {
         let mut s = step(1, "Run");
         s.command = "make all
-".into();
+"
+        .into();
         let files = version_files(&ver(vec![s]));
         let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
-        assert!(readme.contains("   make all
+        assert!(
+            readme.contains(
+                "   make all
    
-   ```"), "{}", readme);
+   ```"
+            ),
+            "{}",
+            readme
+        );
     }
 
     /// У пункта «10.» маркер длиннее, и трёх пробелов продолжению уже не хватает.
