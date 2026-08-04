@@ -257,21 +257,25 @@ fn readme(v: &VersionData) -> String {
             String::new()
         };
         lines.push(format!("{} **{}**{}", marker, s.title, lvl));
+        // Продолжение пункта отступается ПО ДЛИНЕ МАРКЕРА, а не на фиксированные три
+        // пробела: у пункта «10.» маркер уже четыре символа, и трёх пробелов мало —
+        // по CommonMark содержимое перестаёт принадлежать пункту и выпадает из него.
+        let indent = " ".repeat(marker.chars().count() + 1);
         if !s.desc.is_empty() {
-            lines.push(format!("   {}", s.desc.replace('\n', "\n   ")));
+            lines.push(format!("{}{}", indent, s.desc.replace('\n', &format!("\n{}", indent))));
         }
         if !s.command.is_empty() {
             lines.push(String::new());
-            lines.extend(code_block(&s.command, "   ", "sh"));
+            lines.extend(code_block(&s.command, &indent, "sh"));
         }
         if !s.why.is_empty() {
-            lines.push(format!("   > why: {}", s.why));
+            lines.push(format!("{}> why: {}", indent, s.why));
         }
         for st in &s.subtasks {
-            lines.push(format!("   - [ ] {}", st));
+            lines.push(format!("{}- [ ] {}", indent, st));
         }
         for r in &s.refs {
-            lines.push(format!("   - {}", ref_item(r)));
+            lines.push(format!("{}- {}", indent, ref_item(r)));
         }
         lines.push(String::new());
     }
@@ -473,6 +477,24 @@ mod tests {
         let inside = &lines[open + 1..close];
         assert!(inside.iter().any(|l| l.contains("<img src=x onerror=alert(1)>")));
         assert!(inside.iter().any(|l| l.trim() == "```"));
+    }
+
+    /// У пункта «10.» маркер длиннее, и трёх пробелов продолжению уже не хватает.
+    #[test]
+    fn tenth_item_keeps_its_body() {
+        let steps: Vec<SerStep> = (1..=10)
+            .map(|n| {
+                let mut s = step(n, &format!("S{}", n));
+                s.command = "make all".into();
+                s
+            })
+            .collect();
+        let files = version_files(&ver(steps));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        let lines: Vec<&str> = readme.lines().collect();
+        let head = lines.iter().position(|l| l.starts_with("10. ")).unwrap();
+        let body = lines[head + 1..].iter().find(|l| !l.trim().is_empty()).unwrap();
+        assert!(body.starts_with("    "), "тело десятого пункта: {:?}", body);
     }
 
     /// Многострочная команда обязана целиком остаться в отступе пункта.
