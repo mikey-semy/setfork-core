@@ -22,6 +22,10 @@ pub struct ProjStep {
     pub image_key: Option<String>,
     pub needs_human: Option<bool>,
     pub needs_human_ask: Option<String>,
+    /// Разрушительный пункт — тристейт того же устройства, что needs_human:
+    /// None = поля в файле не было → значение переносится из текущей версии по
+    /// block_id; Some(false) — снятие пометки пушем.
+    pub danger: Option<bool>,
     // Блочная модель: '' = шаг; 'text'|'image' — презентационный блок. content —
     // payload не-step блока (Null у шага).
     pub block_type: String,
@@ -67,6 +71,8 @@ struct RawStep {
     needs_human: Option<bool>,
     #[serde(rename = "needsHumanAsk")]
     needs_human_ask: Option<String>,
+    // Разрушительный пункт — тристейт как needs_human (см. ProjStep::danger).
+    danger: Option<bool>,
     why: Option<String>,
     section: Option<String>,
     subtasks: Option<Vec<String>>,
@@ -138,6 +144,7 @@ pub fn readme_from_canon(raw: &[u8]) -> Option<String> {
             level: r.level.clone().unwrap_or_default(),
             needs_human: r.needs_human.unwrap_or(false),
             needs_human_ask: r.needs_human_ask.clone(),
+            danger: r.danger.unwrap_or(false),
             why: r.why.clone().unwrap_or_default(),
             section: r.section.clone().unwrap_or_default(),
             subtasks: r.subtasks.clone().unwrap_or_default(),
@@ -212,6 +219,7 @@ fn parse_steps(steps_raw: &[RawStep]) -> Vec<ProjStep> {
             image_key: s.image_key.clone().filter(|k| !k.trim().is_empty()),
             needs_human: s.needs_human,
             needs_human_ask: s.needs_human_ask.clone().filter(|a| !a.trim().is_empty()),
+            danger: s.danger,
             block_type: if is_step { String::new() } else { bt },
             block_id: s.block_id.clone().filter(|v| !v.trim().is_empty()),
             content: if is_step {
@@ -382,6 +390,7 @@ mod tests {
             level: Some("required".into()),
             needs_human: None,
             needs_human_ask: None,
+            danger: None,
             why: None,
             section: None,
             subtasks: None,
@@ -415,6 +424,7 @@ mod tests {
             level: "required".into(),
             needs_human: false,
             needs_human_ask: None,
+            danger: false,
             why: "always".into(),
             section: "Setup".into(),
             subtasks: vec!["sub a".into(), "sub b".into()],

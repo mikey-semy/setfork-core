@@ -36,6 +36,7 @@ fn ser_step(n: i32, title: &str) -> SerStep {
         level: "recommended".into(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
         why: "why".into(),
         section: "Setup".into(),
         subtasks: vec!["sub".into()],
@@ -73,6 +74,7 @@ fn ver(kind: Option<&str>) -> VersionData {
                 level: "required".into(),
                 needs_human: false,
                 needs_human_ask: None,
+                danger: false,
                 why: String::new(),
                 section: String::new(),
                 subtasks: vec![],
@@ -171,6 +173,7 @@ fn step_row(title: &str) -> StepRow {
         refs: serde_json::json!([]),
         needs_human: false,
         needs_human_ask: serde_json::json!({}),
+        danger: false,
     }
 }
 
@@ -314,7 +317,7 @@ async fn картинка_и_пометка_переживают_полный_ц
     let b_id = seed_list(&pool, "img-b", "img", None).await;
     // A: шаг с идентичностью, картинкой и пометкой.
     sqlx::query(
-        "update steps set block_id = $1, image_key = 'steps/pan.png', has_image = true,                           needs_human = true, needs_human_ask = '{\"en\":\"how hot is your oven\"}'::jsonb          where version_id = (select id from template_versions where template_id = $2 and version = 1)",
+        "update steps set block_id = $1, image_key = 'steps/pan.png', has_image = true,                           needs_human = true, needs_human_ask = '{\"en\":\"how hot is your oven\"}'::jsonb,          danger = true          where version_id = (select id from template_versions where template_id = $2 and version = 1)",
     )
     .bind(Uuid::parse_str(BLOCK).unwrap())
     .bind(a_id)
@@ -336,6 +339,9 @@ async fn картинка_и_пометка_переживают_полный_ц
     assert_eq!(parsed["steps"][0]["imageKey"], serde_json::json!("steps/pan.png"));
     assert_eq!(parsed["steps"][0]["needsHuman"], serde_json::json!(true));
     assert_eq!(parsed["steps"][0]["needsHumanAsk"], serde_json::json!("how hot is your oven"));
+    // Разрушительный пункт — тоже содержимое канона: без него клон не знал бы,
+    // какую команду нельзя отдавать скрипту исполняемой.
+    assert_eq!(parsed["steps"][0]["danger"], serde_json::json!(true));
     // И валиден по схеме.
     let schema = schema();
     jsonschema::draft7::validate(&schema, &parsed).expect("канон с новыми полями валиден");
@@ -349,8 +355,8 @@ async fn картинка_и_пометка_переживают_полный_ц
         .expect("проекция")
         .expect("проецируемо");
     assert_eq!(ver, 2);
-    let (ik, nh, ask): (Option<String>, bool, serde_json::Value) = sqlx::query_as(
-        "select s.image_key, s.needs_human, s.needs_human_ask from steps s          join template_versions tv on tv.id = s.version_id          where tv.template_id = $1 and tv.version = 2 and s.n = 1",
+    let (ik, nh, ask, danger): (Option<String>, bool, serde_json::Value, bool) = sqlx::query_as(
+        "select s.image_key, s.needs_human, s.needs_human_ask, s.danger from steps s          join template_versions tv on tv.id = s.version_id          where tv.template_id = $1 and tv.version = 2 and s.n = 1",
     )
     .bind(b_id)
     .fetch_one(&pool)
@@ -359,6 +365,7 @@ async fn картинка_и_пометка_переживают_полный_ц
     assert_eq!(ik.as_deref(), Some("steps/pan.png"), "картинка пришла из файла (recovery работает)");
     assert!(nh, "пометка пришла из файла");
     assert_eq!(ask["en"], "how hot is your oven");
+    assert!(danger, "пометка разрушительности пришла из файла");
 
     // Явный false в файле СНИМАЕТ пометку (тристейт).
     let mut v3 = parsed.clone();

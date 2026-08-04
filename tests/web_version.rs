@@ -86,6 +86,7 @@ fn ser_step(n: i32, title: &str) -> SerStep {
         level: "required".into(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
         why: String::new(),
         section: String::new(),
         subtasks: vec![],
@@ -132,6 +133,7 @@ fn step_row(title: &str, command: &str, level: Level) -> StepRow {
         refs: serde_json::json!([]),
         needs_human: false,
         needs_human_ask: serde_json::json!({}),
+        danger: false,
     }
 }
 
