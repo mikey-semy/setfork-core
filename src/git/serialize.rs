@@ -192,7 +192,10 @@ fn code_block(code: &str, indent: &str, lang: &str) -> Vec<String> {
     }
     let fence = "`".repeat(longest.max(2) + 1);
     let mut out = vec![format!("{}{}{}", indent, fence, lang)];
-    out.extend(normalized.lines().map(|l| format!("{}{}", indent, l)));
+    // `split('\n')`, а НЕ `lines()`: последний отбрасывает завершающую пустую строку,
+    // а TS-зеркало (`markdownCodeBlock`) её сохраняет. Реализации обязаны давать
+    // одинаковые байты — на этом стоит golden-сверка.
+    out.extend(normalized.split('\n').map(|l| format!("{}{}", indent, l)));
     out.push(format!("{}{}", indent, fence));
     out
 }
@@ -477,6 +480,20 @@ mod tests {
         let inside = &lines[open + 1..close];
         assert!(inside.iter().any(|l| l.contains("<img src=x onerror=alert(1)>")));
         assert!(inside.iter().any(|l| l.trim() == "```"));
+    }
+
+    /// Команда с завершающим переводом строки даёт те же байты, что TS-зеркало:
+    /// `lines()` съедал бы пустую хвостовую строку, а `split` — нет.
+    #[test]
+    fn trailing_newline_in_command_is_preserved() {
+        let mut s = step(1, "Run");
+        s.command = "make all
+".into();
+        let files = version_files(&ver(vec![s]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("   make all
+   
+   ```"), "{}", readme);
     }
 
     /// У пункта «10.» маркер длиннее, и трёх пробелов продолжению уже не хватает.
