@@ -95,7 +95,10 @@ create table steps (
   -- «Здесь нужен человек»: место, где машина знать не может (цены, вкус, опыт).
   -- Зеркало фронт-схемы; расхождение тестовой копии с настоящей = ложно-зелёные тесты.
   needs_human boolean not null default false,
-  needs_human_ask jsonb not null default '{}'::jsonb
+  needs_human_ask jsonb not null default '{}'::jsonb,
+  -- Разрушительный пункт: команда необратима (сносит данные, тома, окружение).
+  -- Пункт с пометкой не попадает в собранный скрипт исполняемым.
+  danger boolean not null default false
 );
 
 create table stars (

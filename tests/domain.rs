@@ -39,6 +39,7 @@ fn step(title_en: &str) -> NewStep {
         content_json: String::new(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
     }
 }
 
@@ -125,6 +126,7 @@ async fn needs_human_survives_git_projection() {
         image_key: None,
         needs_human: None,
         needs_human_ask: None,
+        danger: None,
         block_type: "step".into(),
         content: serde_json::Value::Null,
         block_id: Some(bid.clone()),
@@ -184,6 +186,75 @@ async fn create_writes_moderation_with_the_row() {
     bad.moderation = "whatever".into();
     let err = write.create(Request::new(bad)).await.expect_err("должно отказать");
     assert_eq!(err.code(), tonic::Code::InvalidArgument);
+}
+
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn danger_survives_write_and_is_tristate_on_push() {
+    // «Разрушительный пункт» — пометка на законной, но необратимой команде: с ней
+    // пункт приезжает в собранный скрипт закомментированным. Цена потери пометки
+    // выше, чем у любой другой: скрипт молча станет исполнять `docker system prune
+    // --volumes`. Поэтому проверяем оба пути записи и обе стороны тристейта.
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "alice").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+    let read = ListReadSvc { pool: pool.clone() };
+
+    let bid = uuid::Uuid::new_v4().to_string();
+    let mut req = create_req(&owner.to_string(), "danger-list");
+    let mut risky = NewStep { danger: true, ..step("Очистить тома") };
+    risky.command = "docker system prune -a --volumes".into();
+    risky.block_id = bid.clone();
+    req.steps = vec![risky, step("Проверить сервис")];
+    let created = write.create(Request::new(req)).await.expect("create").into_inner();
+    let list_id = uuid::Uuid::parse_str(&created.id).expect("uuid");
+
+    let v1 = read
+        .get_version(Request::new(GetVersionRequest { list_id: created.id.clone(), version: 1 }))
+        .await
+        .expect("get_version")
+        .into_inner();
+    assert!(v1.steps[0].danger, "пометка обязана пережить запись через домен");
+    assert!(!v1.steps[1].danger, "непомеченный шаг остаётся непомеченным");
+
+    // Push из клона, где поля в файле нет (None): значение переносится по block_id —
+    // иначе старый клон снимал бы пометку с разрушительной команды.
+    let proj = |danger: Option<bool>| {
+        vec![setfork_core::git::project::ProjStep {
+            image_key: None,
+            needs_human: None,
+            needs_human_ask: None,
+            danger,
+            block_type: "step".into(),
+            content: serde_json::Value::Null,
+            block_id: Some(bid.clone()),
+            title: "Очистить тома".into(),
+            desc: String::new(),
+            command: "docker system prune -a --volumes".into(),
+            level: "required".into(),
+            why: String::new(),
+            section: String::new(),
+            subtasks: vec![],
+            refs: vec![],
+        }]
+    };
+    let v2 = setfork_core::db::add_version(&pool, list_id, "push", &proj(None)).await.expect("add_version");
+    let after_carry = read
+        .get_version(Request::new(GetVersionRequest { list_id: created.id.clone(), version: v2 }))
+        .await
+        .expect("get_version")
+        .into_inner();
+    assert!(after_carry.steps[0].danger, "push без поля НЕ снимает пометку — перенос по block_id");
+
+    // Явный false в файле — способ снять пометку пушем (вторая сторона тристейта).
+    let v3 =
+        setfork_core::db::add_version(&pool, list_id, "push", &proj(Some(false))).await.expect("add_version");
+    let after_clear = read
+        .get_version(Request::new(GetVersionRequest { list_id: created.id.clone(), version: v3 }))
+        .await
+        .expect("get_version")
+        .into_inner();
+    assert!(!after_clear.steps[0].danger, "явный false в каноне снимает пометку");
 }
 
 #[tokio::test]

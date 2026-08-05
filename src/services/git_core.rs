@@ -382,6 +382,10 @@ fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
                 // Идентичность блока — сквозь провод: без неё дифф ветки читает
                 // переименование как «удалён + добавлен» (ADR-0013).
                 block_id: st.block_id.clone().unwrap_or_default(),
+                // Разрушительный пункт: снапшот ветки ЧИТАЕТ пометку из канона —
+                // тот, кто смотрит чужую правку, обязан видеть её до слияния.
+                // Обратно (запись в ветку) она едет не отсюда, см. canon_list_json.
+                danger: st.danger.unwrap_or(false),
             })
             .collect(),
     }
@@ -426,6 +430,11 @@ fn from_list_content(c: ListContent) -> VersionData {
                 level: s.level,
                 needs_human: false,
                 needs_human_ask: None,
+                // Как и пометка «нужен человек»: значение с провода здесь НЕ берём,
+                // его подставляет canon_list_json из текущей версии по block_id.
+                // Клиент, который поля не заполнил, иначе снял бы пометку с
+                // разрушительной команды одной записью в ветку.
+                danger: false,
                 why: s.why,
                 section: s.section,
                 subtasks: s.subtasks,
@@ -525,6 +534,7 @@ fn canon_list_json(
         s.image_key = co.image_key.clone();
         s.needs_human = co.needs_human;
         s.needs_human_ask = Some(db::loc(&co.needs_human_ask)).filter(|a| !a.is_empty() && co.needs_human);
+        s.danger = co.danger;
     }
     Ok(serialize::list_json(&v).into_bytes())
 }
@@ -1285,6 +1295,7 @@ mod canon_tests {
             r#type: String::new(),
             content_json: String::new(),
             block_id: "11111111-2222-3333-4444-555555555555".into(),
+            danger: false,
         }
     }
 

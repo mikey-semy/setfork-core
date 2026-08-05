@@ -149,7 +149,7 @@ impl ListRead for ListReadSvc {
 
         let srows = sqlx::query(
             "select id, version_id, n, \"type\", content, title, \"desc\", command, level::text as level, \
-                    why, section, subtasks, refs, image_key, needs_human, needs_human_ask \
+                    why, section, subtasks, refs, image_key, needs_human, needs_human_ask, danger \
              from steps where version_id = $1 order by n asc",
         )
         .bind(vid)
@@ -199,6 +199,7 @@ impl ListRead for ListReadSvc {
                         &s.try_get::<serde_json::Value, _>("needs_human_ask")
                             .unwrap_or(serde_json::Value::Null),
                     )),
+                    danger: s.try_get::<bool, _>("danger").unwrap_or(false),
                     r#type: block_ty.clone(),
                     content_json: if block_ty.is_empty() {
                         String::new()
@@ -295,6 +296,9 @@ fn step_row(s: &NewStep) -> db::StepRow {
         // при поднятой пометке: «что спросить» без «нужен человек» — висячий текст.
         needs_human: s.needs_human,
         needs_human_ask: if s.needs_human { loc_json(&s.needs_human_ask) } else { serde_json::json!({}) },
+        // Разрушительный пункт: пометку ставит вызывающий (автор вручную либо
+        // авто-простановка по шаблону команды на его стороне) — ядро её хранит.
+        danger: s.danger,
     }
 }
 

@@ -35,6 +35,9 @@ pub struct SerStep {
     pub needs_human: bool,
     /// Вопрос к пометке (en-проекция); пишется только при needs_human и непустом.
     pub needs_human_ask: Option<String>,
+    /// Разрушительный пункт: команда необратима. Пишется только при true —
+    /// байты списков без пометки не меняются (та же дисциплина, что needs_human).
+    pub danger: bool,
     pub why: String,
     pub section: String,
     pub subtasks: Vec<String>,
@@ -132,6 +135,9 @@ pub fn list_json(v: &VersionData) -> String {
                 if let Some(ask) = &s.needs_human_ask {
                     m.insert("needsHumanAsk".into(), serde_json::Value::String(ask.clone()));
                 }
+            }
+            if s.danger {
+                m.insert("danger".into(), serde_json::json!(true));
             }
             m.insert("why".into(), serde_json::json!(s.why));
             m.insert("section".into(), serde_json::json!(s.section));
@@ -376,6 +382,7 @@ mod tests {
             level: "required".into(),
             needs_human: false,
             needs_human_ask: None,
+            danger: false,
             why: String::new(),
             section: String::new(),
             subtasks: vec![],

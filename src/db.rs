@@ -189,7 +189,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
     // длинного списка давала N+1 round-trip'ов), группировка по version_id.
     let srows = sqlx::query(
         "select s.version_id, s.n, s.block_id, s.\"type\", s.content, s.title, s.\"desc\", s.command, \
-                s.image_key, s.level::text as level, s.needs_human, s.needs_human_ask, \
+                s.image_key, s.level::text as level, s.needs_human, s.needs_human_ask, s.danger, \
                 s.why, s.section, s.subtasks, s.refs \
          from steps s join template_versions tv on tv.id = s.version_id \
          where tv.template_id = $1 order by s.version_id, s.n asc",
@@ -251,6 +251,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                     .ok()
                     .map(|v| loc(&v))
                     .filter(|a| !a.is_empty()),
+                danger: sr.try_get::<bool, _>("danger").unwrap_or(false),
                 why: loc(&sr.get::<serde_json::Value, _>("why")),
                 section: loc(&sr.get::<serde_json::Value, _>("section")),
                 subtasks,
@@ -300,6 +301,10 @@ pub struct StepRow {
     /// бы пометку — набор шагов перезаписывается ЦЕЛИКОМ.
     pub needs_human: bool,
     pub needs_human_ask: serde_json::Value, // LocaleText jsonb; {} = общий текст
+    /// Разрушительный пункт: команда необратима. Как и needs_human, обязан ехать
+    /// обоими путями записи — набор шагов версии перезаписывается ЦЕЛИКОМ, и
+    /// поле, о котором путь не знает, тихо исчезает вместе с версией.
+    pub danger: bool,
 }
 
 /// Вставка шагов версии — единственный INSERT в steps.
@@ -310,8 +315,8 @@ pub async fn insert_step_rows(
 ) -> Result<(), sqlx::Error> {
     for (i, r) in rows.iter().enumerate() {
         sqlx::query(
-            "insert into steps (version_id, n, block_id, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs, needs_human, needs_human_ask) \
-             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17::jsonb)",
+            "insert into steps (version_id, n, block_id, type, content, title, \"desc\", command, has_image, image_key, level, why, section, subtasks, refs, needs_human, needs_human_ask, danger) \
+             values ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17::jsonb, $18)",
         )
         .bind(ver_id)
         .bind((i as i32) + 1)
@@ -330,6 +335,7 @@ pub async fn insert_step_rows(
         .bind(&r.refs)
         .bind(r.needs_human)
         .bind(&r.needs_human_ask)
+        .bind(r.danger)
         .execute(&mut **tx)
         .await?;
     }
@@ -416,12 +422,18 @@ pub struct CarryOver {
     pub needs_human: bool,
     pub needs_human_ask: serde_json::Value,
     pub image_key: Option<String>,
+    pub danger: bool,
 }
 
 impl Default for CarryOver {
     fn default() -> Self {
         // ask = {} (не Null!): колонка jsonb NOT NULL, Null-bind уронил бы вставку.
-        CarryOver { needs_human: false, needs_human_ask: serde_json::json!({}), image_key: None }
+        CarryOver {
+            needs_human: false,
+            needs_human_ask: serde_json::json!({}),
+            image_key: None,
+            danger: false,
+        }
     }
 }
 
@@ -486,6 +498,10 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, CarryOver>
             Some(false) => serde_json::json!({}),
             None => carry.needs_human_ask.clone(),
         },
+        // Разрушительный пункт — тот же тристейт: файл источник, когда поле в нём
+        // есть; иначе перенос по block_id, чтобы push старого клона не снимал
+        // пометку с команды, которая сносит данные.
+        danger: s.danger.unwrap_or(carry.danger),
     }
 }
 
@@ -497,7 +513,7 @@ pub(crate) async fn current_marks(
     template_id: Uuid,
 ) -> Result<std::collections::HashMap<Uuid, CarryOver>, sqlx::Error> {
     let rows = sqlx::query(
-        "select s.block_id, s.needs_human, s.needs_human_ask, s.image_key \
+        "select s.block_id, s.needs_human, s.needs_human_ask, s.image_key, s.danger \
          from steps s \
          join template_versions tv on tv.id = s.version_id \
          join templates t on t.id = tv.template_id and t.current_version = tv.version \
@@ -517,6 +533,7 @@ pub(crate) async fn current_marks(
                         .try_get::<serde_json::Value, _>("needs_human_ask")
                         .unwrap_or(serde_json::json!({})),
                     image_key: r.try_get::<Option<String>, _>("image_key").ok().flatten(),
+                    danger: r.try_get::<bool, _>("danger").unwrap_or(false),
                 },
             );
         }
@@ -563,6 +580,7 @@ pub fn ser_step_from_row(n: i32, r: &StepRow) -> SerStep {
         level: r.level.as_str().to_string(),
         needs_human: r.needs_human,
         needs_human_ask: Some(loc(&r.needs_human_ask)).filter(|a| !a.is_empty() && r.needs_human),
+        danger: r.danger,
         why: loc(&r.why),
         section: loc(&r.section),
         subtasks: r
@@ -669,6 +687,7 @@ mod ser_step_tests {
             ]),
             needs_human: true,
             needs_human_ask: serde_json::json!({}),
+            danger: false,
         }
     }
 

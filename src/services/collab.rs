@@ -85,6 +85,9 @@ fn json_to_step(v: &serde_json::Value) -> NewStep {
         // тот же класс потери, что чинили во фронте (набор шагов перезаписывается целиком).
         needs_human: v.get("needsHuman").and_then(|x| x.as_bool()).unwrap_or(false),
         needs_human_ask: loc_from_obj(v.get("needsHumanAsk")),
+        // Пометка «разрушительный пункт» — ровно та же история: без переноса
+        // принятие предложения снимало бы её с команды, которая сносит данные.
+        danger: v.get("danger").and_then(|x| x.as_bool()).unwrap_or(false),
         // type/content_json — только у не-step блоков.
         r#type: wire_type(Some(ty)),
         content_json: if is_step_type(ty) {
