@@ -276,14 +276,41 @@ pub fn commit_snapshot(bare: &Path, sha: &str) -> Option<BranchSnapshotData> {
 }
 
 fn snapshot_from_data(tip: String, raw: &[u8]) -> Option<BranchSnapshotData> {
-    let parsed: RawList = serde_json::from_slice(raw).ok()?;
-    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]));
+    let parts = parse_list_value(serde_json::from_slice(raw).ok()?)?;
     Some(BranchSnapshotData {
         tip,
+        title: parts.title,
+        desc: parts.desc,
+        tags: parts.tags,
+        ordered: parts.ordered,
+        steps: parts.steps,
+    })
+}
+
+/// Мета и шаги из УЖЕ разобранного list.json — без tip и без чтения git.
+///
+/// Общий вход двух режимов чтения канона: снапшота ветки (мягкого) и строгого
+/// разбора редактора (`git::canon`). Превращение манифеста в шаги остаётся ровно
+/// одно: второе неминуемо разошлось бы с первым на очередном поле.
+pub struct ListParts {
+    pub title: String,
+    pub desc: String,
+    pub tags: Vec<String>,
+    pub ordered: bool,
+    pub version: i32,
+    pub steps: Vec<ProjStep>,
+}
+
+/// None — значение не объект манифеста (массив, число, строка).
+pub fn parse_list_value(value: serde_json::Value) -> Option<ListParts> {
+    let parsed: RawList = serde_json::from_value(value).ok()?;
+    let steps = parse_steps(parsed.steps.as_deref().unwrap_or(&[]));
+    Some(ListParts {
         title: parsed.title.unwrap_or_default(),
         desc: parsed.desc.unwrap_or_default(),
         tags: parsed.tags.unwrap_or_default(),
         ordered: parsed.ordered.unwrap_or(true),
+        version: parsed.version.unwrap_or(0),
         steps,
     })
 }

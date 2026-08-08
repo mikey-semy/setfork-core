@@ -12,6 +12,7 @@
 pub const MAIN_REF: &str = "refs/heads/main";
 
 pub mod bundle;
+pub mod canon;
 pub mod history;
 pub mod magic;
 pub mod messages;

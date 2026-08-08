@@ -39,6 +39,10 @@ base64 = "0.23.0"
 # транзитивно с tonic — здесь они просто объявлены прямыми, чтобы ими пользоваться.
 # Только http1 и plaintext: вызов идёт внутри docker-сети, TLS там не нужен.
 hyper = { version = "1", features = ["client", "http1"] }
+# Валидация канона по ОПУБЛИКОВАННОЙ схеме list.v1.json (git::canon): правила
+# формата берутся из схемы, а не переписываются условиями в коде. Раньше крейт
+# стоял только в dev-зависимостях — им проверялись тесты того же файла.
+jsonschema = { version = "0.49.2", default-features = false }
 hyper-util = { version = "0.1", features = ["client-legacy", "tokio"] }
 http-body-util = "0.1"
 bytes = "1"
@@ -50,4 +54,4 @@ protox = "0.9"
 prost = "0.14"
 
 [dev-dependencies]
-jsonschema = { version = "0.49.2", default-features = false }
+
