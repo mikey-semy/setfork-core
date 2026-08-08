@@ -15,11 +15,12 @@ use crate::git::{MAIN_REF, bundle, history, project, repo, serialize, smart_http
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
-    CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest, CommitToBranchResponse,
-    CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
-    ListCommitsRequest, ListContent, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest,
-    MergeStateRequest, MergeStateResponse, MirrorCheckResponse, MirrorPushResponse, PostRequest,
-    ReceivePackResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest,
+    CanonIssue, CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest,
+    CommitToBranchResponse, CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest,
+    InfoRefsRequest, ListCommitsRequest, ListContent, MergeBranchRequest, MergeBranchResponse,
+    MergeResolvedRequest, MergeStateRequest, MergeStateResponse, MirrorCheckResponse, MirrorPushResponse,
+    ParseCanonRequest, ParseCanonResponse, PostRequest, ReceivePackResponse, RenderCanonRequest,
+    RenderCanonResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest,
     UpdateBranchResponse,
 };
 
@@ -110,6 +111,18 @@ impl GitCoreSvc {
         repo::ensure_repo(&self.pool, owner, slug)
             .await
             .map_err(db_status)?
+            .ok_or_else(|| reason::status(Code::NotFound, Reason::NotFound, "list not found"))
+    }
+
+    /// Только идентичность списка — БЕЗ создания репозитория на диске.
+    /// Для RPC, которые ничего не пишут в git: заводить дерево ради чтения текста
+    /// значит оставлять следы там, где вызывающий об этом не просил.
+    async fn list_id(&self, repo: Option<RepoRef>) -> Result<Uuid, Status> {
+        let repo = repo.ok_or_else(|| Status::invalid_argument("repo required"))?;
+        db::resolve_list(&self.pool, &repo.owner, &repo.slug)
+            .await
+            .map_err(db_status)?
+            .map(|(id, _ver)| id)
             .ok_or_else(|| reason::status(Code::NotFound, Reason::NotFound, "list not found"))
     }
 }
@@ -359,36 +372,62 @@ fn to_snapshot_pb(sn: project::BranchSnapshotData) -> BranchSnapshotResponse {
         desc: sn.desc,
         tags: sn.tags,
         ordered: sn.ordered,
-        steps: sn
-            .steps
-            .iter()
-            .enumerate()
-            .map(|(i, st)| SnapshotStep {
-                n: (i as i32) + 1,
-                title: st.title.clone(),
-                desc: st.desc.clone(),
-                command: st.command.clone(),
-                level: st.level.clone(),
-                why: st.why.clone(),
-                section: st.section.clone(),
-                subtasks: st.subtasks.clone(),
-                refs: st
-                    .refs
-                    .iter()
-                    .map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() })
-                    .collect(),
-                r#type: st.block_type.clone(),
-                content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
-                // Идентичность блока — сквозь провод: без неё дифф ветки читает
-                // переименование как «удалён + добавлен» (ADR-0013).
-                block_id: st.block_id.clone().unwrap_or_default(),
-                // Разрушительный пункт: снапшот ветки ЧИТАЕТ пометку из канона —
-                // тот, кто смотрит чужую правку, обязан видеть её до слияния.
-                // Обратно (запись в ветку) она едет не отсюда, см. canon_list_json.
-                danger: st.danger.unwrap_or(false),
-            })
-            .collect(),
+        steps: steps_to_pb(&sn.steps),
     }
+}
+
+/// Разобранный канон -> провод (Ф4): то же содержимое, что клиент понесёт в
+/// AddVersion. Собирается из ListParts, а не из текста повторно: разбор канона
+/// живёт в одном месте, иначе редактор и проекция начнут понимать файл по-разному.
+fn list_content_from_parts(p: project::ListParts) -> ListContent {
+    ListContent {
+        title: p.title,
+        desc: p.desc,
+        tags: p.tags,
+        ordered: p.ordered,
+        version: p.version,
+        steps: steps_to_pb(&p.steps),
+    }
+}
+
+// Шаги домена -> шаги провода. Общее у снапшота ветки, merge-state и разбора
+// канона: три места, где ProjStep уезжает клиенту.
+fn steps_to_pb(steps: &[project::ProjStep]) -> Vec<SnapshotStep> {
+    steps
+        .iter()
+        .enumerate()
+        .map(|(i, st)| SnapshotStep {
+            n: (i as i32) + 1,
+            title: st.title.clone(),
+            desc: st.desc.clone(),
+            command: st.command.clone(),
+            level: st.level.clone(),
+            why: st.why.clone(),
+            section: st.section.clone(),
+            subtasks: st.subtasks.clone(),
+            refs: st
+                .refs
+                .iter()
+                .map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() })
+                .collect(),
+            r#type: st.block_type.clone(),
+            content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
+            // Идентичность блока — сквозь провод: без неё дифф ветки читает
+            // переименование как «удалён + добавлен» (ADR-0013).
+            block_id: st.block_id.clone().unwrap_or_default(),
+            // Разрушительный пункт: снапшот ветки ЧИТАЕТ пометку из канона —
+            // тот, кто смотрит чужую правку, обязан видеть её до слияния.
+            // Обратно (запись в ветку) она едет не отсюда, см. canon_list_json.
+            danger: st.danger.unwrap_or(false),
+            // Ф4: канон эти поля несёт, и вернуть содержимое без них значит
+            // стереть картинку и пометку при сохранении из редактора кода —
+            // набор шагов перезаписывается целиком. Отсутствие в тексте = «нет»:
+            // редактор видит полный снимок (proto/git.proto, SnapshotStep).
+            image_key: st.image_key.clone().unwrap_or_default(),
+            needs_human: st.needs_human.unwrap_or(false),
+            needs_human_ask: st.needs_human_ask.clone().unwrap_or_default(),
+        })
+        .collect()
 }
 
 /// Провод → домен сериализации: структура версии от клиента становится тем же
@@ -1197,6 +1236,58 @@ impl GitCore for GitCoreSvc {
         Ok(Response::new(CommitToBranchResponse { tip_sha: tip, changed }))
     }
 
+    /// Ф4, чтение: канон текстом — ровно то, что уехало бы в коммит.
+    ///
+    /// Собирается ТЕМ ЖЕ `canon_list_json`, что и запись в ветку: показать человеку
+    /// один текст, а закоммитить другой — худшее, что может сделать редактор кода.
+    /// Репозиторий здесь не создаётся: чтение не заводит на диске ничего нового.
+    async fn render_canon(
+        &self,
+        req: Request<RenderCanonRequest>,
+    ) -> Result<Response<RenderCanonResponse>, Status> {
+        let RenderCanonRequest { repo, content } = req.into_inner();
+        let id = self.list_id(repo).await?;
+        let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
+        let carry = db::current_marks(&self.pool, id).await.map_err(db_status)?;
+        let canon = canon_list_json(content, kind, &carry)?;
+        let canon = String::from_utf8(canon).map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(RenderCanonResponse { canon }))
+    }
+
+    /// Ф4, запись: строгий разбор отредактированного текста.
+    ///
+    /// Придирки — ЛЕГИТИМНЫЙ ответ, а не gRPC-ошибка: это разбор пользовательского
+    /// ввода, и вызывающему нужен весь список сразу, чтобы подсветить места в буфере.
+    /// Ошибкой отвечаем только на то, что сломано у нас (нет списка, битая БД).
+    async fn parse_canon(
+        &self,
+        req: Request<ParseCanonRequest>,
+    ) -> Result<Response<ParseCanonResponse>, Status> {
+        let ParseCanonRequest { repo, canon } = req.into_inner();
+        // Список резолвим и здесь: разбор текста от имени несуществующего списка —
+        // ошибка вызывающего, и узнать о ней лучше до правки, а не при сохранении.
+        self.list_id(repo).await?;
+        match crate::git::canon::parse_canon(&canon) {
+            Ok(parts) => Ok(Response::new(ParseCanonResponse {
+                issues: Vec::new(),
+                content: Some(list_content_from_parts(parts)),
+            })),
+            Err(issues) => Ok(Response::new(ParseCanonResponse {
+                issues: issues
+                    .into_iter()
+                    .map(|i| CanonIssue {
+                        path: i.path,
+                        code: i.code.as_str().to_string(),
+                        message: i.message,
+                        line: i.line,
+                        column: i.column,
+                    })
+                    .collect(),
+                content: None,
+            })),
+        }
+    }
+
     /// Ф3: пуш зеркала по запросу (кнопка «Синхронизировать», после сохранения
     /// настроек). Исход в теле ответа — текст ошибки показывается владельцу.
     async fn mirror_push(&self, req: Request<RepoRef>) -> Result<Response<MirrorPushResponse>, Status> {
@@ -1296,6 +1387,11 @@ mod canon_tests {
             content_json: String::new(),
             block_id: "11111111-2222-3333-4444-555555555555".into(),
             danger: false,
+            // Довески канона: в веточной записи они приходят НЕ отсюда, а из БД
+            // по block_id (canon_list_json) — здесь пусто намеренно.
+            image_key: String::new(),
+            needs_human: false,
+            needs_human_ask: String::new(),
         }
     }
 
