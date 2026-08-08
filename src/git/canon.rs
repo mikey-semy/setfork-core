@@ -42,6 +42,8 @@ pub enum IssueCode {
     Schema,
     /// Шаг без заголовка: проекция молча выбросила бы такой пункт.
     StepTitleRequired,
+    /// Ссылка без подписи: проекция молча выбросила бы саму ссылку.
+    RefLabelRequired,
 }
 
 impl IssueCode {
@@ -51,6 +53,7 @@ impl IssueCode {
             IssueCode::Syntax => "syntax",
             IssueCode::Schema => "schema",
             IssueCode::StepTitleRequired => "step_title_required",
+            IssueCode::RefLabelRequired => "ref_label_required",
         }
     }
 }
@@ -59,11 +62,18 @@ impl IssueCode {
 /// бинарь: правила формата обязаны ехать вместе с кодом, который его пишет.
 const SCHEMA: &str = include_str!("../../schema/list.v1.json");
 
+/// Разбор ровно тех полей, по которым мягкий парс МОЛЧА выбрасывает данные.
 #[derive(Deserialize)]
-struct StepTitleProbe {
+struct LossProbe {
     #[serde(rename = "type")]
     block_type: Option<String>,
     title: Option<String>,
+    refs: Option<Vec<RefProbe>>,
+}
+
+#[derive(Deserialize)]
+struct RefProbe {
+    label: Option<String>,
 }
 
 /// Строгий разбор: либо содержимое, либо ВСЕ найденные придирки разом.
@@ -85,7 +95,7 @@ pub fn parse_canon(text: &str) -> Result<super::project::ListParts, Vec<CanonIss
     };
 
     let mut issues = schema_issues(&value);
-    issues.extend(step_title_issues(&value));
+    issues.extend(silent_loss_issues(&value));
     if !issues.is_empty() {
         return Err(issues);
     }
@@ -133,28 +143,45 @@ fn schema_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
         .collect()
 }
 
-/// Шаг без заголовка схему проходит (title там — просто строка), а проекция такой
-/// пункт ВЫБРАСЫВАЕТ. Для редактора это ошибка, иначе сохранение молча теряет строку.
-fn step_title_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
+/// Места, где мягкий парс МОЛЧА выбрасывает данные, а схема пропускает: пустая
+/// строка — законная строка, и остановить её может только смысл, а не тип.
+///
+/// Таких мест ровно столько, сколько отбрасываний в `parse_steps`. Появится новое —
+/// сюда обязана приехать и придирка, иначе редактор снова начнёт молча терять ввод.
+fn silent_loss_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
     let Some(steps) = value.get("steps").and_then(|s| s.as_array()) else {
         return Vec::new();
     };
-    steps
-        .iter()
-        .enumerate()
-        .filter_map(|(i, raw)| {
-            let probe: StepTitleProbe = serde_json::from_value(raw.clone()).ok()?;
-            let is_step = crate::blocks::is_step_type(probe.block_type.as_deref().unwrap_or_default());
-            let empty = probe.title.as_deref().unwrap_or_default().trim().is_empty();
-            (is_step && empty).then(|| CanonIssue {
+    let mut out = Vec::new();
+    for (i, raw) in steps.iter().enumerate() {
+        let Ok(probe) = serde_json::from_value::<LossProbe>(raw.clone()) else { continue };
+        let blank = |v: &Option<String>| v.as_deref().unwrap_or_default().trim().is_empty();
+
+        // Шаг без заголовка проекция выбрасывает целиком.
+        if crate::blocks::is_step_type(probe.block_type.as_deref().unwrap_or_default()) && blank(&probe.title)
+        {
+            out.push(CanonIssue {
                 path: format!("/steps/{i}/title"),
                 code: IssueCode::StepTitleRequired,
                 message: "a step block requires a non-empty title".into(),
                 line: 0,
                 column: 0,
-            })
-        })
-        .collect()
+            });
+        }
+        // Ссылка без подписи — выбрасывается сама ссылка вместе с адресом.
+        for (k, r) in probe.refs.unwrap_or_default().iter().enumerate() {
+            if blank(&r.label) {
+                out.push(CanonIssue {
+                    path: format!("/steps/{i}/refs/{k}/label"),
+                    code: IssueCode::RefLabelRequired,
+                    message: "a reference requires a non-empty label".into(),
+                    line: 0,
+                    column: 0,
+                });
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -184,7 +211,9 @@ mod tests {
 
     #[test]
     fn синтаксис_показывает_место_разрыва() {
-        let Err(issues) = parse_canon("{\"title\": \n}") else { panic!("битый JSON обязан отвергнуться") };
+        let Err(issues) = parse_canon("{\"title\": \n}") else {
+            panic!("битый JSON обязан отвергнуться")
+        };
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].code, IssueCode::Syntax);
         assert_eq!(issues[0].line, 2, "строка разрыва, а не начало файла");
@@ -192,7 +221,9 @@ mod tests {
 
     #[test]
     fn шаг_без_заголовка_это_ошибка_а_не_тихая_потеря() {
-        let Err(issues) = parse_canon(&canon(&step(""))) else { panic!("шаг без заголовка обязан отвергнуться") };
+        let Err(issues) = parse_canon(&canon(&step(""))) else {
+            panic!("шаг без заголовка обязан отвергнуться")
+        };
         assert_eq!(issues[0].code, IssueCode::StepTitleRequired);
         assert_eq!(issues[0].path, "/steps/0/title", "указатель на само поле");
     }
@@ -214,15 +245,31 @@ mod tests {
             r#"{{"$schema":"u","title":"Т","desc":"","tags":[],"ordered":true,"version":1,"lishnee":1,"steps":[{}]}}"#,
             step("")
         );
-        let Err(issues) = parse_canon(&text) else { panic!("обе придирки обязаны прийти") };
+        let Err(issues) = parse_canon(&text) else {
+            panic!("обе придирки обязаны прийти")
+        };
         assert!(issues.iter().any(|i| i.code == IssueCode::Schema), "посторонний ключ");
         assert!(issues.iter().any(|i| i.code == IssueCode::StepTitleRequired), "шаг без заголовка");
     }
 
     #[test]
+    fn ссылка_без_подписи_это_ошибка_а_не_тихая_потеря() {
+        // Схема пропускает: пустая строка — законная строка. А мягкий парс
+        // выбрасывает ссылку целиком, вместе с адресом.
+        let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"   ","url":"https://example.com"}]}"#;
+        let Err(issues) = parse_canon(&canon(s)) else {
+            panic!("ссылка без подписи обязана отвергнуться")
+        };
+        let it = issues.iter().find(|i| i.code == IssueCode::RefLabelRequired).expect("придирка");
+        assert_eq!(it.path, "/steps/0/refs/0/label");
+    }
+
+    #[test]
     fn чужое_значение_ловится_схемой_с_указателем() {
         let bad = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"КАКОЙ-ТО","why":"","section":"","subtasks":[],"refs":[]}"#;
-        let Err(issues) = parse_canon(&canon(bad)) else { panic!("level вне реестра обязан отвергнуться") };
+        let Err(issues) = parse_canon(&canon(bad)) else {
+            panic!("level вне реестра обязан отвергнуться")
+        };
         let it = issues.iter().find(|i| i.code == IssueCode::Schema).expect("придирка схемы");
         assert_eq!(it.path, "/steps/0/level");
     }

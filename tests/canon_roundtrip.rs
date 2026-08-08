@@ -9,7 +9,9 @@
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
-use setfork_core::pb::{ListContent, ParseCanonRequest, RenderCanonRequest, RepoRef, SnapshotRef, SnapshotStep};
+use setfork_core::pb::{
+    ListContent, ParseCanonRequest, RenderCanonRequest, RepoRef, SnapshotRef, SnapshotStep,
+};
 use setfork_core::services::git_core::GitCoreSvc;
 use sqlx::postgres::PgPool;
 use tonic::Request;
@@ -49,6 +51,9 @@ fn content() -> ListContent {
                 content_json: String::new(),
                 block_id: String::new(),
                 danger: false,
+                image_key: String::new(),
+                needs_human: false,
+                needs_human_ask: String::new(),
             },
             SnapshotStep {
                 n: 2,
@@ -64,6 +69,9 @@ fn content() -> ListContent {
                 content_json: r#"{"md":"пояснение"}"#.into(),
                 block_id: String::new(),
                 danger: false,
+                image_key: String::new(),
+                needs_human: false,
+                needs_human_ask: String::new(),
             },
         ],
     }
@@ -130,6 +138,56 @@ async fn брак_в_тексте_приходит_придирками_а_не_
     let issue = out.issues.first().expect("придирка");
     assert_eq!(issue.code, "step_title_required");
     assert_eq!(issue.path, "/steps/0/title", "указатель на само поле");
+}
+
+/// Поля-довески канона обязаны доехать до вызывающего: он понесёт содержимое в
+/// AddVersion, где набор шагов перезаписывается ЦЕЛИКОМ. Пустое место любого из
+/// них означало бы стёртую картинку и снятую пометку — молча, при сохранении.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn картинка_и_пометка_из_текста_доезжают_до_вызывающего() {
+    let pool = support::pool_with_schema().await;
+    seed_list(&pool, "canon-довески", "стенд").await;
+    let svc = GitCoreSvc { pool };
+
+    let text = r#"{"$schema":"https://setfork.com/schema/list.v1.json","title":"Т","desc":"","tags":[],"ordered":true,"version":1,"steps":[{"n":1,"title":"Ш","desc":"","command":"rm -rf /tmp/x","imageKey":"u/1/shot.png","level":"required","needsHuman":true,"needsHumanAsk":"глянь глазами","danger":true,"why":"","section":"","subtasks":[],"refs":[]}]}"#;
+
+    let out = svc
+        .parse_canon(Request::new(ParseCanonRequest {
+            repo: Some(RepoRef { owner: "canon-довески".into(), slug: "стенд".into() }),
+            canon: text.into(),
+        }))
+        .await
+        .expect("разбор состоялся")
+        .into_inner();
+    assert!(out.issues.is_empty(), "текст валиден");
+    let step = &out.content.expect("содержимое").steps[0];
+    assert_eq!(step.image_key, "u/1/shot.png");
+    assert!(step.needs_human, "пометка «нужен человек» пережила провод");
+    assert_eq!(step.needs_human_ask, "глянь глазами");
+    assert!(step.danger, "разрушительный пункт пережил провод");
+}
+
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn ссылка_без_подписи_не_теряется_молча() {
+    let pool = support::pool_with_schema().await;
+    seed_list(&pool, "canon-ссылка", "стенд").await;
+    let svc = GitCoreSvc { pool };
+
+    let text = r#"{"$schema":"https://setfork.com/schema/list.v1.json","title":"Т","desc":"","tags":[],"ordered":true,"version":1,"steps":[{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"  ","url":"https://example.com"}]}]}"#;
+
+    let out = svc
+        .parse_canon(Request::new(ParseCanonRequest {
+            repo: Some(RepoRef { owner: "canon-ссылка".into(), slug: "стенд".into() }),
+            canon: text.into(),
+        }))
+        .await
+        .expect("разбор состоялся")
+        .into_inner();
+    let issue = out.issues.first().expect("придирка");
+    assert_eq!(issue.code, "ref_label_required");
+    assert_eq!(issue.path, "/steps/0/refs/0/label");
 }
 
 #[tokio::test]

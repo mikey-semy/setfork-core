@@ -15,12 +15,13 @@ use crate::git::{MAIN_REF, bundle, history, project, repo, serialize, smart_http
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
     Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
-    CanonIssue, CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest, CommitToBranchResponse,
-    CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
-    ListCommitsRequest, ListContent, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest,
-    MergeStateRequest, MergeStateResponse, MirrorCheckResponse, MirrorPushResponse, ParseCanonRequest,
-    ParseCanonResponse, PostRequest, ReceivePackResponse, RenderCanonRequest, RenderCanonResponse, RepoRef,
-    SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
+    CanonIssue, CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest,
+    CommitToBranchResponse, CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest,
+    InfoRefsRequest, ListCommitsRequest, ListContent, MergeBranchRequest, MergeBranchResponse,
+    MergeResolvedRequest, MergeStateRequest, MergeStateResponse, MirrorCheckResponse, MirrorPushResponse,
+    ParseCanonRequest, ParseCanonResponse, PostRequest, ReceivePackResponse, RenderCanonRequest,
+    RenderCanonResponse, RepoRef, SnapshotRef, SnapshotStep, Tag, TagsResponse, UpdateBranchRequest,
+    UpdateBranchResponse,
 };
 
 // Только простые имена веток — никаких путей/точек (защита от ref-инъекций).
@@ -395,30 +396,37 @@ fn steps_to_pb(steps: &[project::ProjStep]) -> Vec<SnapshotStep> {
     steps
         .iter()
         .enumerate()
-            .map(|(i, st)| SnapshotStep {
-                n: (i as i32) + 1,
-                title: st.title.clone(),
-                desc: st.desc.clone(),
-                command: st.command.clone(),
-                level: st.level.clone(),
-                why: st.why.clone(),
-                section: st.section.clone(),
-                subtasks: st.subtasks.clone(),
-                refs: st
-                    .refs
-                    .iter()
-                    .map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() })
-                    .collect(),
-                r#type: st.block_type.clone(),
-                content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
-                // Идентичность блока — сквозь провод: без неё дифф ветки читает
-                // переименование как «удалён + добавлен» (ADR-0013).
-                block_id: st.block_id.clone().unwrap_or_default(),
-                // Разрушительный пункт: снапшот ветки ЧИТАЕТ пометку из канона —
-                // тот, кто смотрит чужую правку, обязан видеть её до слияния.
-                // Обратно (запись в ветку) она едет не отсюда, см. canon_list_json.
-                danger: st.danger.unwrap_or(false),
-            })
+        .map(|(i, st)| SnapshotStep {
+            n: (i as i32) + 1,
+            title: st.title.clone(),
+            desc: st.desc.clone(),
+            command: st.command.clone(),
+            level: st.level.clone(),
+            why: st.why.clone(),
+            section: st.section.clone(),
+            subtasks: st.subtasks.clone(),
+            refs: st
+                .refs
+                .iter()
+                .map(|r| SnapshotRef { label: r.label.clone(), url: r.url.clone().unwrap_or_default() })
+                .collect(),
+            r#type: st.block_type.clone(),
+            content_json: if st.block_type.is_empty() { String::new() } else { st.content.to_string() },
+            // Идентичность блока — сквозь провод: без неё дифф ветки читает
+            // переименование как «удалён + добавлен» (ADR-0013).
+            block_id: st.block_id.clone().unwrap_or_default(),
+            // Разрушительный пункт: снапшот ветки ЧИТАЕТ пометку из канона —
+            // тот, кто смотрит чужую правку, обязан видеть её до слияния.
+            // Обратно (запись в ветку) она едет не отсюда, см. canon_list_json.
+            danger: st.danger.unwrap_or(false),
+            // Ф4: канон эти поля несёт, и вернуть содержимое без них значит
+            // стереть картинку и пометку при сохранении из редактора кода —
+            // набор шагов перезаписывается целиком. Отсутствие в тексте = «нет»:
+            // редактор видит полный снимок (proto/git.proto, SnapshotStep).
+            image_key: st.image_key.clone().unwrap_or_default(),
+            needs_human: st.needs_human.unwrap_or(false),
+            needs_human_ask: st.needs_human_ask.clone().unwrap_or_default(),
+        })
         .collect()
 }
 
@@ -1379,6 +1387,11 @@ mod canon_tests {
             content_json: String::new(),
             block_id: "11111111-2222-3333-4444-555555555555".into(),
             danger: false,
+            // Довески канона: в веточной записи они приходят НЕ отсюда, а из БД
+            // по block_id (canon_list_json) — здесь пусто намеренно.
+            image_key: String::new(),
+            needs_human: false,
+            needs_human_ask: String::new(),
         }
     }
 
