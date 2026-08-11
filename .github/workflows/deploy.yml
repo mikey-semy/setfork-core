@@ -94,6 +94,10 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      # issues: write — чтобы шаг снятия тревоги мог закрыть issue. Без него gh молча
+      # падает, а `|| true` прячет ошибку: тревога остаётся висеть после успешной
+      # выкатки. Находка авто-ревью на core#88.
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
