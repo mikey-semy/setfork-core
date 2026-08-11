@@ -1,13 +1,28 @@
-# Автодеплой на прод setfork (31.177.83.219, без Dokploy) после зелёного CI на master.
+# Автодеплой ядра на прод setfork.com (159.195.151.41, netcup) после зелёного CI на master.
+#
+# ⚠️ ЦЕЛЬ СМЕНИЛАСЬ 11.08.2026. Канон вернулся на setfork.com 04.08 (ADR-0017), у фронта
+# выкатку перенацелили 09.08 (fe#726) — а ядро всё это время ехало на 31.177.83.219 (.ru),
+# то есть уже не на прод. На каноне поэтому работала сборка от 07.08: весь трек канона
+# (#83–#86) туда не попадал, при том что запись версий идёт ТОЛЬКО через ядро, а protobuf
+# незнакомые поля игнорирует молча. Нашла линза 08 (hq/reviews/2026-08-11-reliability-ledger.md,
+# находка R1); .ru из выкатки убран (решение владельца 11.08).
+#
+# Стек ядра на netcup поднят ТЕМ ЖЕ способом, что раньше на .ru: ручной compose-проект
+# `setfork-core` из /root/setfork/src/setfork-core/docker-compose.dokploy.yml, Dokploy им не
+# управляет, серверного override нет (в отличие от фронта — там второй -f обязателен).
+# Сервисов в проекте два: `core` и `git-backup`, поэтому --remove-orphans безопасен, а
+# `up -d` заодно поднимает бэкап git-тома. Серверный .env (права 600) лежит вне репозитория
+# и tar-ом не затирается.
 #
 # Образ ядра собирается ЗДЕСЬ, на локальном self-hosted раннере, и уезжает на
-# сервер потоком `docker save | ssh docker load` — БЕЗ реестра. Причина: RF-сервер
-# не может качать с objects.githubusercontent.com (шейпинг провайдера), поэтому
-# сборка Dockerfile на сервере падает (grpc_health_probe); GHCR-pull потребовал бы
-# PAT read:packages на сервере — save|load обходится без кредов вовсе.
+# сервер потоком `docker save | ssh docker load` — БЕЗ реестра. Так надёжнее независимо
+# от сервера: сборка Dockerfile на стороне прода требует доступа к
+# objects.githubusercontent.com (grpc_health_probe), а GHCR-pull — PAT read:packages;
+# save|load не требует ни того, ни другого.
 #
 # Ключ деплоя приходит ro-mount'ом из setfork-ci-runner/docker-compose.yml
-# (/ssh/setfork) — в GitHub Secrets ничего не хранится.
+# (/ssh/setfork) — в GitHub Secrets ничего не хранится. Публичная часть заведена
+# в /root/.ssh/authorized_keys на netcup (09.08, для деплоя фронта — ключ тот же).
 name: Deploy
 
 on:
@@ -21,8 +36,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEPLOY: root@31.177.83.219
-  APP_DIR: /opt/setfork/src/setfork-core
+  DEPLOY: root@159.195.151.41
+  APP_DIR: /root/setfork/src/setfork-core
 
 jobs:
   deploy:
