@@ -18,9 +18,11 @@ services:
       SETFORK_RPC_RPM: ${SETFORK_RPC_RPM:-600}
       SETFORK_RPC_RPM_HEAVY: ${SETFORK_RPC_RPM_HEAVY:-60}
       # URL опубликованной JSON Schema манифеста ($schema в каждом list.json, Ф2a).
-      # От инстанса: RU-прод ссылается на себя — чужой домен дал бы молча не
-      # работающее автодополнение из-за шейпинга. Файл раздаёт фронт (public/schema).
-      SETFORK_SCHEMA_URL: ${SETFORK_SCHEMA_URL:-https://setfork.ru/schema/list.v1.json}
+      # Значение от инстанса: каждый прод ссылается на себя, файл раздаёт фронт
+      # (public/schema). Дефолт указывает на канон — `setfork.ru` списан 11.08.2026,
+      # и ссылка на него означала бы молча не работающее автодополнение у всех,
+      # кто поднимет стек без своего .env.
+      SETFORK_SCHEMA_URL: ${SETFORK_SCHEMA_URL:-https://setfork.com/schema/list.v1.json}
       # Ф3: общий с фронтом секрет расшифровки токена зеркала (пусто = зеркала
       # выключены, пуш честно запишет ошибку в статус настроек).
       SETFORK_MIRROR_SECRET: ${SETFORK_MIRROR_SECRET:-}
