@@ -36,7 +36,15 @@ jobs:
   # есть с 09.08 (fe#724), у ядра не было вовсе: пропуск не оставлял следа, а на
   # каноне тем временем работало ядро от 07.08. Находка линзы 08, R7.
   stuck:
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success'
+    # Провенанс тот же, что у deploy ниже: иначе форк-PR с веткой `master` запускал бы
+    # привилегированную джобу и писал в общую тревогу «прод отстал», хотя выкатки и не
+    # ожидалось. Находка авто-ревью на core#88.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion != 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'master'
     runs-on: [self-hosted, setfork]
     permissions:
       contents: read
@@ -45,6 +53,10 @@ jobs:
       - name: Тревога — выкатка ядра не состоялась
         env:
           GH_TOKEN: ${{ github.token }}
+          # Репозиторий задаём явно: джоба не делает checkout, а без него gh определяет
+          # его по git-remote рабочего каталога — на чистом раннере такого каталога нет,
+          # и команда молча падает вместе с тревогой.
+          GH_REPO: ${{ github.repository }}
           TITLE: '🟠 Ядро отстаёт от master: CI не зелёный'
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
           SHA: ${{ github.event.workflow_run.head_sha }}
@@ -133,6 +145,23 @@ jobs:
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
           sleep 5
           $SSH "docker ps --filter name=setfork-core --format '{{.Names}} {{.Status}}' | grep -q 'Up' " || { echo "::error::контейнер ядра не поднялся"; $SSH "docker logs --tail 50 setfork-core"; exit 1; }
+
+      # Зелёная выкатка снимает тревогу сама: иначе она живёт вечно и перестаёт
+      # что-либо значить, а следующие сбои дописываются в протухшую. Находка
+      # авто-ревью на core#88 — у фронта такой шаг есть с fe#724.
+      - name: Снять тревогу — выкатка прошла
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: '🟠 Ядро отстаёт от master: CI не зелёный'
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          command -v gh >/dev/null || exit 0
+          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            gh issue close "$EXISTING" --comment "Ядро выкачено на \`${SHA:0:7}\` — прод снова свежий." || true
+          fi
 
       # Копию ключа не оставляем на общем раннере (там же гоняется PR-код из ci.yml).
       # Корневой mount /ssh/setfork — забота инфры (setfork-ci-runner), но лишнюю
