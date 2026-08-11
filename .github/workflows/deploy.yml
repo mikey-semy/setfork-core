@@ -1,10 +1,17 @@
-# Автодеплой на прод setfork (31.177.83.219, без Dokploy) после зелёного CI на master.
+# Автодеплой ядра на прод-канон setfork.com (159.195.151.41, netcup) после зелёного CI.
+#
+# ⚠️ ЦЕЛЬ СМЕНИЛАСЬ 11.08.2026. Канон вернулся на setfork.com 04.08 (ADR-0017), у фронта
+# это исправили 09.08 (fe#726) — а у ядра нет. Ядро продолжало ехать на 31.177.83.219, и на
+# каноне работало ядро от 07.08 (попало туда один раз при переезде) рядом со свежим фронтом.
+# Опасно это не отставанием само по себе: запись версий идёт ТОЛЬКО через ядро, а protobuf
+# молча игнорирует незнакомые поля — новые поля шага доехали бы до старого ядра и пропали
+# без единой ошибки. Находка линзы 08, R1.
 #
 # Образ ядра собирается ЗДЕСЬ, на локальном self-hosted раннере, и уезжает на
-# сервер потоком `docker save | ssh docker load` — БЕЗ реестра. Причина: RF-сервер
-# не может качать с objects.githubusercontent.com (шейпинг провайдера), поэтому
-# сборка Dockerfile на сервере падает (grpc_health_probe); GHCR-pull потребовал бы
-# PAT read:packages на сервере — save|load обходится без кредов вовсе.
+# сервер потоком `docker save | ssh docker load` — БЕЗ реестра. Причина историческая:
+# RF-сервер не мог качать с objects.githubusercontent.com (шейпинг провайдера), а GHCR-pull
+# потребовал бы PAT read:packages на сервере. Способ оставлен и для netcup: он не зависит
+# ни от кредов на сервере, ни от доступности реестра.
 #
 # Ключ деплоя приходит ro-mount'ом из setfork-ci-runner/docker-compose.yml
 # (/ssh/setfork) — в GitHub Secrets ничего не хранится.
@@ -21,10 +28,44 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  DEPLOY: root@31.177.83.219
-  APP_DIR: /opt/setfork/src/setfork-core
+  DEPLOY: root@159.195.151.41
+  APP_DIR: /root/setfork/src/setfork-core
 
 jobs:
+  # CI не зелёный → деплоя не будет, и об этом надо СКАЗАТЬ. У фронта такая тревога
+  # есть с 09.08 (fe#724), у ядра не было вовсе: пропуск не оставлял следа, а на
+  # каноне тем временем работало ядро от 07.08. Находка линзы 08, R7.
+  stuck:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success'
+    runs-on: [self-hosted, setfork]
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Тревога — выкатка ядра не состоялась
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: '🟠 Ядро отстаёт от master: CI не зелёный'
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RESULT: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          command -v gh >/dev/null || { echo "::warning::нет gh CLI на раннере — тревога не отправлена"; exit 0; }
+          BODY="CI ядра на master завершился как \`$RESULT\` на \`${SHA:0:7}\` — выкатка пропущена.
+
+          Прогон: $RUN_URL
+
+          Чем это опасно именно у ядра: запись версий идёт ТОЛЬКО через него, а protobuf молча
+          игнорирует незнакомые поля — новые поля шага доедут до старого ядра и пропадут без ошибки.
+          Возраст ядра на каноне: \`ssh root@159.195.151.41 \"docker inspect setfork-core --format '{{.Created}}'\"\`.
+          Эта тревога закроется сама при следующей зелёной выкатке."
+          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
+            gh issue comment "$EXISTING" --body "$BODY" || echo "::warning::не удалось дописать в тревогу #$EXISTING"
+          else
+            gh issue create --title "$TITLE" --body "$BODY" || echo "::warning::не удалось создать тревогу"
+          fi
+
   deploy:
     # Деплоим ТОЛЬКО реальный push в наш master, не форк-PR. head_branch
     # подделывается именем форк-ветки (назвал ветку форка `master` — фильтр
@@ -83,7 +124,9 @@ jobs:
           docker save setfork-core:prod | $SSH docker load
           tar --exclude=.git -czf - . | $SSH "mkdir -p $APP_DIR && tar -xzf - -C $APP_DIR"
           $SSH "printf 'services:\n  core:\n    image: setfork-core:prod\n' > $APP_DIR/docker-compose.image.yml"
-          $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build --remove-orphans"
+          # Без --remove-orphans: на netcup проектом частично управляет Dokploy, и
+          # «лишним» compose может счесть чужой контейнер (у фронта это уже учтено).
+          $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build"
 
       - name: Health-check
         run: |
