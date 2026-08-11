@@ -11,6 +11,12 @@ WORKDIR /app
 # артефакты фиктивной сборки за свежие (mtime COPY может быть старше).
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY proto ./proto
+# Опубликованная схема списка нужна САМОЙ СБОРКЕ: `src/git/canon.rs` вшивает её
+# через include_str!. Локально файл на месте, поэтому расхождение видно только в
+# образе — с #86 сборка падала «couldn't read ../../schema/list.v1.json», деплой
+# ядра уходил skipped, а CI фронта продолжал тестировать ghcr :latest от 05.08.
+# Слой рядом с proto намеренно: схема меняется редко, кэш зависимостей остаётся цел.
+COPY schema ./schema
 RUN mkdir src \
   && echo 'fn main() {}' > src/main.rs \
   && touch src/lib.rs \
