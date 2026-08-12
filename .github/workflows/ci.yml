@@ -83,21 +83,44 @@ jobs:
           docker rm -f "pg-${GITHUB_RUN_ID}" || true
           docker network rm "ci-pg-${GITHUB_RUN_ID}" || true
 
-  # Публикация образа в GHCR (только push в master): ghcr.io/<repo>:latest + :sha.
-  # Плоский docker build/push через сок (buildx-экшен не нужен). Деплой в Dokploy
-  # пока собирает образ сам; переключение на pull из GHCR — вопрос трека.
+  # Сборка образа — на КАЖДОМ прогоне, публикация в GHCR — только с master.
+  #
+  # До 12.08 джоба целиком стояла за `if: push && master`, то есть единственная
+  # проверка «код собирается локально, но не собирается в образе» была ЗА воротами.
+  # Так #86 прошёл зелёным, а master после мержа три дня не собирался: в образ не
+  # копировался `schema/` (core#87). Ни PR, ни master об этом не краснели — деплой
+  # уходил `skipped` и молчал. У фронта сборка стережёт вход в master с самого
+  # начала (`npm run build` в джобе `check`), у ядра — не стерегла. Линза 08, R11:
+  # это корень, а не сам пропущенный COPY.
+  #
+  # Форма стандартная: `docker/build-push-action` ровно так и настраивают —
+  # `push: ${{ github.event_name != 'pull_request' }}`. Здесь плоский docker
+  # через сок (buildx-экшен на sibling-раннере не работает, см. шапку файла).
   image:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: [self-hosted, setfork-core]
+    # `packages: write` достаётся и PR-прогону — права задаются на джобе, не на шаге.
+    # Разделять на две джобы смысла нет: репозиторий приватный, форков ноль, а PR-код
+    # и так исполняется на раннере с доступом к docker.sock хоста, то есть модель
+    # угроз от этой строки не меняется. Пушит всё равно только шаг ниже, с master.
     permissions:
       contents: read
       packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-      - name: docker build + push в GHCR
+      - name: docker build (тот же слой, что поедет на прод)
+        run: docker build --target runtime -t "$IMAGE:${{ github.sha }}" .
+      - name: push в GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         run: |
-          IMAGE=ghcr.io/${{ github.repository }}
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          docker build --target runtime -t "$IMAGE:latest" -t "$IMAGE:${{ github.sha }}" .
-          docker push "$IMAGE:latest"
+          docker tag "$IMAGE:${{ github.sha }}" "$IMAGE:latest"
           docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"
+      # Тег с PR-прогона на раннере не нужен: образы копятся и съедают диск
+      # (13 брошенных CI-контейнеров и 27 ГБ worktree — уже было 12.08). Кэш
+      # слоёв удаление тега не трогает, следующая сборка так же быстра.
+      - name: Убрать образ PR-прогона
+        if: always() && github.event_name == 'pull_request'
+        run: docker image rm "$IMAGE:${{ github.sha }}" 2>/dev/null || true
