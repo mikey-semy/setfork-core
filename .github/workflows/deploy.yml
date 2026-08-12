@@ -106,35 +106,56 @@ jobs:
       # выкатки. Находка авто-ревью на core#88.
       issues: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      # Очередь прогонов порядок не гарантирует: два пуша в master могут завершить CI
-      # не по порядку, и опоздавший выкатил бы СТАРЫЙ образ поверх нового — прод
-      # откатился бы назад, притом оба прогона зелёные. У фронта такой гейт есть с
-      # 09.08, у ядра не было. Находка авто-ревью на core#88 (P1).
-      - name: Коммит всё ещё вершина master?
-        id: fresh
+      # Что именно выкатываем, решаем ДО чекаута: не «свой» коммит, а вершину master,
+      # если её CI уже зелёный. Так делают GitOps-контроллеры (Argo CD, Flux): целью
+      # доставки является состояние ветки, а не отдельный прогон.
+      #
+      # Почему не просто «уступить свежему прогону» (как сейчас у фронта): очередь
+      # concurrency держит ОДИН running и ОДИН pending, и каждая новая постановка
+      # вытесняет прежний pending
+      # (docs.github.com/actions/…/control-workflow-concurrency). Пока идёт выкатка A,
+      # прогон вершины B стоит в очереди — и опоздавший прогон старого коммита C
+      # выбивает B из слота. C, увидев чужую вершину, уступил бы, а B уже отменён:
+      # прод молча остаётся на A до следующего пуша. Ровно тот класс, из-за которого
+      # прод не обновлялся трое суток (линза 08). Здесь опоздавший C доставляет
+      # вершину B сам, поэтому вытеснение слота ничего не теряет.
+      - name: Что выкатываем — свой коммит или ушедшую вперёд вершину
+        id: target
         uses: actions/github-script@v7
         with:
           script: |
             // github-script, а НЕ gh: на раннере без GitHub CLI шаг падал бы с кодом 127
-            // и валил каждую выкатку. Node и этот action есть всегда. Тот же приём у фронта.
+            // и валил каждую выкатку. Node и этот action есть всегда.
             const mine = process.env.DEPLOY_SHA
             const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
             const tip = ref.object.sha
-            const ok = tip === mine
-            if (!ok) core.notice(`master уже на ${tip.slice(0, 7)}, а это прогон ${mine.slice(0, 7)} — уступаем свежему`)
-            core.setOutput('ok', String(ok))
+            if (tip === mine) return core.setOutput('sha', mine)
+
+            // Вершина ушла вперёд. Выкатываем ЕЁ, но только если её CI уже зелёный —
+            // непроверенный код на прод не едет.
+            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+              ...context.repo, head_sha: tip, event: 'push', per_page: 20,
+            })
+            const ci = runs.workflow_runs.find((r) => r.name === 'CI')
+            if (ci?.conclusion === 'success') {
+              core.notice(`master уже на ${tip.slice(0, 7)} и её CI зелёный — выкатываем вершину вместо ${mine.slice(0, 7)}`)
+              return core.setOutput('sha', tip)
+            }
+            core.notice(`master на ${tip.slice(0, 7)}, её CI — ${ci?.status ?? 'не запускался'}; выкатит её собственный прогон`)
+            core.setOutput('sha', '')
         env:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/checkout@v4
+        if: steps.target.outputs.sha != ''
+        with:
+          ref: ${{ steps.target.outputs.sha }}
 
       # GitHub Deployment — только витрина/история в сайдбаре: сам деплой ниже от
       # него никак не зависит, и сбой API не должен ронять доставку (continue-on-error).
       - name: 'Deployment: старт'
         id: dep
-        if: steps.fresh.outputs.ok == 'true'
+        if: steps.target.outputs.sha != ''
         continue-on-error: true
         uses: actions/github-script@v7
         with:
@@ -153,17 +174,17 @@ jobs:
             })
             core.setOutput('id', String(dep.id))
         env:
-          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEPLOY_SHA: ${{ steps.target.outputs.sha }}
 
       - name: Ключ деплоя (ro-mount раннера)
-        if: steps.fresh.outputs.ok == 'true'
+        if: steps.target.outputs.sha != ''
         run: |
           test -f /ssh/setfork || { echo "::error::нет /ssh/setfork — подними раннер из setfork-ci-runner/docker-compose.yml (там ro-mount ключа)"; exit 1; }
           command -v ssh >/dev/null || (apt-get update -qq && apt-get install -y -qq openssh-client)
           install -m 600 /ssh/setfork /tmp/deploy_key
 
       - name: Сборка → доставка образа → up
-        if: steps.fresh.outputs.ok == 'true'
+        if: steps.target.outputs.sha != ''
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
           docker build -t setfork-core:prod --target runtime .
@@ -175,7 +196,7 @@ jobs:
           $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build"
 
       - name: Health-check
-        if: steps.fresh.outputs.ok == 'true'
+        if: steps.target.outputs.sha != ''
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
           sleep 5
@@ -185,12 +206,12 @@ jobs:
       # что-либо значить, а следующие сбои дописываются в протухшую. Находка
       # авто-ревью на core#88 — у фронта такой шаг есть с fe#724.
       - name: Снять тревогу — выкатка прошла
-        if: success() && steps.fresh.outputs.ok == 'true'
+        if: success() && steps.target.outputs.sha != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TITLE: '🟠 Ядро отстаёт от master: CI не зелёный'
-          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          SHA: ${{ steps.target.outputs.sha }}
         run: |
           command -v gh >/dev/null || exit 0
           EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' 2>/dev/null || true)
