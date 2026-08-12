@@ -63,7 +63,7 @@ jobs:
     # сразу завели бы два issue), но не отбирают слот у деплоя.
     concurrency:
       group: deploy-prod-core-alert
-      cancel-in-progress: false
+      queue: max
     permissions:
       contents: read
       issues: write
@@ -115,9 +115,15 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.head_branch == 'master'
     runs-on: [self-hosted, setfork-core]
+    # `queue: max` — штатный способ не терять прогоны: по умолчанию (`single`) в
+    # группе ждёт РОВНО ОДИН, и каждая новая постановка отменяет предыдущего.
+    # Пока идёт выкатка, прогон вершины ждёт в очереди — и любой следующий выбивал
+    # бы его оттуда. С `max` очередь держит до 100 и разбирается FIFO.
+    # docs.github.com/actions/…/workflow-syntax#queueing-multiple-pending-runs
+    # (`cancel-in-progress` с ним несовместим — валидация отвергает пару).
     concurrency:
       group: deploy-prod-core
-      cancel-in-progress: false
+      queue: max
     # deployments: write — витрина Deployments в сайдбаре GitHub (история выкаток).
     permissions:
       contents: read
@@ -239,11 +245,14 @@ jobs:
           TITLE: '🟠 Ядро отстаёт от master: CI не зелёный'
           SHA: ${{ steps.target.outputs.sha }}
         run: |
-          command -v gh >/dev/null || exit 0
-          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' 2>/dev/null || true)
-          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
-            gh issue close "$EXISTING" --comment "Ядро выкачено на \`${SHA:0:7}\` — прод снова свежий." || true
-          fi
+          command -v gh >/dev/null || { echo "::warning::нет gh CLI на раннере — тревога осталась открытой"; exit 0; }
+          # Закрываем ВСЕ открытые с этим заголовком, а не первую: тревоги заводятся
+          # из разных прогонов, и поиск по заголовку уже возвращал больше одной.
+          # Оставленная открытой тревога — это ложный «прод отстаёт» на свежем проде.
+          for N in $(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[].number' 2>/dev/null); do
+            gh issue close "$N" --comment "Ядро выкачено на \`${SHA:0:7}\` — прод снова свежий." \
+              || echo "::warning::не удалось закрыть тревогу #$N"
+          done
 
       # Копию ключа не оставляем на общем раннере (там же гоняется PR-код из ci.yml).
       # Корневой mount /ssh/setfork — забота инфры (setfork-ci-runner), но лишнюю
