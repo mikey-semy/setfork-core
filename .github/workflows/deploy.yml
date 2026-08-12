@@ -153,8 +153,26 @@ jobs:
       # Зелёная выкатка снимает тревогу сама: иначе она живёт вечно и перестаёт
       # что-либо значить, а следующие сбои дописываются в протухшую. Находка
       # авто-ревью на core#88 — у фронта такой шаг есть с fe#724.
-      - name: Снять тревогу — выкатка прошла
+      # Проверка перед снятием: выкатили ли мы ТЕКУЩУЮ вершину master. Прогоны
+      # завершаются не по порядку, и опоздавший успешный (со старым SHA) закрыл бы
+      # тревогу, открытую свежим упавшим, — «прод свежий», хотя новая ревизия так и
+      # не уехала. Находка авто-ревью на core#88.
+      - name: Наш ли коммит сейчас вершина master
+        id: tip
         if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          TIP=$(gh api repos/${{ github.repository }}/commits/master --jq .sha 2>/dev/null || echo '')
+          if [ -n "$TIP" ] && [ "$TIP" = "$SHA" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::выкачен ${SHA:0:7}, а вершина master ${TIP:0:7} — тревогу не снимаем"
+          fi
+
+      - name: Снять тревогу — выкатка прошла
+        if: success() && steps.tip.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
