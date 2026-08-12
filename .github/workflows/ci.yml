@@ -39,16 +39,42 @@ jobs:
       # Клон фронта берём тем же токеном, если он задан секретом; без него шаг сам
       # печатает «НЕ ВЫПОЛНЕН» и не блокирует — кросс-репный чекаут приватного репо
       # без токена невозможен, и врать об этом гейт не должен.
-      - name: proto-sync (фронт)
+      # ⚠️ Существующий клон ОБНОВЛЯЕМ, а не переиспользуем как есть. Раннеры
+      # ephemeral, но их workdir — именованный том, переживающий пересоздание
+      # контейнера: клон фронта может дожить до следующих прогонов и протухнуть.
+      # Оба гейта ниже сверяются с `origin/master` фронта, поэтому устаревший клон
+      # означает сверку со вчерашним состоянием — и в момент настоящего расхождения
+      # они оба ответили бы «OK». Замечание авто-ревью на core#93 (P1).
+      #
+      # `fetch` идёт с url'ом в аргументе, а не через `remote set-url`: так токен не
+      # оседает в `.git/config` на общем раннере.
+      - name: Свежий клон фронта (для обоих кросс-репных гейтов)
         env:
           FRONTEND_TOKEN: ${{ secrets.FRONTEND_RO_TOKEN }}
         run: |
-          if [ -n "${FRONTEND_TOKEN:-}" ] && [ ! -d ../setfork-frontend/.git ]; then
-            url="https://x-access-token:${FRONTEND_TOKEN}@github.com/mikey-semy/setfork-frontend.git"
-            git clone --quiet --depth 50 "$url" ../setfork-frontend \
-              || echo "::warning::клон фронта не удался — proto-sync пропущен"
+          if [ -z "${FRONTEND_TOKEN:-}" ]; then
+            echo "::warning::FRONTEND_RO_TOKEN не задан — кросс-репные гейты не выполнятся"
+            exit 0
           fi
-          bash scripts/check-proto-sync.sh
+          url="https://x-access-token:${FRONTEND_TOKEN}@github.com/mikey-semy/setfork-frontend.git"
+          if [ -d ../setfork-frontend/.git ]; then
+            git -C ../setfork-frontend fetch --quiet --depth 50 "$url" master:refs/remotes/origin/master \
+              || echo "::warning::fetch фронта не удался — гейты сверятся с УСТАРЕВШИМ клоном"
+          else
+            git clone --quiet --depth 50 "$url" ../setfork-frontend \
+              || echo "::warning::клон фронта не удался — кросс-репные гейты пропущены"
+          fi
+
+      - name: proto-sync (фронт)
+        run: bash scripts/check-proto-sync.sh
+
+      # Второй кросс-репный гейт на том же клоне: ядро и фронт обязаны выкатываться
+      # на ОДИН хост. 04.08 канон сменился, у фронта цель поправили 09.08, у ядра
+      # забыли — и оно пять суток каталось на списанный сервер, а нашла это линза,
+      # случайно. Проверка того самого утверждения, которое было неверным всё это
+      # время. R1 реестра 2026-08-11.
+      - name: deploy-target (ядро и фронт на одном хосте)
+        run: bash scripts/check-deploy-target.sh
 
   # Интеграционные + golden против настоящего Postgres — те же тесты,
   # что гоняет scripts/ci-local.sh на эфемерном контейнере.
