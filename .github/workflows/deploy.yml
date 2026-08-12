@@ -71,53 +71,69 @@ jobs:
       # уже выкачено». Витрина Deployments для этого и заводилась.
       deployments: read
     steps:
+      # Всё через github-script, а НЕ через gh: раннер собран из чужого образа
+      # (myoung34/github-runner), CLI там есть сегодня и может не быть завтра, а
+      # проверка `command -v gh || exit 0` выключала бы тревогу МОЛЧА — то есть
+      # сигнальный механизм умирал бы ровно так же тихо, как то, о чём он сигналит.
+      # Node и этот action есть на любом раннере. Замечание авто-ревью на core#88.
       - name: Тревога — выкатка ядра не состоялась
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ github.token }}
-          # Репозиторий задаём явно: джоба не делает checkout, а без него gh определяет
-          # его по git-remote рабочего каталога — на чистом раннере такого каталога нет,
-          # и команда молча падает вместе с тревогой.
-          GH_REPO: ${{ github.repository }}
-          TITLE: '🟠 Ядро отстаёт от master: CI не зелёный'
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           RESULT: ${{ github.event.workflow_run.conclusion }}
-        run: |
-          command -v gh >/dev/null || { echo "::warning::нет gh CLI на раннере — тревога не отправлена"; exit 0; }
-          # Опоздавший упавший прогон не должен тревожить, если master уже ушёл вперёд:
-          # его ревизия никого не касается, а закрыть такую тревогу было бы некому.
-          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha 2>/dev/null || echo '')
-          if [ -n "$TIP" ] && [ "$TIP" != "$SHA" ]; then
-            echo "::notice::упал прогон ${SHA:0:7}, а master уже на ${TIP:0:7} — тревогу не заводим"
-            exit 0
-          fi
-          # Перезапуск CI на уже выкаченной ревизии — обычное дело: раннеры теряют
-          # связь, и джобу гоняют заново (сегодня так дважды). Падение такого прогона
-          # не значит, что прод отстал: этот самый коммит уже на проде, и тревога о нём
-          # была бы ложной — а ложные и превращают её в фоновый шум (R6 линзы 08).
-          # Спрашиваем витрину Deployments, которую сами же и заполняем при выкатке.
-          DEP=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?sha=${SHA}&environment=production&per_page=1" --jq '.[0].id' 2>/dev/null || echo '')
-          if [ -n "$DEP" ] && [ "$DEP" != "null" ]; then
-            STATE=$(gh api "repos/${GITHUB_REPOSITORY}/deployments/${DEP}/statuses?per_page=1" --jq '.[0].state' 2>/dev/null || echo '')
-            if [ "$STATE" = "success" ]; then
-              echo "::notice::${SHA:0:7} уже выкачен (deployment $DEP) — прогон перезапускали, тревога не нужна"
-              exit 0
-            fi
-          fi
-          BODY="CI ядра на master завершился как \`$RESULT\` на \`${SHA:0:7}\` — выкатка пропущена.
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const TITLE = '🟠 Ядро отстаёт от master: CI не зелёный'
+            const sha = process.env.SHA
 
-          Прогон: $RUN_URL
+            // Опоздавший упавший прогон не тревожит, если master уже ушёл вперёд:
+            // его ревизия никого не касается, а закрыть такую тревогу было бы некому.
+            const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
+            const tip = ref.object.sha
+            if (tip !== sha) {
+              return core.notice(`упал прогон ${sha.slice(0, 7)}, а master уже на ${tip.slice(0, 7)} — тревогу не заводим`)
+            }
 
-          Чем это опасно именно у ядра: запись версий идёт ТОЛЬКО через него, а protobuf молча
-          игнорирует незнакомые поля — новые поля шага доедут до старого ядра и пропадут без ошибки.
-          Возраст ядра на каноне: \`ssh root@159.195.151.41 \"docker inspect setfork-core --format '{{.Created}}'\"\`.
-          Эта тревога закроется сама при следующей зелёной выкатке."
-          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' 2>/dev/null || true)
-          if [ -n "$EXISTING" ] && [ "$EXISTING" != "null" ]; then
-            gh issue comment "$EXISTING" --body "$BODY" || echo "::warning::не удалось дописать в тревогу #$EXISTING"
-          else
-            gh issue create --title "$TITLE" --body "$BODY" || echo "::warning::не удалось создать тревогу"
-          fi
+            // Перезапуск CI на уже выкаченной ревизии — обычное дело: раннеры теряют
+            // связь, и джобу гоняют заново (12.08 так дважды). Падение такого прогона
+            // не значит, что прод отстал: этот самый коммит уже на проде, и тревога о
+            // нём была бы ложной — а ложные и превращают её в шум (R6 линзы 08).
+            // Спрашиваем витрину Deployments, которую сама же выкатка и заполняет.
+            const { data: deps } = await github.rest.repos.listDeployments({
+              ...context.repo, sha, environment: 'production', per_page: 1,
+            })
+            if (deps.length) {
+              const { data: states } = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: deps[0].id, per_page: 1,
+              })
+              if (states[0]?.state === 'success') {
+                return core.notice(`${sha.slice(0, 7)} уже выкачен (deployment ${deps[0].id}) — прогон перезапускали, тревога не нужна`)
+              }
+            }
+
+            const body = [
+              `CI ядра на master завершился как \`${process.env.RESULT}\` на \`${sha.slice(0, 7)}\` — выкатка пропущена.`,
+              '',
+              `Прогон: ${process.env.RUN_URL}`,
+              '',
+              'Чем это опасно именно у ядра: запись версий идёт ТОЛЬКО через него, а protobuf молча',
+              'игнорирует незнакомые поля — новые поля шага доедут до старого ядра и пропадут без ошибки.',
+              'Возраст ядра на каноне: `ssh root@159.195.151.41 "docker inspect setfork-core --format \'{{.Created}}\'"`.',
+              'Эта тревога закроется сама при следующей зелёной выкатке.',
+            ].join('\n')
+
+            // Точное сравнение заголовка, а не search-запрос: поиск индексируется с
+            // задержкой и на свежую тревогу отвечает пустотой — получались дубли.
+            const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 })
+            const existing = open.find((i) => i.title === TITLE && !i.pull_request)
+            if (existing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body })
+              core.notice(`дописал в тревогу #${existing.number}`)
+            } else {
+              const { data: made } = await github.rest.issues.create({ ...context.repo, title: TITLE, body })
+              core.notice(`завёл тревогу #${made.number}`)
+            }
 
   deploy:
     # Деплоим ТОЛЬКО реальный push в наш master, не форк-PR. head_branch
@@ -274,38 +290,42 @@ jobs:
       # авто-ревью на core#88 — у фронта такой шаг есть с fe#724.
       - name: Снять тревогу — выкатка прошла
         if: success() && steps.target.outputs.sha != ''
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TITLE: '🟠 Ядро отстаёт от master: CI не зелёный'
           SHA: ${{ steps.target.outputs.sha }}
-        run: |
-          command -v gh >/dev/null || { echo "::warning::нет gh CLI на раннере — тревога осталась открытой"; exit 0; }
-          # Тревога общая на все ревизии, поэтому закрывать её вправе только выкатка
-          # ТЕКУЩЕЙ вершины. Пока шла сборка (десять минут), в master мог прийти новый
-          # коммит с красным CI — тревогу завели уже про него, и закрыть её значило бы
-          # соврать: прод остался на предыдущем. Свежесть проверяется здесь заново, а
-          # не только в шаге выбора цели до сборки. Замечание авто-ревью на core#88.
-          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha 2>/dev/null || echo '')
-          # Отказ ведёт в СТОРОНУ ОТКРЫТОЙ тревоги, и это осознанно: не сумели
-          # убедиться, что прод свеж, — значит не вправе снимать сигнал. В джобе
-          # `stuck` выше та же неизвестность решается наоборот (тревога заводится),
-          # потому что там безопасная сторона — лишний сигнал, а не его отсутствие.
-          if [ -z "$TIP" ]; then
-            echo "::warning::не удалось узнать вершину master — тревогу оставляем открытой"
-            exit 0
-          fi
-          if [ "$TIP" != "$SHA" ]; then
-            echo "::notice::выкачен ${SHA:0:7}, а master уже на ${TIP:0:7} — тревогу оставляем открытой"
-            exit 0
-          fi
-          # Закрываем ВСЕ открытые с этим заголовком, а не первую: тревоги заводятся
-          # из разных прогонов, и поиск по заголовку уже возвращал больше одной.
-          # Оставленная открытой тревога — это ложный «прод отстаёт» на свежем проде.
-          for N in $(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[].number' 2>/dev/null); do
-            gh issue close "$N" --comment "Ядро выкачено на \`${SHA:0:7}\` — прод снова свежий." \
-              || echo "::warning::не удалось закрыть тревогу #$N"
-          done
+        with:
+          script: |
+            const TITLE = '🟠 Ядро отстаёт от master: CI не зелёный'
+            const sha = process.env.SHA
+            try {
+              // Тревога общая на все ревизии, поэтому закрывать её вправе только выкатка
+              // ТЕКУЩЕЙ вершины. Пока шла сборка (десять минут), в master мог прийти
+              // новый коммит с красным CI — тревогу завели уже про него, и закрыть её
+              // значило бы соврать: прод остался на предыдущем.
+              const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
+              const tip = ref.object.sha
+              if (tip !== sha) {
+                return core.notice(`выкачен ${sha.slice(0, 7)}, а master уже на ${tip.slice(0, 7)} — тревогу оставляем открытой`)
+              }
+              // Закрываем ВСЕ открытые с этим заголовком, а не первую: тревоги заводятся
+              // из разных прогонов. Оставленная открытой — это ложный «прод отстаёт».
+              const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 })
+              for (const i of open.filter((x) => x.title === TITLE && !x.pull_request)) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: i.number,
+                  body: `Ядро выкачено на \`${sha.slice(0, 7)}\` — прод снова свежий.`,
+                })
+                await github.rest.issues.update({ ...context.repo, issue_number: i.number, state: 'closed' })
+                core.notice(`тревога #${i.number} закрыта`)
+              }
+            } catch (e) {
+              // Отказ ведёт в СТОРОНУ ОТКРЫТОЙ тревоги, и это осознанно: не сумели
+              // убедиться, что прод свеж, — не вправе снимать сигнал. В джобе `stuck`
+              // та же неизвестность решается наоборот (тревога заводится), потому что
+              // там безопасная сторона — лишний сигнал, а не его отсутствие.
+              // Выкатка уже прошла, поэтому шаг не красим — только предупреждаем.
+              core.warning(`не удалось снять тревогу (${e.message}) — оставлена открытой`)
+            }
 
       # Копию ключа не оставляем на общем раннере (там же гоняется PR-код из ci.yml).
       # Корневой mount /ssh/setfork — забота инфры (setfork-ci-runner), но лишнюю
