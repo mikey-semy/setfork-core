@@ -67,6 +67,9 @@ jobs:
     permissions:
       contents: read
       issues: write
+      # deployments: read — отличить «прод отстал» от «перезапустили CI на том, что
+      # уже выкачено». Витрина Deployments для этого и заводилась.
+      deployments: read
     steps:
       - name: Тревога — выкатка ядра не состоялась
         env:
@@ -83,10 +86,23 @@ jobs:
           command -v gh >/dev/null || { echo "::warning::нет gh CLI на раннере — тревога не отправлена"; exit 0; }
           # Опоздавший упавший прогон не должен тревожить, если master уже ушёл вперёд:
           # его ревизия никого не касается, а закрыть такую тревогу было бы некому.
-          TIP=$(gh api repos/${{ github.repository }}/commits/master --jq .sha 2>/dev/null || echo '')
+          TIP=$(gh api "repos/${GITHUB_REPOSITORY}/commits/master" --jq .sha 2>/dev/null || echo '')
           if [ -n "$TIP" ] && [ "$TIP" != "$SHA" ]; then
             echo "::notice::упал прогон ${SHA:0:7}, а master уже на ${TIP:0:7} — тревогу не заводим"
             exit 0
+          fi
+          # Перезапуск CI на уже выкаченной ревизии — обычное дело: раннеры теряют
+          # связь, и джобу гоняют заново (сегодня так дважды). Падение такого прогона
+          # не значит, что прод отстал: этот самый коммит уже на проде, и тревога о нём
+          # была бы ложной — а ложные и превращают её в фоновый шум (R6 линзы 08).
+          # Спрашиваем витрину Deployments, которую сами же и заполняем при выкатке.
+          DEP=$(gh api "repos/${GITHUB_REPOSITORY}/deployments?sha=${SHA}&environment=production&per_page=1" --jq '.[0].id' 2>/dev/null || echo '')
+          if [ -n "$DEP" ] && [ "$DEP" != "null" ]; then
+            STATE=$(gh api "repos/${GITHUB_REPOSITORY}/deployments/${DEP}/statuses?per_page=1" --jq '.[0].state' 2>/dev/null || echo '')
+            if [ "$STATE" = "success" ]; then
+              echo "::notice::${SHA:0:7} уже выкачен (deployment $DEP) — прогон перезапускали, тревога не нужна"
+              exit 0
+            fi
           fi
           BODY="CI ядра на master завершился как \`$RESULT\` на \`${SHA:0:7}\` — выкатка пропущена.
 
