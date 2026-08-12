@@ -142,15 +142,15 @@ jobs:
       # если её CI уже зелёный. Так делают GitOps-контроллеры (Argo CD, Flux): целью
       # доставки является состояние ветки, а не отдельный прогон.
       #
-      # Почему не просто «уступить свежему прогону» (как сейчас у фронта): очередь
-      # concurrency держит ОДИН running и ОДИН pending, и каждая новая постановка
-      # вытесняет прежний pending
-      # (docs.github.com/actions/…/control-workflow-concurrency). Пока идёт выкатка A,
-      # прогон вершины B стоит в очереди — и опоздавший прогон старого коммита C
-      # выбивает B из слота. C, увидев чужую вершину, уступил бы, а B уже отменён:
-      # прод молча остаётся на A до следующего пуша. Ровно тот класс, из-за которого
-      # прод не обновлялся трое суток (линза 08). Здесь опоздавший C доставляет
-      # вершину B сам, поэтому вытеснение слота ничего не теряет.
+      # Это ВТОРАЯ защита, не замена очереди. Очередь (`queue: max` выше) не даёт
+      # потерять прогон; этот гейт не даёт откатить прод. Порядок завершения CI не
+      # гарантирован: у фронта деплой в такой ситуации просто уступает — и если
+      # опоздавший приходит последним, прод остаётся на предыдущем коммите до
+      # следующего пуша. Здесь опоздавший доставляет вершину сам.
+      #
+      # Тот же приём закрывает и гонку внутри самой выкатки: master может уйти
+      # вперёд за те десять минут, что идёт сборка образа. Прогон нового коммита
+      # дождётся своей очереди и выкатит его следом.
       - name: Что выкатываем — свой коммит или ушедшую вперёд вершину
         id: target
         uses: actions/github-script@v7
@@ -169,6 +169,9 @@ jobs:
               ...context.repo, head_sha: tip, event: 'push', per_page: 20,
             })
             const ci = runs.workflow_runs.find((r) => r.name === 'CI')
+            // Гейт опирается на ИМЯ воркфлоу: переименуют CI — и он начнёт уступать
+            // всегда, то есть замолчит навсегда. Пусть это будет видно в аннотациях.
+            if (!ci) core.warning(`по вершине ${tip.slice(0, 7)} не нашёлся прогон с именем «CI» — проверьте имя воркфлоу`)
             if (ci?.conclusion === 'success') {
               core.notice(`master уже на ${tip.slice(0, 7)} и её CI зелёный — выкатываем вершину вместо ${mine.slice(0, 7)}`)
               return core.setOutput('sha', tip)
@@ -227,12 +230,28 @@ jobs:
           # «лишним» compose может счесть чужой контейнер (у фронта это уже учтено).
           $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build"
 
+      # Ждём НАСТОЯЩЕЙ готовности, а не пять секунд наугад: у образа есть
+      # HEALTHCHECK через grpc_health_probe, и до первой пробы (start-period 10 с)
+      # контейнер числится `health: starting`. Фиксированный sleep 5 успевал застать
+      # либо ещё стартующий контейнер (ложная тревога), либо уже упавший и
+      # перезапущенный (ложный успех) — «ожидание, которое не ожидает», R8 линзы 08.
       - name: Health-check
         if: steps.target.outputs.sha != ''
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
-          sleep 5
-          $SSH "docker ps --filter name=setfork-core --format '{{.Names}} {{.Status}}' | grep -q 'Up' " || { echo "::error::контейнер ядра не поднялся"; $SSH "docker logs --tail 50 setfork-core"; exit 1; }
+          for i in $(seq 1 30); do
+            STATE=$($SSH "docker inspect setfork-core --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'" 2>/dev/null || echo 'нет/контейнера')
+            case "$STATE" in
+              running/healthy) echo "ядро здорово через $((i * 2)) с"; exit 0 ;;
+              running/none)    echo "ядро запущено (healthcheck у образа нет)"; exit 0 ;;
+              running/starting) ;;
+              *) echo "::notice::состояние $STATE" ;;
+            esac
+            sleep 2
+          done
+          echo "::error::ядро не стало здоровым за 60 с (последнее состояние: $STATE)"
+          $SSH "docker logs --tail 50 setfork-core" || true
+          exit 1
 
       # Зелёная выкатка снимает тревогу сама: иначе она живёт вечно и перестаёт
       # что-либо значить, а следующие сбои дописываются в протухшую. Находка
