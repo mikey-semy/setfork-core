@@ -217,6 +217,26 @@ jobs:
               return states[0]?.state === 'success'
             }
 
+            // Цель доставки ВСЕГДА одна — вершина master. Свой коммит тут не особый
+            // случай, а просто частный: когда он и есть вершина, его CI зелён по
+            // условию запуска этой джобы, проверять нечего.
+            const ciGreen = async () => {
+              if (tip === mine) return true
+              const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+                ...context.repo, head_sha: tip, event: 'push', per_page: 20,
+              })
+              const ci = runs.workflow_runs.find((r) => r.name === 'CI')
+              // Гейт опирается на ИМЯ воркфлоу: переименуют CI — и он начнёт уступать
+              // всегда, то есть замолчит навсегда. Пусть это видно в аннотациях.
+              if (!ci) core.warning(`по вершине ${tip.slice(0, 7)} не нашёлся прогон с именем «CI» — проверьте имя воркфлоу`)
+              if (ci?.conclusion !== 'success') {
+                core.notice(`master на ${tip.slice(0, 7)}, её CI — ${ci?.status ?? 'не запускался'}; выкатит её собственный прогон`)
+                return false
+              }
+              core.notice(`master уже на ${tip.slice(0, 7)} и её CI зелёный — выкатываем вершину вместо ${mine.slice(0, 7)}`)
+              return true
+            }
+
             // Два РАЗНЫХ ответа, и путать их нельзя:
             //   sha   — что выкатывать (пусто = катить нечего);
             //   fresh — ревизия, про которую доказано, что она и есть вершина master
@@ -225,38 +245,18 @@ jobs:
             // однажды сорвалось (сеть), а следующий зелёный прогон той же вершины
             // видит «уже выкачено», пропускает всё подряд — и ложная тревога висит
             // вечно, хотя прод свеж. Замечание авто-ревью.
-            if (tip === mine) {
-              core.setOutput('fresh', mine)
-              if (await deployed(mine)) {
-                core.notice(`${mine.slice(0, 7)} уже выкачен — повторная выкатка не нужна`)
-                return core.setOutput('sha', '')
-              }
-              return core.setOutput('sha', mine)
+            if (!(await ciGreen())) {
+              // Вершина не проверена — прод заведомо не свеж: ни катить, ни снимать
+              // тревогу мы не вправе, это сделает её собственный прогон.
+              core.setOutput('fresh', '')
+              return core.setOutput('sha', '')
             }
-
-            // Вершина ушла вперёд. Выкатываем ЕЁ, но только если её CI уже зелёный —
-            // непроверенный код на прод не едет.
-            const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
-              ...context.repo, head_sha: tip, event: 'push', per_page: 20,
-            })
-            const ci = runs.workflow_runs.find((r) => r.name === 'CI')
-            // Гейт опирается на ИМЯ воркфлоу: переименуют CI — и он начнёт уступать
-            // всегда, то есть замолчит навсегда. Пусть это будет видно в аннотациях.
-            if (!ci) core.warning(`по вершине ${tip.slice(0, 7)} не нашёлся прогон с именем «CI» — проверьте имя воркфлоу`)
-            if (ci?.conclusion === 'success') {
-              core.setOutput('fresh', tip)
-              if (await deployed(tip)) {
-                core.notice(`вершина ${tip.slice(0, 7)} уже выкачена — выкатывать нечего`)
-                return core.setOutput('sha', '')
-              }
-              core.notice(`master уже на ${tip.slice(0, 7)} и её CI зелёный — выкатываем вершину вместо ${mine.slice(0, 7)}`)
-              return core.setOutput('sha', tip)
+            core.setOutput('fresh', tip)
+            if (await deployed(tip)) {
+              core.notice(`${tip.slice(0, 7)} уже выкачен — повторная выкатка не нужна`)
+              return core.setOutput('sha', '')
             }
-            // Вершина не проверена — прод заведомо не свеж: ни катить, ни снимать
-            // тревогу мы не вправе, это сделает её собственный прогон.
-            core.notice(`master на ${tip.slice(0, 7)}, её CI — ${ci?.status ?? 'не запускался'}; выкатит её собственный прогон`)
-            core.setOutput('fresh', '')
-            core.setOutput('sha', '')
+            core.setOutput('sha', tip)
         env:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
 
