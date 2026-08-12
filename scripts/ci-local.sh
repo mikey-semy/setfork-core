@@ -16,6 +16,9 @@ cargo fmt --check
 echo "== proto-sync с фронтом =="
 bash scripts/check-proto-sync.sh
 
+echo "== deploy-target: ядро и фронт на одном хосте =="
+bash scripts/check-deploy-target.sh
+
 echo "== cargo clippy (--all-targets, -D warnings) =="
 cargo clippy --all-targets -- -D warnings
 
