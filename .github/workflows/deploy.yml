@@ -45,7 +45,18 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.head_branch == 'master'
-    runs-on: [self-hosted, setfork]
+    # Метка `setfork-core`, а НЕ `setfork`: раннеры с меткой `setfork` зарегистрированы
+    # на репозиторий фронта, в этом их нет ни одного
+    # (`gh api repos/mikey-semy/setfork-core/actions/runners` — четыре, все `setfork-core`).
+    # Джоба с чужой меткой не падает, а молча висит в очереди до суточного таймаута,
+    # то есть тревога о пропущенной выкатке не пришла бы ни разу — ровно тот дефект,
+    # против которого она и заводится.
+    #
+    # Оговорка: если раннеры ядра лежат совсем, тревога тоже не приедет — она дождётся
+    # их возвращения в очереди. Отдельного канала на этот случай нет сознательно:
+    # GitHub-минуты не тратим (решение владельца), а «CI не гоняется вовсе» видно
+    # по пустому списку прогонов.
+    runs-on: [self-hosted, setfork-core]
     permissions:
       contents: read
       issues: write
