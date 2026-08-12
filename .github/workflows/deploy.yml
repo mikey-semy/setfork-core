@@ -1,10 +1,17 @@
-# Автодеплой на прод setfork (31.177.83.219, без Dokploy) после зелёного CI на master.
+# Автодеплой ядра на прод-канон setfork.com (159.195.151.41, netcup) после зелёного CI.
+#
+# ⚠️ ЦЕЛЬ СМЕНИЛАСЬ 11.08.2026. Канон вернулся на setfork.com 04.08 (ADR-0017), у фронта
+# это исправили 09.08 (fe#726) — а у ядра нет. Ядро продолжало ехать на 31.177.83.219, и на
+# каноне работало ядро от 07.08 (попало туда один раз при переезде) рядом со свежим фронтом.
+# Опасно это не отставанием само по себе: запись версий идёт ТОЛЬКО через ядро, а protobuf
+# молча игнорирует незнакомые поля — новые поля шага доехали бы до старого ядра и пропали
+# без единой ошибки. Находка линзы 08, R1.
 #
 # Образ ядра собирается ЗДЕСЬ, на локальном self-hosted раннере, и уезжает на
-# сервер потоком `docker save | ssh docker load` — БЕЗ реестра. Причина: RF-сервер
-# не может качать с objects.githubusercontent.com (шейпинг провайдера), поэтому
-# сборка Dockerfile на сервере падает (grpc_health_probe); GHCR-pull потребовал бы
-# PAT read:packages на сервере — save|load обходится без кредов вовсе.
+# сервер потоком `docker save | ssh docker load` — БЕЗ реестра. Причина историческая:
+# RF-сервер не мог качать с objects.githubusercontent.com (шейпинг провайдера), а GHCR-pull
+# потребовал бы PAT read:packages на сервере. Способ оставлен и для netcup: он не зависит
+# ни от кредов на сервере, ни от доступности реестра.
 #
 # Ключ деплоя приходит ro-mount'ом из setfork-ci-runner/docker-compose.yml
 # (/ssh/setfork) — в GitHub Secrets ничего не хранится.
@@ -16,15 +23,125 @@ on:
     types: [completed]
     branches: [master]
 
-concurrency:
-  group: deploy-prod-core
-  cancel-in-progress: false
+# Очередь выкатки объявлена НА ДЖОБЕ deploy, а не на воркфлоу. На воркфлоу она
+# захватывала бы и прогоны, где деплоя нет вовсе (упавший CI → работает только
+# `stuck`): такой прогон занимал бы слот и вытеснял из очереди тот, что должен
+# был выкатывать, — GitHub держит один running и один pending, новая постановка
+# отменяет прежний pending. Замечание авто-ревью на core#88 (P1).
 
 env:
-  DEPLOY: root@31.177.83.219
-  APP_DIR: /opt/setfork/src/setfork-core
+  DEPLOY: root@159.195.151.41
+  APP_DIR: /root/setfork/src/setfork-core
 
 jobs:
+  # CI не зелёный → деплоя не будет, и об этом надо СКАЗАТЬ. У фронта такая тревога
+  # есть с 09.08 (fe#724), у ядра не было вовсе: пропуск не оставлял следа, а на
+  # каноне тем временем работало ядро от 07.08. Находка линзы 08, R7.
+  stuck:
+    # Провенанс тот же, что у deploy ниже: иначе форк-PR с веткой `master` запускал бы
+    # привилегированную джобу и писал в общую тревогу «прод отстал», хотя выкатки и не
+    # ожидалось. Находка авто-ревью на core#88.
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion != 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'master'
+    # Метка `setfork-core`, а НЕ `setfork`: раннеры с меткой `setfork` зарегистрированы
+    # на репозиторий фронта, в этом их нет ни одного
+    # (`gh api repos/mikey-semy/setfork-core/actions/runners` — четыре, все `setfork-core`).
+    # Джоба с чужой меткой не падает, а молча висит в очереди до суточного таймаута,
+    # то есть тревога о пропущенной выкатке не пришла бы ни разу — ровно тот дефект,
+    # против которого она и заводится.
+    #
+    # Оговорка: если раннеры ядра лежат совсем, тревога тоже не приедет — она дождётся
+    # их возвращения в очереди. Отдельного канала на этот случай нет сознательно:
+    # GitHub-минуты не тратим (решение владельца), а «CI не гоняется вовсе» видно
+    # по пустому списку прогонов.
+    runs-on: [self-hosted, setfork-core]
+    # ТА ЖЕ очередь, что у выкатки. Иначе они бегут наперегонки: для одного SHA
+    # упавший прогон и успешный rerun идут параллельно на разных раннерах, тревога
+    # видит выкатку ещё `in_progress` и заводит issue уже ПОСЛЕ того, как выкатка
+    # прошлась по списку открытых, — закрывать её становится некому, а следующие
+    # падения того же SHA подавляются как «уже выкачено». Замечание авто-ревью.
+    #
+    # Разделять очереди пришлось бы, будь в группе один слот ожидания: тревожный
+    # прогон вытеснял бы из него деплойный. С `queue: max` (ниже, у deploy) очередь
+    # никого не теряет, поэтому общая группа безопасна и снимает гонку целиком.
+    concurrency:
+      group: deploy-prod-core
+      queue: max
+    permissions:
+      contents: read
+      issues: write
+      # deployments: read — отличить «прод отстал» от «перезапустили CI на том, что
+      # уже выкачено». Витрина Deployments для этого и заводилась.
+      deployments: read
+    steps:
+      # Всё через github-script, а НЕ через gh: раннер собран из чужого образа
+      # (myoung34/github-runner), CLI там есть сегодня и может не быть завтра, а
+      # проверка `command -v gh || exit 0` выключала бы тревогу МОЛЧА — то есть
+      # сигнальный механизм умирал бы ровно так же тихо, как то, о чём он сигналит.
+      # Node и этот action есть на любом раннере. Замечание авто-ревью на core#88.
+      - name: Тревога — выкатка ядра не состоялась
+        uses: actions/github-script@v7
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RESULT: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}
+        with:
+          script: |
+            const TITLE = '🟠 Ядро отстаёт от master: CI не зелёный'
+            const sha = process.env.SHA
+
+            // Опоздавший упавший прогон не тревожит, если master уже ушёл вперёд:
+            // его ревизия никого не касается, а закрыть такую тревогу было бы некому.
+            const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
+            const tip = ref.object.sha
+            if (tip !== sha) {
+              return core.notice(`упал прогон ${sha.slice(0, 7)}, а master уже на ${tip.slice(0, 7)} — тревогу не заводим`)
+            }
+
+            // Перезапуск CI на уже выкаченной ревизии — обычное дело: раннеры теряют
+            // связь, и джобу гоняют заново (12.08 так дважды). Падение такого прогона
+            // не значит, что прод отстал: этот самый коммит уже на проде, и тревога о
+            // нём была бы ложной — а ложные и превращают её в шум (R6 линзы 08).
+            // Спрашиваем витрину Deployments, которую сама же выкатка и заполняет.
+            const { data: deps } = await github.rest.repos.listDeployments({
+              ...context.repo, sha, environment: 'production', per_page: 1,
+            })
+            if (deps.length) {
+              const { data: states } = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: deps[0].id, per_page: 1,
+              })
+              if (states[0]?.state === 'success') {
+                return core.notice(`${sha.slice(0, 7)} уже выкачен (deployment ${deps[0].id}) — прогон перезапускали, тревога не нужна`)
+              }
+            }
+
+            const body = [
+              `CI ядра на master завершился как \`${process.env.RESULT}\` на \`${sha.slice(0, 7)}\` — выкатка пропущена.`,
+              '',
+              `Прогон: ${process.env.RUN_URL}`,
+              '',
+              'Чем это опасно именно у ядра: запись версий идёт ТОЛЬКО через него, а protobuf молча',
+              'игнорирует незнакомые поля — новые поля шага доедут до старого ядра и пропадут без ошибки.',
+              'Возраст ядра на каноне: `ssh root@159.195.151.41 "docker inspect setfork-core --format \'{{.Created}}\'"`.',
+              'Эта тревога закроется сама при следующей зелёной выкатке.',
+            ].join('\n')
+
+            // Точное сравнение заголовка, а не search-запрос: поиск индексируется с
+            // задержкой и на свежую тревогу отвечает пустотой — получались дубли.
+            const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 })
+            const existing = open.find((i) => i.title === TITLE && !i.pull_request)
+            if (existing) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body })
+              core.notice(`дописал в тревогу #${existing.number}`)
+            } else {
+              const { data: made } = await github.rest.issues.create({ ...context.repo, title: TITLE, body })
+              core.notice(`завёл тревогу #${made.number}`)
+            }
+
   deploy:
     # Деплоим ТОЛЬКО реальный push в наш master, не форк-PR. head_branch
     # подделывается именем форк-ветки (назвал ветку форка `master` — фильтр
@@ -37,19 +154,122 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository &&
       github.event.workflow_run.head_branch == 'master'
     runs-on: [self-hosted, setfork-core]
+    # `queue: max` — штатный способ не терять прогоны: по умолчанию (`single`) в
+    # группе ждёт РОВНО ОДИН, и каждая новая постановка отменяет предыдущего.
+    # Пока идёт выкатка, прогон вершины ждёт в очереди — и любой следующий выбивал
+    # бы его оттуда. С `max` очередь держит до 100 и разбирается FIFO.
+    # docs.github.com/actions/…/workflow-syntax#queueing-multiple-pending-runs
+    # (`cancel-in-progress` с ним несовместим — валидация отвергает пару).
+    concurrency:
+      group: deploy-prod-core
+      queue: max
     # deployments: write — витрина Deployments в сайдбаре GitHub (история выкаток).
     permissions:
       contents: read
       deployments: write
+      # issues: write — чтобы шаг снятия тревоги мог закрыть issue. Без него gh молча
+      # падает, а `|| true` прячет ошибку: тревога остаётся висеть после успешной
+      # выкатки. Находка авто-ревью на core#88.
+      issues: write
+      # actions: read — шагу «что выкатываем» нужен список прогонов CI по вершине.
+      # Явный блок permissions отключает ВСЁ неперечисленное, поэтому без этой строки
+      # listWorkflowRunsForRepo отвечает 403 и красит каждую выкатку, где master ушёл
+      # вперёд. Замечание авто-ревью на core#88 (P1).
+      actions: read
     steps:
-      - uses: actions/checkout@v4
+      # Что именно выкатываем, решаем ДО чекаута: не «свой» коммит, а вершину master,
+      # если её CI уже зелёный. Так делают GitOps-контроллеры (Argo CD, Flux): целью
+      # доставки является состояние ветки, а не отдельный прогон.
+      #
+      # Это ВТОРАЯ защита, не замена очереди. Очередь (`queue: max` выше) не даёт
+      # потерять прогон; этот гейт не даёт откатить прод. Порядок завершения CI не
+      # гарантирован: у фронта деплой в такой ситуации просто уступает — и если
+      # опоздавший приходит последним, прод остаётся на предыдущем коммите до
+      # следующего пуша. Здесь опоздавший доставляет вершину сам.
+      #
+      # Тот же приём закрывает и гонку внутри самой выкатки: master может уйти
+      # вперёд за те десять минут, что идёт сборка образа. Прогон нового коммита
+      # дождётся своей очереди и выкатит его следом.
+      - name: Что выкатываем — свой коммит или ушедшую вперёд вершину
+        id: target
+        uses: actions/github-script@v7
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          script: |
+            // github-script, а НЕ gh: на раннере без GitHub CLI шаг падал бы с кодом 127
+            // и валил каждую выкатку. Node и этот action есть всегда.
+            const mine = process.env.DEPLOY_SHA
+            const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
+            const tip = ref.object.sha
+
+            // Уже выкачено? Тогда катить нечего. Иначе при двух пушах подряд одна и та
+            // же ревизия едет дважды: сперва её доставляет опоздавший прогон, следом
+            // приезжает её собственный. Это не только десять минут раннера впустую —
+            // `compose up` пересоздаёт контейнер, то есть ядро на секунды пропадает,
+            // а запись версий списков идёт только через него.
+            const deployed = async (sha) => {
+              const { data: deps } = await github.rest.repos.listDeployments({
+                ...context.repo, sha, environment: 'production', per_page: 1,
+              })
+              if (!deps.length) return false
+              const { data: states } = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: deps[0].id, per_page: 1,
+              })
+              return states[0]?.state === 'success'
+            }
+
+            // Цель доставки ВСЕГДА одна — вершина master. Свой коммит тут не особый
+            // случай, а просто частный: когда он и есть вершина, его CI зелён по
+            // условию запуска этой джобы, проверять нечего.
+            const ciGreen = async () => {
+              if (tip === mine) return true
+              const { data: runs } = await github.rest.actions.listWorkflowRunsForRepo({
+                ...context.repo, head_sha: tip, event: 'push', per_page: 20,
+              })
+              const ci = runs.workflow_runs.find((r) => r.name === 'CI')
+              // Гейт опирается на ИМЯ воркфлоу: переименуют CI — и он начнёт уступать
+              // всегда, то есть замолчит навсегда. Пусть это видно в аннотациях.
+              if (!ci) core.warning(`по вершине ${tip.slice(0, 7)} не нашёлся прогон с именем «CI» — проверьте имя воркфлоу`)
+              if (ci?.conclusion !== 'success') {
+                core.notice(`master на ${tip.slice(0, 7)}, её CI — ${ci?.status ?? 'не запускался'}; выкатит её собственный прогон`)
+                return false
+              }
+              core.notice(`master уже на ${tip.slice(0, 7)} и её CI зелёный — выкатываем вершину вместо ${mine.slice(0, 7)}`)
+              return true
+            }
+
+            // Два РАЗНЫХ ответа, и путать их нельзя:
+            //   sha   — что выкатывать (пусто = катить нечего);
+            //   fresh — ревизия, про которую доказано, что она и есть вершина master
+            //           и она на проде (или окажется там по итогам этой выкатки).
+            // Снятие тревоги идёт по `fresh`. Иначе выходит так: закрытие тревоги
+            // однажды сорвалось (сеть), а следующий зелёный прогон той же вершины
+            // видит «уже выкачено», пропускает всё подряд — и ложная тревога висит
+            // вечно, хотя прод свеж. Замечание авто-ревью.
+            if (!(await ciGreen())) {
+              // Вершина не проверена — прод заведомо не свеж: ни катить, ни снимать
+              // тревогу мы не вправе, это сделает её собственный прогон.
+              core.setOutput('fresh', '')
+              return core.setOutput('sha', '')
+            }
+            core.setOutput('fresh', tip)
+            if (await deployed(tip)) {
+              core.notice(`${tip.slice(0, 7)} уже выкачен — повторная выкатка не нужна`)
+              return core.setOutput('sha', '')
+            }
+            core.setOutput('sha', tip)
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/checkout@v4
+        if: steps.target.outputs.sha != ''
+        with:
+          ref: ${{ steps.target.outputs.sha }}
 
       # GitHub Deployment — только витрина/история в сайдбаре: сам деплой ниже от
       # него никак не зависит, и сбой API не должен ронять доставку (continue-on-error).
       - name: 'Deployment: старт'
         id: dep
+        if: steps.target.outputs.sha != ''
         continue-on-error: true
         uses: actions/github-script@v7
         with:
@@ -68,28 +288,93 @@ jobs:
             })
             core.setOutput('id', String(dep.id))
         env:
-          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+          DEPLOY_SHA: ${{ steps.target.outputs.sha }}
 
       - name: Ключ деплоя (ro-mount раннера)
+        if: steps.target.outputs.sha != ''
         run: |
           test -f /ssh/setfork || { echo "::error::нет /ssh/setfork — подними раннер из setfork-ci-runner/docker-compose.yml (там ro-mount ключа)"; exit 1; }
           command -v ssh >/dev/null || (apt-get update -qq && apt-get install -y -qq openssh-client)
           install -m 600 /ssh/setfork /tmp/deploy_key
 
       - name: Сборка → доставка образа → up
+        if: steps.target.outputs.sha != ''
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
           docker build -t setfork-core:prod --target runtime .
           docker save setfork-core:prod | $SSH docker load
           tar --exclude=.git -czf - . | $SSH "mkdir -p $APP_DIR && tar -xzf - -C $APP_DIR"
           $SSH "printf 'services:\n  core:\n    image: setfork-core:prod\n' > $APP_DIR/docker-compose.image.yml"
-          $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build --remove-orphans"
+          # Без --remove-orphans: на netcup проектом частично управляет Dokploy, и
+          # «лишним» compose может счесть чужой контейнер (у фронта это уже учтено).
+          $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build"
 
+      # Ждём НАСТОЯЩЕЙ готовности, а не пять секунд наугад: у образа есть
+      # HEALTHCHECK через grpc_health_probe, и до первой пробы (start-period 10 с)
+      # контейнер числится `health: starting`. Фиксированный sleep 5 успевал застать
+      # либо ещё стартующий контейнер (ложная тревога), либо уже упавший и
+      # перезапущенный (ложный успех) — «ожидание, которое не ожидает», R8 линзы 08.
       - name: Health-check
+        if: steps.target.outputs.sha != ''
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
-          sleep 5
-          $SSH "docker ps --filter name=setfork-core --format '{{.Names}} {{.Status}}' | grep -q 'Up' " || { echo "::error::контейнер ядра не поднялся"; $SSH "docker logs --tail 50 setfork-core"; exit 1; }
+          for i in $(seq 1 30); do
+            STATE=$($SSH "docker inspect setfork-core --format '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'" 2>/dev/null || echo 'нет/контейнера')
+            case "$STATE" in
+              running/healthy) echo "ядро здорово через $((i * 2)) с"; exit 0 ;;
+              running/none)    echo "ядро запущено (healthcheck у образа нет)"; exit 0 ;;
+              running/starting) ;;
+              *) echo "::notice::состояние $STATE" ;;
+            esac
+            sleep 2
+          done
+          echo "::error::ядро не стало здоровым за 60 с (последнее состояние: $STATE)"
+          $SSH "docker logs --tail 50 setfork-core" || true
+          exit 1
+
+      # Тревогу снимает подтверждённая свежесть прода, а не факт сборки: шаг идёт по
+      # `fresh`, поэтому отрабатывает и тогда, когда катить было нечего (ревизия уже
+      # на проде). Иначе тревога, чьё закрытие однажды сорвалось, не закрылась бы уже
+      # никогда. Без этого шага она живёт вечно и перестаёт что-либо значить, а
+      # следующие сбои дописываются в протухшую — у фронта он есть с fe#724.
+      - name: Снять тревогу — прод на вершине master
+        if: success() && steps.target.outputs.fresh != ''
+        uses: actions/github-script@v7
+        env:
+          SHA: ${{ steps.target.outputs.fresh }}
+        with:
+          script: |
+            const TITLE = '🟠 Ядро отстаёт от master: CI не зелёный'
+            const sha = process.env.SHA
+            try {
+              // Тревога общая на все ревизии, поэтому закрывать её вправе только выкатка
+              // ТЕКУЩЕЙ вершины. Пока шла сборка (десять минут), в master мог прийти
+              // новый коммит с красным CI — тревогу завели уже про него, и закрыть её
+              // значило бы соврать: прод остался на предыдущем.
+              const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
+              const tip = ref.object.sha
+              if (tip !== sha) {
+                return core.notice(`выкачен ${sha.slice(0, 7)}, а master уже на ${tip.slice(0, 7)} — тревогу оставляем открытой`)
+              }
+              // Закрываем ВСЕ открытые с этим заголовком, а не первую: тревоги заводятся
+              // из разных прогонов. Оставленная открытой — это ложный «прод отстаёт».
+              const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 })
+              for (const i of open.filter((x) => x.title === TITLE && !x.pull_request)) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: i.number,
+                  body: `Ядро выкачено на \`${sha.slice(0, 7)}\` — прод снова свежий.`,
+                })
+                await github.rest.issues.update({ ...context.repo, issue_number: i.number, state: 'closed' })
+                core.notice(`тревога #${i.number} закрыта`)
+              }
+            } catch (e) {
+              // Отказ ведёт в СТОРОНУ ОТКРЫТОЙ тревоги, и это осознанно: не сумели
+              // убедиться, что прод свеж, — не вправе снимать сигнал. В джобе `stuck`
+              // та же неизвестность решается наоборот (тревога заводится), потому что
+              // там безопасная сторона — лишний сигнал, а не его отсутствие.
+              // Выкатка уже прошла, поэтому шаг не красим — только предупреждаем.
+              core.warning(`не удалось снять тревогу (${e.message}) — оставлена открытой`)
+            }
 
       # Копию ключа не оставляем на общем раннере (там же гоняется PR-код из ci.yml).
       # Корневой mount /ssh/setfork — забота инфры (setfork-ci-runner), но лишнюю
