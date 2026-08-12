@@ -200,7 +200,30 @@ jobs:
             const mine = process.env.DEPLOY_SHA
             const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
             const tip = ref.object.sha
-            if (tip === mine) return core.setOutput('sha', mine)
+
+            // Уже выкачено? Тогда катить нечего. Иначе при двух пушах подряд одна и та
+            // же ревизия едет дважды: сперва её доставляет опоздавший прогон, следом
+            // приезжает её собственный. Это не только десять минут раннера впустую —
+            // `compose up` пересоздаёт контейнер, то есть ядро на секунды пропадает,
+            // а запись версий списков идёт только через него.
+            const deployed = async (sha) => {
+              const { data: deps } = await github.rest.repos.listDeployments({
+                ...context.repo, sha, environment: 'production', per_page: 1,
+              })
+              if (!deps.length) return false
+              const { data: states } = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: deps[0].id, per_page: 1,
+              })
+              return states[0]?.state === 'success'
+            }
+
+            if (tip === mine) {
+              if (await deployed(mine)) {
+                core.notice(`${mine.slice(0, 7)} уже выкачен — повторная выкатка не нужна`)
+                return core.setOutput('sha', '')
+              }
+              return core.setOutput('sha', mine)
+            }
 
             // Вершина ушла вперёд. Выкатываем ЕЁ, но только если её CI уже зелёный —
             // непроверенный код на прод не едет.
@@ -212,6 +235,10 @@ jobs:
             // всегда, то есть замолчит навсегда. Пусть это будет видно в аннотациях.
             if (!ci) core.warning(`по вершине ${tip.slice(0, 7)} не нашёлся прогон с именем «CI» — проверьте имя воркфлоу`)
             if (ci?.conclusion === 'success') {
+              if (await deployed(tip)) {
+                core.notice(`вершина ${tip.slice(0, 7)} уже выкачена — выкатывать нечего`)
+                return core.setOutput('sha', '')
+              }
               core.notice(`master уже на ${tip.slice(0, 7)} и её CI зелёный — выкатываем вершину вместо ${mine.slice(0, 7)}`)
               return core.setOutput('sha', tip)
             }
