@@ -241,18 +241,32 @@ jobs:
       # docker-демоне хоста (sibling через docker.sock), поэтому тег виден и отсюда —
       # второй сборки не нужно. Если демон почистили между джобами, собираем заново:
       # лучше лишние минуты, чем непрокатка.
+      # ⚠️ Тег СВОЙ НА КАЖДУЮ ВЫКАТКУ, а не общий `setfork-core:prod`.
+      #
+      # `docker compose up` решает, трогать ли контейнер, по конфигурации сервиса,
+      # где образ записан ИМЕНЕМ. Подменишь содержимое под тем же именем — compose
+      # ответит «Container setfork-core Running» и оставит работать старый образ.
+      # Проверено на выкатке 12.08 09:37 (прогон 31583005066): `docker load` тег
+      # перевесил, контейнер остался на прежнем образе (он стал висячим), джоба
+      # отчиталась success. Сработала эта схема ровно один раз — 08:19, когда имя
+      # менялось с `setfork-core-core:latest` на `setfork-core:prod`.
+      #
+      # У фронта такой беды нет: он собирает образ НА СЕРВЕРЕ (`up -d --build`),
+      # то есть compose всегда видит свежий слой. Ядро доставляется потоком
+      # `save | load`, поэтому уникальность обязана быть в теге.
       - name: Доставка образа на прод и подъём
         if: steps.target.outputs.sha != ''
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
+          TAG="setfork-core:$GITHUB_SHA"
           docker image inspect "$IMAGE:$GITHUB_SHA" >/dev/null 2>&1 || {
             echo "::warning::образа $GITHUB_SHA нет в локальном демоне — собираю заново"
             docker build --target runtime -t "$IMAGE:$GITHUB_SHA" .
           }
-          docker tag "$IMAGE:$GITHUB_SHA" setfork-core:prod
-          docker save setfork-core:prod | $SSH docker load
+          docker tag "$IMAGE:$GITHUB_SHA" "$TAG"
+          docker save "$TAG" | $SSH docker load
           tar --exclude=.git -czf - . | $SSH "mkdir -p $APP_DIR && tar -xzf - -C $APP_DIR"
-          $SSH "printf 'services:\n  core:\n    image: setfork-core:prod\n' > $APP_DIR/docker-compose.image.yml"
+          $SSH "printf 'services:\n  core:\n    image: %s\n' '$TAG' > $APP_DIR/docker-compose.image.yml"
           # Без --remove-orphans: на netcup проектом частично управляет Dokploy, и
           # «лишним» compose может счесть чужой контейнер (у фронта это уже учтено).
           $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build"
@@ -279,6 +293,38 @@ jobs:
           echo "::error::ядро не стало здоровым за 60 с (последнее состояние: $STATE)"
           $SSH "docker logs --tail 50 setfork-core" || true
           exit 1
+
+      # Гейт против «успеха при неудаче»: сверяем, что контейнер поднят ИМЕННО на
+      # выкаченном образе. Именно отсутствие этой проверки скрывало предыдущий
+      # дефект — health-check показывал healthy, потому что живой контейнер и был
+      # живым, просто старым.
+      - name: Контейнер работает на выкаченном образе?
+        if: steps.target.outputs.sha != ''
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
+          WANT=$($SSH "docker image inspect setfork-core:$GITHUB_SHA --format '{{.Id}}'" 2>/dev/null || echo '')
+          LIVE=$($SSH "docker inspect setfork-core --format '{{.Image}}'" 2>/dev/null || echo '')
+          if [ -z "$WANT" ] || [ -z "$LIVE" ]; then
+            echo "::error::не удалось сверить образы (доставленный='$WANT', живой='$LIVE')"
+            exit 1
+          fi
+          if [ "$WANT" != "$LIVE" ]; then
+            echo "::error::контейнер работает на ${LIVE:0:19}, а выкачен ${WANT:0:19} — compose не пересоздал контейнер"
+            $SSH "docker ps --filter name=setfork-core --format '{{.Names}} {{.Image}} {{.Status}}'"
+            exit 1
+          fi
+          echo "контейнер на выкаченном образе ${WANT:7:12}"
+
+      # Старые образы выкаток копятся на сервере (каждая ~200 МБ). Держим последние
+      # три: откатиться на предыдущий можно правкой одной строки в
+      # docker-compose.image.yml, а диск не растёт без потолка — на `.ru` кэш сборок
+      # уже съедал 15 ГБ из 35.
+      - name: Убрать старые образы выкаток
+        if: steps.target.outputs.sha != ''
+        continue-on-error: true
+        run: |
+          SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
+          $SSH "docker images 'setfork-core' --format '{{.Tag}} {{.CreatedAt}}' | sort -k2 -r | tail -n +4 | awk '{print \$1}' | xargs -r -I{} docker rmi setfork-core:{}" || true
 
       # Тревогу снимает подтверждённая свежесть прода, а не факт сборки: шаг идёт
       # по `fresh`, поэтому отрабатывает и когда катить было нечего. Иначе тревога,
