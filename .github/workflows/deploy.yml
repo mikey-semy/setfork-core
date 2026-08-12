@@ -116,16 +116,19 @@ jobs:
       # 09.08, у ядра не было. Находка авто-ревью на core#88 (P1).
       - name: Коммит всё ещё вершина master?
         id: fresh
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // github-script, а НЕ gh: на раннере без GitHub CLI шаг падал бы с кодом 127
+            // и валил каждую выкатку. Node и этот action есть всегда. Тот же приём у фронта.
+            const mine = process.env.DEPLOY_SHA
+            const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
+            const tip = ref.object.sha
+            const ok = tip === mine
+            if (!ok) core.notice(`master уже на ${tip.slice(0, 7)}, а это прогон ${mine.slice(0, 7)} — уступаем свежему`)
+            core.setOutput('ok', String(ok))
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          TIP=$(gh api repos/${{ github.repository }}/commits/master --jq .sha)
-          if [ "$TIP" = "$DEPLOY_SHA" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::master уже на ${TIP:0:7}, а это прогон ${DEPLOY_SHA:0:7} — уступаем свежему"
-          fi
 
       # GitHub Deployment — только витрина/история в сайдбаре: сам деплой ниже от
       # него никак не зависит, и сбой API не должен ронять доставку (continue-on-error).
