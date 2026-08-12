@@ -63,6 +63,13 @@ jobs:
           RESULT: ${{ github.event.workflow_run.conclusion }}
         run: |
           command -v gh >/dev/null || { echo "::warning::нет gh CLI на раннере — тревога не отправлена"; exit 0; }
+          # Опоздавший упавший прогон не должен тревожить, если master уже ушёл вперёд:
+          # его ревизия никого не касается, а закрыть такую тревогу было бы некому.
+          TIP=$(gh api repos/${{ github.repository }}/commits/master --jq .sha 2>/dev/null || echo '')
+          if [ -n "$TIP" ] && [ "$TIP" != "$SHA" ]; then
+            echo "::notice::упал прогон ${SHA:0:7}, а master уже на ${TIP:0:7} — тревогу не заводим"
+            exit 0
+          fi
           BODY="CI ядра на master завершился как \`$RESULT\` на \`${SHA:0:7}\` — выкатка пропущена.
 
           Прогон: $RUN_URL
@@ -103,10 +110,28 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      # Очередь прогонов порядок не гарантирует: два пуша в master могут завершить CI
+      # не по порядку, и опоздавший выкатил бы СТАРЫЙ образ поверх нового — прод
+      # откатился бы назад, притом оба прогона зелёные. У фронта такой гейт есть с
+      # 09.08, у ядра не было. Находка авто-ревью на core#88 (P1).
+      - name: Коммит всё ещё вершина master?
+        id: fresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          TIP=$(gh api repos/${{ github.repository }}/commits/master --jq .sha)
+          if [ "$TIP" = "$DEPLOY_SHA" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::master уже на ${TIP:0:7}, а это прогон ${DEPLOY_SHA:0:7} — уступаем свежему"
+          fi
+
       # GitHub Deployment — только витрина/история в сайдбаре: сам деплой ниже от
       # него никак не зависит, и сбой API не должен ронять доставку (continue-on-error).
       - name: 'Deployment: старт'
         id: dep
+        if: steps.fresh.outputs.ok == 'true'
         continue-on-error: true
         uses: actions/github-script@v7
         with:
@@ -128,12 +153,14 @@ jobs:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
 
       - name: Ключ деплоя (ro-mount раннера)
+        if: steps.fresh.outputs.ok == 'true'
         run: |
           test -f /ssh/setfork || { echo "::error::нет /ssh/setfork — подними раннер из setfork-ci-runner/docker-compose.yml (там ro-mount ключа)"; exit 1; }
           command -v ssh >/dev/null || (apt-get update -qq && apt-get install -y -qq openssh-client)
           install -m 600 /ssh/setfork /tmp/deploy_key
 
       - name: Сборка → доставка образа → up
+        if: steps.fresh.outputs.ok == 'true'
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
           docker build -t setfork-core:prod --target runtime .
@@ -145,6 +172,7 @@ jobs:
           $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build"
 
       - name: Health-check
+        if: steps.fresh.outputs.ok == 'true'
         run: |
           SSH="ssh -i /tmp/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
           sleep 5
@@ -153,26 +181,8 @@ jobs:
       # Зелёная выкатка снимает тревогу сама: иначе она живёт вечно и перестаёт
       # что-либо значить, а следующие сбои дописываются в протухшую. Находка
       # авто-ревью на core#88 — у фронта такой шаг есть с fe#724.
-      # Проверка перед снятием: выкатили ли мы ТЕКУЩУЮ вершину master. Прогоны
-      # завершаются не по порядку, и опоздавший успешный (со старым SHA) закрыл бы
-      # тревогу, открытую свежим упавшим, — «прод свежий», хотя новая ревизия так и
-      # не уехала. Находка авто-ревью на core#88.
-      - name: Наш ли коммит сейчас вершина master
-        id: tip
-        if: success()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-        run: |
-          TIP=$(gh api repos/${{ github.repository }}/commits/master --jq .sha 2>/dev/null || echo '')
-          if [ -n "$TIP" ] && [ "$TIP" = "$SHA" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::выкачен ${SHA:0:7}, а вершина master ${TIP:0:7} — тревогу не снимаем"
-          fi
-
       - name: Снять тревогу — выкатка прошла
-        if: success() && steps.tip.outputs.ok == 'true'
+        if: success() && steps.fresh.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
