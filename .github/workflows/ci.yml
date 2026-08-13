@@ -486,12 +486,51 @@ jobs:
               }
             }
 
+            // ПОРОГ ПО ВОЗРАСТУ ОТСТАВАНИЯ, а не «упало — кричим». Тревога,
+            // срабатывающая с первого красного прогона, за двое суток дала во
+            // фронте четыре срабатывания, три из которых закрылись сами (R6
+            // линзы 08) — такой сигнал перестают читать, и настоящая остановка
+            // доставки тонет среди флейковых.
+            //
+            // Порог из РАСПРЕДЕЛЕНИЯ: 25 выкаток ядра дали медиану интервала
+            // 2,9 ч (у фронта 1,4 ч, p90 7,1 ч). Шесть часов — это заметно выше
+            // обычного ритма обоих репозиториев, поэтому порог общий.
+            const STALE_HOURS = Number(process.env.STALE_ALERT_HOURS || 6)
+            const { data: live } = await github.rest.repos.listDeployments({
+              ...context.repo, environment: 'production', per_page: 20,
+            })
+            let lastOk = null
+            for (const d of live) {
+              const { data: st } = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: d.id, per_page: 1,
+              })
+              if (st[0]?.state === 'success') { lastOk = d; break }
+            }
+            const ageH = lastOk ? (Date.now() - Date.parse(lastOk.created_at)) / 3.6e6 : Infinity
+            if (ageH < STALE_HOURS) {
+              return core.notice(
+                `CI красный, но ядро на проде свежее: выкатка ${ageH.toFixed(1)} ч назад (порог ${STALE_HOURS} ч) — тревогу не заводим`,
+              )
+            }
+
+            // Сколько коммитов не уехало — мера отставания, понятная без логов.
+            let behind = '?'
+            try {
+              const cmp = await github.rest.repos.compareCommitsWithBasehead({
+                ...context.repo, basehead: `${lastOk?.sha ?? sha}...${tip}`,
+              })
+              behind = String(cmp.data.ahead_by)
+            } catch { /* сравнение не критично: тревога важнее точного числа */ }
+
             const failed = ['CHECK', 'INTEGRATION', 'IMAGE']
               .filter((j) => process.env[`R_${j}`] !== 'success')
               .map((j) => j.toLowerCase())
               .join(', ')
             const body = [
               `CI ядра на master не прошёл на \`${sha.slice(0, 7)}\` — выкатка пропущена.`,
+              '',
+              `**Ядро на проде отстаёт ${ageH === Infinity ? 'неизвестно сколько' : ageH.toFixed(1) + ' ч'}**, не уехало коммитов: **${behind}**.`,
+              `Порог тревоги ${STALE_HOURS} ч выбран по распределению: медиана между выкатками ядра 2,9 ч.`,
               '',
               `Упало: **${failed || 'неизвестно'}**. Прогон: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               '',
