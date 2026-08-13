@@ -202,10 +202,25 @@ jobs:
         with:
           script: |
             const sha = context.sha
+            // Итог решения — в СВОДКУ прогона, а не только в аннотации. Прогон,
+            // где выкатки не было, заканчивается `success` так же, как прогон с
+            // выкаткой: в списке они неотличимы, и оператор делает тот же вывод,
+            // что оказался неверным 09.08. Сводка отвечает на вопрос «выкачено
+            // ли» прямо в UI, не заставляя читать логи. R3 линзы 08.
+            const say = (итог, почему) => core.summary
+              .addHeading('Выкатка ядра', 3)
+              .addTable([
+                [{ data: 'Итог', header: true }, { data: 'Причина', header: true }],
+                [итог, почему],
+              ])
+              .write()
+
             const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
             const tip = ref.object.sha
             if (tip !== sha) {
-              core.notice(`master уже на ${tip.slice(0, 7)}, а это прогон ${sha.slice(0, 7)} — выкатит прогон вершины`)
+              const почему = `master уже на \`${tip.slice(0, 7)}\`, а это прогон \`${sha.slice(0, 7)}\` — выкатит прогон вершины`
+              core.notice(почему)
+              await say('⏭️ пропущена', почему)
               core.setOutput('fresh', '')
               return core.setOutput('sha', '')
             }
@@ -225,9 +240,12 @@ jobs:
             }
             core.setOutput('fresh', sha)
             if (live) {
-              core.notice(`${sha.slice(0, 7)} уже выкачен — повторная выкатка не нужна`)
+              const почему = `\`${sha.slice(0, 7)}\` уже на проде — повторная выкатка не нужна`
+              core.notice(почему)
+              await say('✅ прод уже свеж', почему)
               return core.setOutput('sha', '')
             }
+            await say('🚀 выкатываем', `\`${sha.slice(0, 7)}\` — вершина master, на проде её ещё нет`)
             core.setOutput('sha', sha)
 
       - uses: actions/checkout@v4
@@ -340,6 +358,17 @@ jobs:
             exit 1
           fi
           echo "контейнер на выкаченном образе ${WANT:7:12}"
+          # Итог доставки — в сводку прогона: она отвечает «что именно сейчас на
+          # проде», не заставляя открывать логи джобы. R3 линзы 08.
+          {
+            echo "### Доставлено на прод"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Ревизия | \`${GITHUB_SHA:0:7}\` |"
+            echo "| Образ | \`${WANT:7:19}\` |"
+            echo "| Контейнер | пересоздан и здоров |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Старые образы выкаток копятся на сервере (каждая ~200 МБ). Держим последние
       # три: откатиться на предыдущий можно правкой одной строки в
