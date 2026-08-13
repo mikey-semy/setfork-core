@@ -429,28 +429,22 @@ jobs:
           DEP_ID: ${{ steps.dep.outputs.id }}
           JOB_STATUS: ${{ job.status }}
 
-  # CI не зелёный → выкатки не будет, и об этом надо СКАЗАТЬ: у ядра такой тревоги
-  # не было вовсе, и прод простоял на образе от 07.08 пять суток (линза 08, R7).
-  # Теперь она в том же прогоне, что и проверки, — сверять провенанс больше не
-  # нужно, а коммит один и тот же.
+  # Красный CI = выкатки не будет, и это надо отметить — но НЕ тревогой-issue.
+  #
+  # Тревога отвечает на вопрос «прод отстаёт?», то есть про СОСТОЯНИЕ, и живёт по
+  # расписанию в `prod-stale.yml`. Здесь фиксируется СОБЫТИЕ: этот прогон не
+  # довёз. Смешение этих двух вопросов в одном триггере дало во фронте сначала
+  # шум (тревога на каждом флейке, R6 линзы 08), а потом молчание: порог «дольше
+  # шести часов» внутри джобы никогда не пересчитывался без нового пуша
+  # (замечание авто-ревью на fe#787).
   stuck:
     if: >-
       always() && github.event_name == 'push' && github.ref == 'refs/heads/master' &&
       (needs.check.result != 'success' || needs.integration.result != 'success' || needs.image.result != 'success')
     needs: [check, integration, image]
     runs-on: [self-hosted, setfork-core]
-    # Та же очередь, что у выкатки: иначе тревога и выкатка бегут наперегонки —
-    # тревога успевает завести issue уже после того, как выкатка прошлась по
-    # списку открытых, и закрывать её становится некому.
-    concurrency:
-      group: deploy-prod-core
-      queue: max
-    permissions:
-      contents: read
-      issues: write
-      deployments: read
     steps:
-      - name: Тревога — выкатка ядра не состоялась
+      - name: Отметить в сводке, что выкатка не состоялась
         uses: actions/github-script@v7
         env:
           R_CHECK: ${{ needs.check.result }}
@@ -458,96 +452,14 @@ jobs:
           R_IMAGE: ${{ needs.image.result }}
         with:
           script: |
-            const TITLE = '🟠 Ядро отстаёт от master: CI не зелёный'
-            const sha = context.sha
-
-            // Опоздавший упавший прогон не тревожит, если master ушёл вперёд:
-            // его ревизия никого не касается, а закрыть такую тревогу было бы некому.
-            const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: 'heads/master' })
-            const tip = ref.object.sha
-            if (tip !== sha) {
-              return core.notice(`упал прогон ${sha.slice(0, 7)}, а master уже на ${tip.slice(0, 7)} — тревогу не заводим`)
-            }
-
-            // Перезапуск CI на уже выкаченной ревизии — обычное дело: раннеры
-            // теряют связь, и джобу гоняют заново (12.08 так дважды). Падение
-            // такого прогона не значит, что прод отстал: этот самый коммит уже
-            // на проде, и тревога о нём была бы ложной, а ложные и превращают
-            // её в шум (R6 линзы 08).
-            const { data: deps } = await github.rest.repos.listDeployments({
-              ...context.repo, sha, environment: 'production', per_page: 1,
-            })
-            if (deps.length) {
-              const { data: states } = await github.rest.repos.listDeploymentStatuses({
-                ...context.repo, deployment_id: deps[0].id, per_page: 1,
-              })
-              if (states[0]?.state === 'success') {
-                return core.notice(`${sha.slice(0, 7)} уже выкачен (deployment ${deps[0].id}) — прогон перезапускали, тревога не нужна`)
-              }
-            }
-
-            // ПОРОГ ПО ВОЗРАСТУ ОТСТАВАНИЯ, а не «упало — кричим». Тревога,
-            // срабатывающая с первого красного прогона, за двое суток дала во
-            // фронте четыре срабатывания, три из которых закрылись сами (R6
-            // линзы 08) — такой сигнал перестают читать, и настоящая остановка
-            // доставки тонет среди флейковых.
-            //
-            // Порог из РАСПРЕДЕЛЕНИЯ: 25 выкаток ядра дали медиану интервала
-            // 2,9 ч (у фронта 1,4 ч, p90 7,1 ч). Шесть часов — это заметно выше
-            // обычного ритма обоих репозиториев, поэтому порог общий.
-            const STALE_HOURS = Number(process.env.STALE_ALERT_HOURS || 6)
-            const { data: live } = await github.rest.repos.listDeployments({
-              ...context.repo, environment: 'production', per_page: 20,
-            })
-            let lastOk = null
-            for (const d of live) {
-              const { data: st } = await github.rest.repos.listDeploymentStatuses({
-                ...context.repo, deployment_id: d.id, per_page: 1,
-              })
-              if (st[0]?.state === 'success') { lastOk = d; break }
-            }
-            const ageH = lastOk ? (Date.now() - Date.parse(lastOk.created_at)) / 3.6e6 : Infinity
-            if (ageH < STALE_HOURS) {
-              return core.notice(
-                `CI красный, но ядро на проде свежее: выкатка ${ageH.toFixed(1)} ч назад (порог ${STALE_HOURS} ч) — тревогу не заводим`,
-              )
-            }
-
-            // Сколько коммитов не уехало — мера отставания, понятная без логов.
-            let behind = '?'
-            try {
-              const cmp = await github.rest.repos.compareCommitsWithBasehead({
-                ...context.repo, basehead: `${lastOk?.sha ?? sha}...${tip}`,
-              })
-              behind = String(cmp.data.ahead_by)
-            } catch { /* сравнение не критично: тревога важнее точного числа */ }
-
             const failed = ['CHECK', 'INTEGRATION', 'IMAGE']
               .filter((j) => process.env[`R_${j}`] !== 'success')
               .map((j) => j.toLowerCase())
               .join(', ')
-            const body = [
-              `CI ядра на master не прошёл на \`${sha.slice(0, 7)}\` — выкатка пропущена.`,
-              '',
-              `**Ядро на проде отстаёт ${ageH === Infinity ? 'неизвестно сколько' : ageH.toFixed(1) + ' ч'}**, не уехало коммитов: **${behind}**.`,
-              `Порог тревоги ${STALE_HOURS} ч выбран по распределению: медиана между выкатками ядра 2,9 ч.`,
-              '',
-              `Упало: **${failed || 'неизвестно'}**. Прогон: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-              '',
-              'Чем это опасно именно у ядра: запись версий идёт ТОЛЬКО через него, а protobuf молча',
-              'игнорирует незнакомые поля — новые поля шага доедут до старого ядра и пропадут без ошибки.',
-              'Возраст ядра на каноне: `ssh root@159.195.151.41 "docker inspect setfork-core --format \'{{.Created}}\'"`.',
-              'Эта тревога закроется сама при следующей зелёной выкатке.',
-            ].join('\n')
-
-            // Точное сравнение заголовка, а не search-запрос: поиск индексируется
-            // с задержкой и на свежую тревогу отвечает пустотой — получались дубли.
-            const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 })
-            const existing = open.find((i) => i.title === TITLE && !i.pull_request)
-            if (existing) {
-              await github.rest.issues.createComment({ ...context.repo, issue_number: existing.number, body })
-              core.notice(`дописал в тревогу #${existing.number}`)
-            } else {
-              const { data: made } = await github.rest.issues.create({ ...context.repo, title: TITLE, body })
-              core.notice(`завёл тревогу #${made.number}`)
-            }
+            core.notice(`выкатка ядра пропущена: упало ${failed || 'неизвестно'}`)
+            await core.summary
+              .addHeading('Выкатка ядра не состоялась', 3)
+              .addRaw('Упало: **' + (failed || 'неизвестно') + '** на ' + context.sha.slice(0, 7) + '.')
+              .addBreak()
+              .addRaw('Если ядро на проде так и останется позади, почасовая проверка заведёт тревогу.')
+              .write()
