@@ -389,10 +389,15 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const TITLE = '🟠 Ядро отстаёт от master: CI не зелёный'
+            // Тревогу об отставании заводит prod-stale.yml, поэтому узнаём её по
+            // МЕТКЕ: пока идентичностью служил заголовок, он жил в двух файлах и при
+            // переименовании молча разъехался — закрыватель перестал её находить, и
+            // она висела бы до следующей почасовой проверки.
+            // Замечание авто-ревью на fe#787 (P2).
+            const LABEL = 'alert:prod-stale'
             try {
-              const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', per_page: 100 })
-              for (const i of open.filter((x) => x.title === TITLE && !x.pull_request)) {
+              const open = await github.paginate(github.rest.issues.listForRepo, { ...context.repo, state: 'open', labels: LABEL, per_page: 100 })
+              for (const i of open.filter((x) => !x.pull_request)) {
                 await github.rest.issues.createComment({
                   ...context.repo, issue_number: i.number,
                   body: `Ядро выкачено на \`${context.sha.slice(0, 7)}\` — прод снова свежий.`,
