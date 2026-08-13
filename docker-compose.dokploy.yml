@@ -1,6 +1,14 @@
-# Деплой git-ядра в Dokploy (standalone). Живёт в общей сети dokploy-network;
-# Postgres и том git-объектов — общие с фронтом (setfork-frontend).
-# .env: DATABASE_URL (на общий db по имени сервиса в dokploy-network), GIT_DATA_DIR=/data/git.
+# Деплой git-ядра на прод-хост (standalone). Postgres и том git-объектов — общие с
+# фронтом (setfork-frontend), связь по именам сервисов внутри общей сети.
+#
+# ПЕРЕЕЗД СЕТИ (13.08): Dokploy с сервера убран, вместе с ним уходит и overlay-сеть
+# Swarm `dokploy-network` — на одном хосте без нод overlay это лишний слой (VXLAN,
+# свой DNS, `swarm leave` невозможен, пока сеть занята). Целевая сеть — обычная
+# bridge `edge`. Пока идёт переезд, оба проекта стоят в ОБЕИХ сетях: они катятся
+# порознь, и любой односторонний шаг оставил бы `setfork-core:50051` без резолва.
+# `dokploy-network` уйдёт отсюда, когда переедут оба; тогда же `swarm leave`.
+#
+# .env: DATABASE_URL (на общий db по имени сервиса), GIT_DATA_DIR=/data/git.
 # Порты наружу НЕ публикуем — gRPC только внутри сети (фронт зовёт core:50051).
 services:
   core:
@@ -26,11 +34,11 @@ services:
       SETFORK_MIRROR_SECRET: ${SETFORK_MIRROR_SECRET:-}
       # ADR-0015: адрес приложения для вопроса «можно ли писать в этот список».
       # ОБЯЗАТЕЛЕН как и токен: без него заморозка и архив перестают действовать на
-      # git-путях, поэтому ядро не стартует. Имя сервиса фронта в dokploy-сети.
+      # git-путях, поэтому ядро не стартует. Имя сервиса фронта в общей сети.
       SETFORK_APP_URL: ${SETFORK_APP_URL:?SETFORK_APP_URL обязателен (адрес приложения, напр. http://setfork-app:3000)}
     volumes:
       - setfork_git:/data/git
-    networks: [dokploy-network]
+    networks: [edge, dokploy-network]
     # Лимиты: защита соседей по VPS от разгона ядра (git-операции прожорливы).
     # Это cap, не резервирование; при упоре в лимит растёт латентность, не OOM соседей.
     mem_limit: 768m
@@ -61,7 +69,7 @@ services:
       NOTIFICATION_LEVEL: ${BACKUP_NOTIFY_LEVEL:-error}
     volumes:
       - setfork_git:/backup/setfork-git:ro
-    networks: [dokploy-network]
+    networks: [edge, dokploy-network]
     mem_limit: 256m
     cpus: 1
 
@@ -69,5 +77,9 @@ volumes:
   setfork_git:
 
 networks:
+  # Целевая сеть — обычная bridge, создаётся руками на хосте: `docker network create edge`.
+  edge:
+    external: true
+  # Уходящая overlay-сеть Swarm. Убрать, когда на `edge` переедет и фронт.
   dokploy-network:
     external: true
