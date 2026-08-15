@@ -6,6 +6,8 @@
 //! «обновить из main».
 //!
 //! Проверяем: обе правки на месте, первый родитель — ветка, main не сдвинулся.
+#![cfg(feature = "probes")]
+
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
@@ -62,11 +64,12 @@ fn proj(title: &str) -> setfork_core::git::project::ProjStep {
     }
 }
 
-fn git_data_dir() -> Tmp {
+async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
+    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
     let p = std::env::temp_dir().join(format!("setfork-upd-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&p).expect("mkdir");
     unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    Tmp(p)
+    (Tmp(p), guard)
 }
 
 fn json_at(bare: &std::path::Path, sha: &str) -> String {
@@ -83,7 +86,7 @@ fn tip(bare: &std::path::Path, refname: &str) -> String {
 #[tokio::test]
 #[ignore = "ПАДАЕТ: legacy steps/*.md против канона веток (только list.json) → git2 даёт conflict там, где git CLI сливает; на проде формы нет ни в одном из 37 репо"]
 async fn влить_main_в_ветку_сохраняет_обе_стороны() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -282,7 +285,7 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn повторное_обновление_без_изменений_отклоняется() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "bob").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -339,7 +342,7 @@ async fn какие_изменения_main_ломают_слияние() {
         ("main ПЕРЕИМЕНОВАЛ шаг", vec!["Первый (main)", "Второй", "Третий", "Четвёртый"]),
         ("main правит только desc", vec!["Первый", "Второй", "Третий", "Четвёртый"]),
     ] {
-        let dir = git_data_dir();
+        let (dir, _git_dir_guard) = git_data_dir().await;
         let pool = support::pool_with_schema().await;
         let owner = support::seed_user(&pool, "u").await;
         let write = ListWriteSvc { pool: pool.clone() };

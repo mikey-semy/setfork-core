@@ -6,6 +6,8 @@
 //! Цена ошибки прямая: без сериализации второе слияние читает устаревший main-tip и
 //! затирает первое — правка пользователя исчезает, притом что интерфейс отчитался
 //! об успехе.
+#![cfg(feature = "probes")]
+
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
@@ -46,11 +48,12 @@ fn step(title: &str) -> NewStep {
     }
 }
 
-fn git_data_dir() -> Tmp {
+async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
+    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
     let p = std::env::temp_dir().join(format!("setfork-lock-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&p).expect("mkdir");
     unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    Tmp(p)
+    (Tmp(p), guard)
 }
 
 fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
@@ -66,7 +69,7 @@ fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn параллельные_слияния_не_затирают_друг_друга() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
     let write = ListWriteSvc { pool: pool.clone() };

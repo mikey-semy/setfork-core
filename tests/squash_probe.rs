@@ -1,4 +1,4 @@
-//! ПРОБНИК контрольной проверки (не для коммита): squash-слияние #54 через
+//! ПРОБА линзы проверки ядра: squash-слияние #54 через
 //! настоящий RPC merge_branch, а не через чистую функцию with_coauthors.
 //!
 //! В master покрыта только сборка трейлеров. Проверяем:
@@ -9,6 +9,8 @@
 //!      MergeResolved (конфликт).
 //!
 //! `TEST_DATABASE_URL=... cargo test --test squash_probe -- --include-ignored --test-threads=1`
+#![cfg(feature = "probes")]
+
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
@@ -52,11 +54,12 @@ fn step(title: &str) -> NewStep {
 }
 
 /// GIT_DATA_DIR — глобальная переменная процесса, поэтому тесты гоняем в один поток.
-fn git_data_dir() -> Tmp {
+async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
+    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
     let p = std::env::temp_dir().join(format!("setfork-squash-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&p).expect("mkdir");
     unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    Tmp(p)
+    (Tmp(p), guard)
 }
 
 fn repo_ref(owner: &str, slug: &str) -> Option<RepoRef> {
@@ -129,7 +132,7 @@ fn proj_step(title: &str) -> setfork_core::git::project::ProjStep {
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn squash_не_откатывает_работу_приехавшую_в_main() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(
         &pool,
@@ -228,7 +231,7 @@ async fn squash_не_откатывает_работу_приехавшую_в_m
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn squash_сплющивает_и_перематываемую_ветку() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "bob", "squash-ff", vec![step("База")]).await;
     let git = GitCoreSvc { pool: pool.clone() };
@@ -293,7 +296,7 @@ async fn squash_сплющивает_и_перематываемую_ветку(
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn при_конфликте_выбранный_режим_squash_не_доживает_до_слияния() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "carol", "squash-conflict", vec![step("Общий")]).await;
     let git = GitCoreSvc { pool: pool.clone() };
@@ -375,7 +378,7 @@ async fn при_конфликте_выбранный_режим_squash_не_д�
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn дамп_расхождения_list_json() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "dave", "dump", vec![step("Первый"), step("Второй")]).await;
     let git = GitCoreSvc { pool: pool.clone() };

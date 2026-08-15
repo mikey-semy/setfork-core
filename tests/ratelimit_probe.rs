@@ -8,6 +8,8 @@
 //! Требует поднятого ядра: SETFORK_RPC_RPM=3 SETFORK_RPC_RPM_HEAVY=2, токен probe-token.
 //! `cargo test --test ratelimit_probe -- --ignored --nocapture --test-threads=1`
 
+#![cfg(feature = "probes")]
+
 use setfork_core::pb::git_core_client::GitCoreClient;
 use setfork_core::pb::RepoRef;
 use tonic::metadata::MetadataValue;

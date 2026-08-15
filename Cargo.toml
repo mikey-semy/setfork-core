@@ -32,6 +32,14 @@ metrics = "0.24.6"
 metrics-exporter-prometheus = { version = "0.18.3", default-features = false, features = ["http-listener"] }
 tonic-reflection = "0.14.6"
 
+[features]
+# Пробы линз проверки (tests/*_probe.rs). ВЫКЛЮЧЕНЫ по умолчанию намеренно: CI гоняет
+# `cargo test -- --include-ignored`, а он выполняет и #[ignore] — то есть карантин через
+# один лишь атрибут не работает. Часть проб требует поднятого сервера, часть падает по делу
+# (документирует найденный дефект), и обе категории валили бы интеграционную джобу.
+#   запуск: cargo test --features probes -- --include-ignored --test-threads=1
+probes = []
+
 [build-dependencies]
 tonic-prost-build = "0.14"
 # Чистый Rust protobuf-компилятор — protoc-бинарь не нужен ни в системе, ни vendored.

@@ -8,6 +8,8 @@
 //! (буквы/цифры/`-_.`), а `tag_lightweight(..., force = true)` ПЕРЕВЕШИВАЕТ
 //! существующий тег. Значит имя вида `v2` формально разрешено. Проверяю, что
 //! из этого выходит.
+#![cfg(feature = "probes")]
+
 use setfork_core::git::bundle::{self, SerStep, VersionData};
 
 struct Tmp(std::path::PathBuf);

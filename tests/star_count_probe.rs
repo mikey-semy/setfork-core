@@ -7,6 +7,8 @@
 //! Цена ошибки не в самой цифре, а в том, что по `stars_count` строится выдача
 //! каталога: разъехавшийся счётчик — это ложная популярность, которую никто не
 //! заметит, потому что число выглядит правдоподобно.
+#![cfg(feature = "probes")]
+
 mod support;
 
 use setfork_core::pb_domain::curation_write_server::CurationWrite;

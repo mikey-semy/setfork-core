@@ -6,6 +6,8 @@
 //! и молча теряет правки, которые считает сохранёнными.
 //!
 //! Проверяем не «код выглядит верным», а сверку с настоящим git merge-base.
+#![cfg(feature = "probes")]
+
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
@@ -62,11 +64,12 @@ fn proj(title: &str) -> setfork_core::git::project::ProjStep {
     }
 }
 
-fn git_data_dir() -> Tmp {
+async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
+    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
     let p = std::env::temp_dir().join(format!("setfork-ms-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&p).expect("mkdir");
     unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    Tmp(p)
+    (Tmp(p), guard)
 }
 
 fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
@@ -80,7 +83,7 @@ fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres) и git в PATH"]
 async fn база_совпадает_с_настоящим_git_merge_base() {
-    let dir = git_data_dir();
+    let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
     let write = ListWriteSvc { pool: pool.clone() };

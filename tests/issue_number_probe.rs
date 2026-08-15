@@ -7,6 +7,8 @@
 //!
 //! Здесь индекс добавляется в свою эфемерную схему, чтобы увидеть, что реально
 //! происходит на проде при одновременном создании задач в одном списке.
+#![cfg(feature = "probes")]
+
 mod support;
 
 use setfork_core::pb_domain::collab_write_server::CollabWrite;

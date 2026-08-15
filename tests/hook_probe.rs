@@ -7,6 +7,8 @@
 //!
 //! Проверяем НАСТОЯЩИМ git, а не чтением текста хука.
 
+#![cfg(feature = "probes")]
+
 use setfork_core::git::bundle::{self, SerStep, VersionData};
 use std::fs;
 use std::path::{Path, PathBuf};
