@@ -1,4 +1,4 @@
-//! ПРОБНИК (не для коммита): UpdateBranch — «влить main в ветку» (#50).
+//! ПРОБА линзы проверки ядра: UpdateBranch — «влить main в ветку» (#50).
 //!
 //! Тестами не покрыт. Риск конкретный: порядок сторон обратный обычному слиянию
 //! (ours = ВЕТКА, theirs = main). Если перепутать, правка автора предложения
@@ -81,7 +81,7 @@ fn tip(bare: &std::path::Path, refname: &str) -> String {
 }
 
 #[tokio::test]
-#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+#[ignore = "ПАДАЕТ: legacy steps/*.md против канона веток (только list.json) → git2 даёт conflict там, где git CLI сливает; на проде формы нет ни в одном из 37 репо"]
 async fn влить_main_в_ветку_сохраняет_обе_стороны() {
     let dir = git_data_dir();
     let pool = support::pool_with_schema().await;

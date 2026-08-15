@@ -1,4 +1,4 @@
-//! ПРОБНИК (не для коммита): нумерация задач при параллельном создании.
+//! ПРОБА линзы проверки ядра: нумерация задач при параллельном создании.
 //!
 //! `open_issue` берёт номер подзапросом `(select coalesce(max(number),0)+1 ...)`
 //! внутри INSERT, без блокировки. В ПРОДОВОЙ схеме фронта на (template_id, number)
@@ -40,7 +40,7 @@ fn step(title: &str) -> NewStep {
 }
 
 #[tokio::test]
-#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+#[ignore = "ПАДАЕТ (дефект): 4 из 8, остальным AlreadyExists — нет повтора со следующим номером"]
 async fn параллельное_создание_задач_на_продовой_схеме() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
@@ -119,7 +119,7 @@ async fn параллельное_создание_задач_на_продов�
 /// подзапросом без блокировки. Автосоздание предложений гномами делает этот путь
 /// не гипотетическим.
 #[tokio::test]
-#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+#[ignore = "ПАДАЕТ (дефект): половина отказов вместо ретрая номера"]
 async fn параллельное_создание_предложений_на_продовой_схеме() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "bob").await;
