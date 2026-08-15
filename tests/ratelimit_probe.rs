@@ -10,8 +10,8 @@
 
 #![cfg(feature = "probes")]
 
-use setfork_core::pb::git_core_client::GitCoreClient;
 use setfork_core::pb::RepoRef;
+use setfork_core::pb::git_core_client::GitCoreClient;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 use tonic::{Code, Request};
@@ -89,8 +89,8 @@ async fn чужой_токен_не_съедает_бюджет() {
 #[tokio::test]
 #[ignore = "нужно поднятое ядро"]
 async fn health_не_лимитируется() {
-    use tonic_health::pb::health_client::HealthClient;
     use tonic_health::pb::HealthCheckRequest;
+    use tonic_health::pb::health_client::HealthClient;
     let mut h = HealthClient::new(chan().await);
     let mut codes = Vec::new();
     for _ in 0..30 {

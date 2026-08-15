@@ -11,8 +11,8 @@
 
 mod support;
 
-use setfork_core::pb_domain::curation_write_server::CurationWrite;
 use setfork_core::pb_domain::UserList;
+use setfork_core::pb_domain::curation_write_server::CurationWrite;
 use setfork_core::services::curation::CurationWriteSvc;
 use tonic::Request;
 use uuid::Uuid;
@@ -96,13 +96,10 @@ async fn повторные_нажатия_одного_пользователя
     for _ in 0..6 {
         let svc = CurationWriteSvc { pool: pool.clone() };
         set.spawn(async move {
-            svc.toggle_star(Request::new(UserList {
-                list_id: list_id.to_string(),
-                user_id: fan.to_string(),
-            }))
-            .await
-            .map(|r| r.into_inner().value)
-            .map_err(|e| (e.code(), e.message().to_string()))
+            svc.toggle_star(Request::new(UserList { list_id: list_id.to_string(), user_id: fan.to_string() }))
+                .await
+                .map(|r| r.into_inner().value)
+                .map_err(|e| (e.code(), e.message().to_string()))
         });
     }
     let mut states = Vec::new();

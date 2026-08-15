@@ -71,7 +71,11 @@ fn ver(steps: Vec<SerStep>) -> VersionData {
 }
 
 /// Список в БД + bare + рабочая копия.
-async fn setup(pool: &sqlx::PgPool, slug: &str, steps: Vec<SerStep>) -> (Uuid, Tmp, std::path::PathBuf, std::path::PathBuf) {
+async fn setup(
+    pool: &sqlx::PgPool,
+    slug: &str,
+    steps: Vec<SerStep>,
+) -> (Uuid, Tmp, std::path::PathBuf, std::path::PathBuf) {
     let owner = support::seed_user(pool, &format!("md{}", &Uuid::new_v4().to_string()[..8])).await;
     let list_id: Uuid = sqlx::query_scalar(
         "insert into templates (owner_id, slug, title, current_version) values ($1, $2, '{\"en\":\"MD\"}', 1) returning id",
@@ -139,13 +143,11 @@ async fn правка_существующего_md_доезжает() {
 #[ignore = "нужен TEST_DATABASE_URL (Postgres) и git"]
 async fn новый_md_без_записи_в_list_json() {
     let pool = support::pool_with_schema().await;
-    let (list_id, _root, bare, work) = setup(&pool, "md-extra", vec![ser(1, "Первый"), ser(2, "Второй")]).await;
+    let (list_id, _root, bare, work) =
+        setup(&pool, "md-extra", vec![ser(1, "Первый"), ser(2, "Второй")]).await;
 
-    std::fs::write(
-        work.join("steps").join("03-tretij.md"),
-        "# Третий шаг\n\nДобавил руками через git.\n",
-    )
-    .expect("write");
+    std::fs::write(work.join("steps").join("03-tretij.md"), "# Третий шаг\n\nДобавил руками через git.\n")
+        .expect("write");
     git_ok(&work, &["add", "-A"]);
     git_ok(&work, &["commit", "-m", "добавил шаг файлом"]);
     let push = git(&work, &["push", "origin", "main"]);
@@ -172,7 +174,8 @@ async fn новый_md_без_записи_в_list_json() {
 #[ignore = "нужен TEST_DATABASE_URL (Postgres) и git"]
 async fn разреженная_нумерация_шагов_не_рвёт_оверрайд() {
     let pool = support::pool_with_schema().await;
-    let (list_id, _root, bare, work) = setup(&pool, "md-sparse", vec![ser(1, "Первый"), ser(5, "Пятый")]).await;
+    let (list_id, _root, bare, work) =
+        setup(&pool, "md-sparse", vec![ser(1, "Первый"), ser(5, "Пятый")]).await;
 
     let files: HashMap<String, std::path::PathBuf> = std::fs::read_dir(work.join("steps"))
         .expect("steps/")

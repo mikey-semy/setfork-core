@@ -119,7 +119,11 @@ async fn база_совпадает_с_настоящим_git_merge_base() {
 
     let bare = dir.0.join(format!("{list_id}.git"));
     let base_before = list_json_at(&bare, &{
-        git2::Repository::open_bare(&bare).expect("o").refname_to_id("refs/heads/main").expect("m").to_string()
+        git2::Repository::open_bare(&bare)
+            .expect("o")
+            .refname_to_id("refs/heads/main")
+            .expect("m")
+            .to_string()
     });
 
     // Ветка правит своё.

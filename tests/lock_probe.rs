@@ -108,7 +108,11 @@ async fn параллельные_слияния_не_затирают_друг_
     }
     let bare = dir.0.join(format!("{list_id}.git"));
     let base = list_json_at(&bare, &{
-        git2::Repository::open_bare(&bare).expect("o").refname_to_id("refs/heads/main").expect("m").to_string()
+        git2::Repository::open_bare(&bare)
+            .expect("o")
+            .refname_to_id("refs/heads/main")
+            .expect("m")
+            .to_string()
     });
 
     git.commit_to_branch(Request::new(CommitToBranchRequest {

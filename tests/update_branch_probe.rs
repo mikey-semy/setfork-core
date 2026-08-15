@@ -169,12 +169,8 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
     // Диагностика на случай конфликта: что реально разъехалось.
     let branch_json = json_at(&bare, &tip(&bare, "refs/heads/pr-u"));
     let main_json = json_at(&bare, &main_before);
-    let diff: Vec<&str> = main_json
-        .lines()
-        .zip(branch_json.lines())
-        .filter(|(a, b)| a != b)
-        .map(|(a, _)| a.trim())
-        .collect();
+    let diff: Vec<&str> =
+        main_json.lines().zip(branch_json.lines()).filter(|(a, b)| a != b).map(|(a, _)| a.trim()).collect();
     println!("РАЗЛИЧАЮЩИЕСЯ СТРОКИ main vs ветка: {diff:?}");
     println!("СТРОК: main={} ветка={}", main_json.lines().count(), branch_json.lines().count());
     let base_sha = {
@@ -218,7 +214,12 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
                 let name = |e: &Option<git2::IndexEntry>| {
                     e.as_ref().map(|x| String::from_utf8_lossy(&x.path).to_string()).unwrap_or("—".into())
                 };
-                println!("  КОНФЛИКТ: ancestor={} our={} their={}", name(&c.ancestor), name(&c.our), name(&c.their));
+                println!(
+                    "  КОНФЛИКТ: ancestor={} our={} their={}",
+                    name(&c.ancestor),
+                    name(&c.our),
+                    name(&c.their)
+                );
             }
         }
     }
@@ -404,7 +405,8 @@ async fn какие_изменения_main_ломают_слияние() {
         .await
         .expect("commit_to_branch");
 
-        let mut steps: Vec<setfork_core::git::project::ProjStep> = шаги_main.iter().map(|t| proj(t)).collect();
+        let mut steps: Vec<setfork_core::git::project::ProjStep> =
+            шаги_main.iter().map(|t| proj(t)).collect();
         if случай == "main правит только desc" {
             steps[0].desc = "новое описание".into();
         }

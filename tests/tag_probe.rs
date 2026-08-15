@@ -87,7 +87,12 @@ fn релиз_с_именем_версии_перевешивает_служеб
     }
 
     let v2_after = tag_target(&bare, "v2");
-    println!("ПОСЛЕ: v2={} (был {}), max={}", &v2_after[..8], &v2_before[..8], bundle::max_tag_version(&bare));
+    println!(
+        "ПОСЛЕ: v2={} (был {}), max={}",
+        &v2_after[..8],
+        &v2_before[..8],
+        bundle::max_tag_version(&bare)
+    );
 
     assert_eq!(
         v2_after, v2_before,

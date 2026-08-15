@@ -13,7 +13,9 @@ mod support;
 
 use setfork_core::pb_domain::collab_write_server::CollabWrite;
 use setfork_core::pb_domain::list_write_server::ListWrite;
-use setfork_core::pb_domain::{CreateListRequest, CreateSuggestionRequest, LocaleText, NewStep, OpenIssueRequest};
+use setfork_core::pb_domain::{
+    CreateListRequest, CreateSuggestionRequest, LocaleText, NewStep, OpenIssueRequest,
+};
 use setfork_core::services::collab::CollabWriteSvc;
 use setfork_core::services::list::ListWriteSvc;
 use tonic::Request;
@@ -175,7 +177,8 @@ async fn параллельное_создание_предложений_на_�
             Err(e) => err.push(e),
         }
     }
-    let cnt: i64 = sqlx::query_scalar("select count(*) from suggestions").fetch_one(&pool).await.expect("count");
+    let cnt: i64 =
+        sqlx::query_scalar("select count(*) from suggestions").fetch_one(&pool).await.expect("count");
     println!("ПРЕДЛОЖЕНИЙ создано {ok} из {n}, в БД {cnt}");
     for (code, msg) in &err {
         println!("  ОТКАЗ: {code:?} — {msg}");

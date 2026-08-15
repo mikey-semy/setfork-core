@@ -382,11 +382,22 @@ async fn дамп_расхождения_list_json() {
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "dave", "dump", vec![step("Первый"), step("Второй")]).await;
     let git = GitCoreSvc { pool: pool.clone() };
-    git.list_branches(Request::new(setfork_core::pb::RepoRef { owner: "dave".into(), slug: "dump".into() })).await.expect("materialize");
+    git.list_branches(Request::new(setfork_core::pb::RepoRef { owner: "dave".into(), slug: "dump".into() }))
+        .await
+        .expect("materialize");
     let bare = bare_of(&dir, list_id);
     let before = list_json_at(&bare, &main_tip(&bare));
-    setfork_core::db::add_version(&pool, list_id, "web", &[proj_step("Первый"), proj_step("Второй"), proj_step("Третий")]).await.expect("v2");
-    git.list_branches(Request::new(setfork_core::pb::RepoRef { owner: "dave".into(), slug: "dump".into() })).await.expect("lb");
+    setfork_core::db::add_version(
+        &pool,
+        list_id,
+        "web",
+        &[proj_step("Первый"), proj_step("Второй"), proj_step("Третий")],
+    )
+    .await
+    .expect("v2");
+    git.list_branches(Request::new(setfork_core::pb::RepoRef { owner: "dave".into(), slug: "dump".into() }))
+        .await
+        .expect("lb");
     let after = list_json_at(&bare, &main_tip(&bare));
     std::fs::write(std::env::temp_dir().join("probe-before.json"), &before).ok();
     std::fs::write(std::env::temp_dir().join("probe-after.json"), &after).ok();
