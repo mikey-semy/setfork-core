@@ -627,6 +627,11 @@ pub fn ser_step_from_row(n: i32, r: &StepRow) -> SerStep {
 
 /// Метаданные списка из list.json (title/desc/tags/ordered/kind) — порт project.ts patch.
 /// None = поле отсутствовало в list.json → не трогаем.
+/// Мета списка из запушенного канона. ОДНОЙ транзакцией: полей четыре, и сбой на
+/// третьем оставлял бы мету наполовину применённой — то есть базу в состоянии,
+/// которого нет ни в одном коммите (линза проверки 04 §7). Восстановилось бы это
+/// только следующим пушем, а до тех пор список показывал бы новый заголовок со
+/// старыми тегами.
 pub async fn update_meta(
     pool: &PgPool,
     template_id: Uuid,
@@ -636,20 +641,21 @@ pub async fn update_meta(
     ordered: Option<bool>,
     kind: Option<String>,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     if let Some(t) = title
         && !t.trim().is_empty()
     {
         sqlx::query("update templates set title = $1::jsonb where id = $2")
             .bind(loc_val(&t))
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(d) = desc {
         sqlx::query("update templates set \"desc\" = $1::jsonb where id = $2")
             .bind(loc_val(&d))
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(tg) = tags {
@@ -657,14 +663,14 @@ pub async fn update_meta(
         sqlx::query("update templates set tags = $1 where id = $2")
             .bind(&tg)
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(o) = ordered {
         sqlx::query("update templates set ordered = $1 where id = $2")
             .bind(o)
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     // kind из push: пишем только валидное значение (санитизация чужого git-входа,
@@ -674,10 +680,10 @@ pub async fn update_meta(
         sqlx::query("update templates set list_kind = $1 where id = $2")
             .bind(&k)
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
-    Ok(())
+    tx.commit().await
 }
 
 #[cfg(test)]
