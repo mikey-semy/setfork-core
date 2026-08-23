@@ -289,6 +289,61 @@ async fn пуш_не_стирает_картинку_и_пометку_по_ид
     assert!(!rows[1].2);
 }
 
+/// КАРТИНКУ МОЖНО СНЯТЬ ПУШЕМ — пустым значением, как снимается пометка «нужен
+/// человек» явным `false`. До этого сказать «картинки нет» через git было НЕЧЕМ:
+/// отсутствие поля значит «не знаю» и возвращает старый ключ, а пустая строка
+/// доезжала в колонку как есть, выставляя `has_image` у шага без картинки
+/// (F9 линзы проверки 02).
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn пуш_снимает_картинку_пустым_значением() {
+    const BLOCK: &str = "22222222-3333-4444-5555-666666666666";
+    let pool = support::pool_with_schema().await;
+    let list_id = seed_list(&pool, "clearer", "clear", "Clear").await;
+    sqlx::query(
+        "update steps set block_id = $1, image_key = 'steps/img.png', has_image = true \
+         where version_id = (select id from template_versions where template_id = $2 and version = 1)",
+    )
+    .bind(Uuid::parse_str(BLOCK).unwrap())
+    .bind(list_id)
+    .execute(&pool)
+    .await
+    .expect("enrich v1 step");
+
+    let root = tmp_root("clear");
+    let bare = root.0.join("repo.git");
+    bundle::bootstrap_bare(&[v1_data(&pool, list_id, "Clear").await], &bare).expect("bootstrap");
+
+    commit_canon_on_main(
+        &bare,
+        &serde_json::json!({
+            "title": "Clear", "desc": "", "tags": [], "ordered": true, "version": 2,
+            "steps": [
+                { "n": 1, "blockId": BLOCK, "imageKey": "", "title": "First", "desc": "", "command": "",
+                  "level": "required", "why": "", "section": "", "subtasks": [], "refs": [] }
+            ]
+        }),
+    );
+
+    let ver = setfork_core::git::project::project_pushed_commit(&pool, list_id, &bare)
+        .await
+        .expect("проекция")
+        .expect("проецируемо");
+    assert_eq!(ver, 2);
+
+    let (image, has_image): (Option<String>, bool) = sqlx::query_as(
+        "select s.image_key, s.has_image from steps s \
+         join template_versions tv on tv.id = s.version_id \
+         where tv.template_id = $1 and tv.version = 2",
+    )
+    .bind(list_id)
+    .fetch_one(&pool)
+    .await
+    .expect("v2 step");
+    assert_eq!(image, None, "пустое значение — это СНЯТИЕ картинки, а не перенос старой");
+    assert!(!has_image, "флаг картинки обязан сняться вместе с ключом");
+}
+
 /// СПИСОК БЕЗ СТРОК ИСТОРИИ ПРИНИМАЕТ ВЕРСИЮ (репро падения итестов фронта на
 /// master): current_version — дефолт колонки, строк версий нет. Старый drizzle-
 /// путь вставлял v2 не глядя; git-first обязан уметь то же — репо рождается

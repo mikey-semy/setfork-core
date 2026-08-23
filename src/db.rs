@@ -479,10 +479,20 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, CarryOver>
         title: loc_val(&s.title),
         desc: loc_val(&s.desc),
         command: s.command.trim().to_string(),
-        // Ф2a-довесок: канон несёт imageKey — файл теперь источник. Отсутствие
-        // поля (старый клон) — фолбэк на перенос по block_id, чтобы push старого
-        // клона не стирал картинку (P1 авто-ревью #63).
-        image_key: s.image_key.clone().or_else(|| carry.image_key.clone()),
+        // Ф2a-довесок: канон несёт imageKey — файл теперь источник. ТРИСТЕЙТ, как у
+        // needs_human: поля нет (старый клон) → перенос по block_id, чтобы push
+        // старого клона не стирал картинку (P1 авто-ревью #63); значение есть →
+        // файл источник; ПУСТОЕ значение → явное снятие картинки пушем.
+        //
+        // Без последней ветки картинку нельзя было снять через git вовсе: любой
+        // способ сказать «её нет» читался как «не знаю» и возвращал старый ключ
+        // (F9 линзы 02). Пустая строка вдобавок доезжала в колонку как есть, и
+        // has_image (image_key.is_some()) выставлялся у шага БЕЗ картинки.
+        image_key: match s.image_key.as_deref().map(str::trim) {
+            Some("") => None,
+            Some(k) => Some(k.to_string()),
+            None => carry.image_key.clone(),
+        },
         level: Level::parse(&s.level),
         why: loc_val(&s.why),
         section: loc_val(&s.section),

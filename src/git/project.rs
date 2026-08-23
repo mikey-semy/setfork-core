@@ -216,7 +216,11 @@ fn parse_steps(steps_raw: &[RawStep]) -> Vec<ProjStep> {
             continue;
         }
         let step = ProjStep {
-            image_key: s.image_key.clone().filter(|k| !k.trim().is_empty()),
+            // Пустое значение НЕ схлопываем в «поля нет»: у картинки тристейт, и
+            // пустой ключ — это «снять картинку». Схлопывание здесь и делало снятие
+            // через git невозможным (F9 линзы 02): проекция видела `None` и честно
+            // возвращала старый ключ переносом.
+            image_key: s.image_key.clone(),
             needs_human: s.needs_human,
             needs_human_ask: s.needs_human_ask.clone().filter(|a| !a.trim().is_empty()),
             danger: s.danger,

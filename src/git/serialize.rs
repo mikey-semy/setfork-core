@@ -126,8 +126,10 @@ pub fn list_json(v: &VersionData) -> String {
             m.insert("command".into(), serde_json::json!(s.command));
             // Ф2a-довесок: новые поля пишутся ТОЛЬКО при наличии — байты списков
             // без картинок/пометок не меняются (та же дисциплина, что blockId/kind).
-            if let Some(ik) = &s.image_key {
-                m.insert("imageKey".into(), serde_json::Value::String(ik.clone()));
+            // Пустой ключ в файл не пишем: в каноне пустое значение ЗНАЧИТ «снять
+            // картинку», и писать его у шага, где картинки и так нет, — писать шум.
+            if let Some(ik) = s.image_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+                m.insert("imageKey".into(), serde_json::Value::String(ik.to_string()));
             }
             m.insert("level".into(), serde_json::json!(s.level));
             if s.needs_human {
