@@ -153,6 +153,26 @@ async fn ошибка_приложения_останавливает_запис
     assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
 }
 
+/// 4xx — НЕ то же, что 5xx, и это главная развилка ответа.
+///
+/// Приложение ответило и отказалось отвечать по существу: разошлись токены канала,
+/// сменился путь, включился чужой обработчик. Повтор такого не лечит, а сказать
+/// клиенту «повтори» значит обречь пуш долбиться в неверную настройку бесконечно —
+/// на git-пути это ещё и 503 с Retry-After наружу (находка своего прохода ревью
+/// по #101).
+#[tokio::test]
+async fn отказ_спрашивать_не_выдаётся_за_срыв_связи() {
+    for resp in [
+        "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n",
+        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
+    ] {
+        let stub = Stub::start(resp);
+        let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("4xx не пропускает");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition, "{resp}");
+        assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
+    }
+}
+
 #[tokio::test]
 async fn мусор_в_ответе_останавливает_запись() {
     let stub = Stub::start(Box::leak(http("<html>что-то пошло не так</html>").into_boxed_str()));

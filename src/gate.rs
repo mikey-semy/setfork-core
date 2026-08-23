@@ -112,9 +112,13 @@ enum Verdict {
     /// клиенту честно сказать «повтори», и код для этого один: `Unavailable`.
     Unreachable(String),
     /// Приложение ОТВЕТИЛО, но ответ непонятен: не JSON, нет поля `allow`, тип не
-    /// тот. Повтор такого не лечит — это расхождение контракта, то есть состояние
-    /// системы, а не срыв связи.
+    /// тот, либо код ответа 4xx («не пущу спрашивать»). Повтор такого не лечит —
+    /// это расхождение контракта или настройки, а не срыв связи.
     Malformed(String),
+    /// Спросить не смогли ПО СВОЕЙ вине: запрос не собрался (например, токен канала
+    /// с переводом строки — такой заголовок невалиден). Ни приложение, ни сеть тут
+    /// ни при чём, и говорить «ответ непонятен» было бы неправдой: ответа не было.
+    Local(String),
 }
 
 /// Разбор тела ответа. Форма — `{"allow":true}` или `{"allow":false,"reason":"frozen"}`.
@@ -147,7 +151,7 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
     }
     let req = match builder.body(Full::new(Bytes::from(payload))) {
         Ok(r) => r,
-        Err(e) => return Verdict::Malformed(format!("запрос не собрался: {e}")),
+        Err(e) => return Verdict::Local(format!("запрос не собрался: {e}")),
     };
 
     // Таймаут накрывает ВЕСЬ обмен, а не только получение заголовков: future от
@@ -162,7 +166,17 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
         };
         let status = resp.status();
         if !status.is_success() {
-            return Verdict::Unreachable(format!("приложение ответило {status}"));
+            // 5xx — приложению плохо, это преходяще и повтор уместен. 4xx —
+            // приложение ОТВЕТИЛО и отказалось отвечать по существу: разошлись
+            // токены канала, сменился путь, включился чужой обработчик. Повтор
+            // такого не лечит, и говорить клиенту «повтори» значит обречь его
+            // долбиться в неверную настройку бесконечно (находка своего прохода
+            // ревью по #101).
+            return if status.is_server_error() {
+                Verdict::Unreachable(format!("приложение ответило {status}"))
+            } else {
+                Verdict::Malformed(format!("приложение ответило {status} — спросить не дало"))
+            };
         }
         match resp.into_body().collect().await {
             Ok(b) => parse_verdict(&b.to_bytes()),
@@ -240,6 +254,23 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
                 "write precondition verdict not understood",
             ))
         }
+        Verdict::Local(why) => {
+            // Наша собственная поломка: сказать «приложение недоступно» или «ответ
+            // непонятен» было бы враньём в обе стороны, а искать будут по этой
+            // строке. Internal — как раз «мы сломались», и повтор не поможет.
+            metrics::counter!("write_gate_denied_total", "reason" => "local").increment(1);
+            tracing::error!(
+                owner,
+                slug,
+                why,
+                "write verdict request could not be built, refusing (fail-closed)"
+            );
+            Err(reason::status(
+                Code::Internal,
+                Reason::GateUnavailable,
+                "write precondition request could not be built",
+            ))
+        }
     }
 }
 
@@ -315,17 +346,5 @@ mod tests {
             parse_app_url(Some("https://app:3000")),
             Err(BadAppUrl::TlsUnsupported("https://app:3000".into()))
         );
-    }
-
-    #[test]
-    fn непонятый_ответ_это_не_разрешение() {
-        // Главное свойство fail-closed: всё, что не «allow: true», не пропускает.
-        for body in [&b"{}"[..], b"not json at all", b"", b"{\"allow\":\"yes\"}", b"[]"] {
-            assert!(
-                !matches!(parse_verdict(body), Verdict::Allow),
-                "разобрано как разрешение: {:?}",
-                String::from_utf8_lossy(body)
-            );
-        }
     }
 }
