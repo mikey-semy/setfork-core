@@ -145,14 +145,20 @@ async fn несуществующий_список_это_not_found() {
 async fn ошибка_приложения_останавливает_запись() {
     let stub = Stub::start("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("500 не пропускает");
-    assert_eq!(err.code(), tonic::Code::Unavailable);
+    // FAILED_PRECONDITION, а не Unavailable: последний значит «повтори», и внешнее
+    // правило (Gitaly STYLE) запрещает отдавать его из хендлера. Здесь состояние
+    // системы — спросить предусловие не удалось. Клиент решает по ПРИЧИНЕ, поэтому
+    // её проверяем тоже: код можно уточнять, контракт держится на ней.
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
 }
 
 #[tokio::test]
 async fn мусор_в_ответе_останавливает_запись() {
     let stub = Stub::start(Box::leak(http("<html>что-то пошло не так</html>").into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("мусор не пропускает");
-    assert_eq!(err.code(), tonic::Code::Unavailable);
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
 }
 
 /// Самый важный край: приложения нет вообще. Отказ, а не «пропустим на всякий».
@@ -164,7 +170,8 @@ async fn недоступное_приложение_останавливает_
         format!("http://{}", l.local_addr().expect("addr"))
     };
     let err = ensure_writable_at(&addr, "mike", "list").await.expect_err("недоступность не пропускает");
-    assert_eq!(err.code(), tonic::Code::Unavailable);
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
 }
 
 /// Регрессия P1 авто-ревью core#71: заголовки пришли, тело залипло.
@@ -181,7 +188,8 @@ async fn залипшее_тело_ответа_не_держит_запись_�
     );
     let started = std::time::Instant::now();
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("залипание не пропускает");
-    assert_eq!(err.code(), tonic::Code::Unavailable);
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
     assert!(
         started.elapsed() < std::time::Duration::from_secs(15),
         "отказ пришёл по таймауту, а не по обрыву"

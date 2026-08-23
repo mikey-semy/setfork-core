@@ -208,8 +208,14 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
             // Громко: это отказ в обслуживании записи, а не рядовая ошибка ввода.
             metrics::counter!("write_gate_denied_total", "reason" => "unavailable").increment(1);
             tracing::error!(owner, slug, why, "write verdict not received, refusing (fail-closed)");
+            // FAILED_PRECONDITION, а НЕ Unavailable. Внешнее правило (Gitaly STYLE)
+            // прямо запрещает отдавать Unavailable из хендлера: этот код значит
+            // «повтори», и ставит его интерцептор для срывов транспорта. Здесь же
+            // состояние системы: спросить предусловие не удалось, и повтор ничего не
+            // изменит, пока приложение молчит (AIP-193). Причина в трейлере остаётся
+            // прежней, поэтому клиент, который решает по ней, ничего не заметит.
             Err(reason::status(
-                Code::Unavailable,
+                Code::FailedPrecondition,
                 Reason::GateUnavailable,
                 "write precondition check unavailable",
             ))
@@ -220,6 +226,28 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Непонятый ответ — это НЕ «можно». Ветки собраны по промпту линзы 05 §3:
+    /// каждая из них однажды может прийти от приложения, и ни одна не имеет права
+    /// открыть запись.
+    #[test]
+    fn непонятый_вердикт_не_открывает_запись() {
+        for body in [
+            &b""[..],                   // пустое тело
+            "не json вовсе".as_bytes(), // не разобралось
+            b"{}",                      // нет поля allow
+            br#"{"allow":"yes"}"#,      // строка вместо булева — «похоже на да»
+            br#"{"allow":1}"#,          // число вместо булева
+            br#"{"allowed":true}"#,     // поле названо иначе
+            br#"[{"allow":true}]"#,     // массив вместо объекта
+        ] {
+            assert!(
+                matches!(parse_verdict(body), Verdict::Unavailable(_)),
+                "тело {:?} обязано читаться как «спросить не удалось»",
+                String::from_utf8_lossy(body)
+            );
+        }
+    }
 
     #[test]
     fn вердикт_разбирается() {

@@ -102,7 +102,11 @@ fn url_with_token(url: &str, token: &str) -> Option<String> {
 /// Однопроходно по каждому https://-URL: наивный «цикл до отсутствия @»
 /// не завершался бы — замена сама содержит '@'.
 fn redact(text: &str, token: &str) -> String {
-    let with_token_hidden = text.replace(token, "***");
+    // Пустой токен НЕ подставляем в replace: `"abc".replace("", "***")` вставляет
+    // звёздочки между каждым символом, и владелец увидел бы кашу вместо причины
+    // (05-F3). Пустой токен — состояние ненормальное, но сообщение об этом должно
+    // остаться читаемым.
+    let with_token_hidden = if token.is_empty() { text.to_string() } else { text.replace(token, "***") };
     let mut result = String::with_capacity(with_token_hidden.len());
     let mut rest = with_token_hidden.as_str();
     while let Some(i) = rest.find("https://") {
@@ -308,6 +312,7 @@ mod tests {
     #[test]
     fn токен_не_утекает_в_текст_ошибки() {
         let msg = "fatal: unable to access 'https://x-access-token:ghp_SECRET@github.com/u/r.git/': 403";
+        assert_eq!(redact("ошибка без кредов", ""), "ошибка без кредов", "пустой токен не крошит текст");
         let red = redact(msg, "ghp_SECRET");
         assert!(!red.contains("ghp_SECRET"), "{red}");
         assert!(!red.contains("x-access-token:"), "{red}");
