@@ -101,6 +101,68 @@ check_reasons() {
 }
 check_reasons
 
+# Общая часть для зеркал: сравнить два множества и назвать, чего где нет.
+# Заведено линзой 01 §3: гейт сверял ЧЕТЫРЕ вещи, а копий контракта оказалось
+# больше, и каждая несверяемая копия расходится молча.
+compare_sets() {
+  local what="$1" ours="$2" theirs="$3" ours_hint="$4" theirs_hint="$5"
+  if [[ -z "$ours" ]]; then
+    echo "proto-sync: не удалось извлечь $what из $ours_hint — проверка сломана, чини её"
+    fail=1
+    return 0
+  fi
+  local only_core only_front
+  only_core=$(comm -23 <(printf '%s\n' "$ours") <(printf '%s\n' "$theirs"))
+  only_front=$(comm -13 <(printf '%s\n' "$ours") <(printf '%s\n' "$theirs"))
+  if [[ -n "$only_core" ]]; then
+    echo "proto-sync: $what есть в ядре, но не у фронта ($theirs_hint):"
+    printf '  %s\n' $only_core
+    fail=1
+  fi
+  if [[ -n "$only_front" ]]; then
+    echo "proto-sync: $what есть у фронта, но не в ядре ($ours_hint):"
+    printf '  %s\n' $only_front
+    fail=1
+  fi
+}
+
+# ВИДЫ СПИСКА. Комментарий в `serialize.rs` прямо называет фронтовый файл
+# зеркалом, но сверки не было. Цена разъезда: проекция САНИТИЗИРУЕТ вид по этому
+# списку, поэтому вид, заведённый на фронте и незнакомый ядру, молча отбрасывается —
+# автор увидит успех и потерянный тип (01-F1).
+check_list_kinds() {
+  local theirs='src/shared/ai/list-kind.ts' front_src
+  if ! front_src=$(git -C "$FRONT" show "$REF:$theirs" 2>/dev/null); then
+    echo "proto-sync: $REF:$theirs НЕ ЧИТАЕТСЯ — переименован или удалён?"
+    fail=1
+    return 0
+  fi
+  local ours_list front_list
+  # Берём ЛЮБОЕ значение в кавычках, а не только латиницу: выборка, молча
+  # пропускающая непонятное, и есть тот самый гейт, который «зелен, потому что
+  # ничего не увидел» (проверено мутацией — кириллическое значение так и прошло).
+  ours_list=$(sed -n '/pub const LIST_KINDS/,/;/p' src/git/serialize.rs | grep -oE '"[^"]+"' | tr -d '"' | sort -u)
+  front_list=$(printf '%s\n' "$front_src" | sed -n '/export const LIST_KINDS/,/]/p' | grep -oE "'[^']+'" | tr -d "'" | sort -u)
+  compare_sets "виды списка" "$ours_list" "$front_list" "src/git/serialize.rs" "src/shared/ai/list-kind.ts"
+}
+check_list_kinds
+
+# КОДЫ ПРИДИРОК КАНОНА. Разъезд не молчалив (неизвестный код падает на английский
+# текст ядра), но человек читает объяснение не на своём языке — 01-F2.
+check_issue_codes() {
+  local theirs='src/features/library/list-editor/CanonPanel.tsx' front_src
+  if ! front_src=$(git -C "$FRONT" show "$REF:$theirs" 2>/dev/null); then
+    echo "proto-sync: $REF:$theirs НЕ ЧИТАЕТСЯ — переименован или удалён?"
+    fail=1
+    return 0
+  fi
+  local ours_list front_list
+  ours_list=$(sed -n '/fn as_str(self)/,/^    }/p' src/git/canon.rs | grep -oE '=> "[^"]+"' | sed 's/=> //; s/"//g' | sort -u)
+  front_list=$(printf '%s\n' "$front_src" | sed -n '/const known: Record<string, string>/,/^  }/p' | grep -oE '^    [A-Za-z_][A-Za-z0-9_]*:' | tr -d ' :' | sort -u)
+  compare_sets "коды придирок канона" "$ours_list" "$front_list" "src/git/canon.rs" "$theirs"
+}
+check_issue_codes
+
 if [[ $fail -eq 0 ]]; then
   echo "proto-sync: OK (идентичны с $FRONT@$REF)"
 fi
