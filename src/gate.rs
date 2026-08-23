@@ -107,22 +107,28 @@ enum Verdict {
     Allow,
     /// Продуктовый запрет с кодом причины ('frozen' | 'archived' | 'not-found').
     Deny(String),
-    /// Спросить не удалось. Текст — для лога и для человека; ответ всё равно «нет».
-    Unavailable(String),
+    /// Спросить не удалось ПО СВЯЗИ: приложение не отвечает, оборвалось тело,
+    /// пришёл 5xx, вышел таймаут. Ответ всё равно «нет», но беда ПРЕХОДЯЩАЯ —
+    /// клиенту честно сказать «повтори», и код для этого один: `Unavailable`.
+    Unreachable(String),
+    /// Приложение ОТВЕТИЛО, но ответ непонятен: не JSON, нет поля `allow`, тип не
+    /// тот. Повтор такого не лечит — это расхождение контракта, то есть состояние
+    /// системы, а не срыв связи.
+    Malformed(String),
 }
 
 /// Разбор тела ответа. Форма — `{"allow":true}` или `{"allow":false,"reason":"frozen"}`.
-/// Неожиданная форма — это НЕ «можно»: непонятый ответ трактуем как недоступность.
+/// Неожиданная форма — это НЕ «можно»: непонятый ответ значит «спросить не удалось».
 fn parse_verdict(body: &[u8]) -> Verdict {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return Verdict::Unavailable("вердикт не разобрался как JSON".into());
+        return Verdict::Malformed("вердикт не разобрался как JSON".into());
     };
     match v.get("allow").and_then(|a| a.as_bool()) {
         Some(true) => Verdict::Allow,
         Some(false) => {
             Verdict::Deny(v.get("reason").and_then(|r| r.as_str()).unwrap_or("denied").to_string())
         }
-        None => Verdict::Unavailable("в вердикте нет поля allow".into()),
+        None => Verdict::Malformed("в вердикте нет поля allow".into()),
     }
 }
 
@@ -141,7 +147,7 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
     }
     let req = match builder.body(Full::new(Bytes::from(payload))) {
         Ok(r) => r,
-        Err(e) => return Verdict::Unavailable(format!("запрос не собрался: {e}")),
+        Err(e) => return Verdict::Malformed(format!("запрос не собрался: {e}")),
     };
 
     // Таймаут накрывает ВЕСЬ обмен, а не только получение заголовков: future от
@@ -152,20 +158,20 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
     let exchange = async {
         let resp = match client().request(req).await {
             Ok(r) => r,
-            Err(e) => return Verdict::Unavailable(format!("приложение недоступно: {e}")),
+            Err(e) => return Verdict::Unreachable(format!("приложение недоступно: {e}")),
         };
         let status = resp.status();
         if !status.is_success() {
-            return Verdict::Unavailable(format!("приложение ответило {status}"));
+            return Verdict::Unreachable(format!("приложение ответило {status}"));
         }
         match resp.into_body().collect().await {
             Ok(b) => parse_verdict(&b.to_bytes()),
-            Err(e) => Verdict::Unavailable(format!("тело вердикта не прочиталось: {e}")),
+            Err(e) => Verdict::Unreachable(format!("тело вердикта не прочиталось: {e}")),
         }
     };
     match tokio::time::timeout(TIMEOUT, exchange).await {
         Ok(v) => v,
-        Err(_) => Verdict::Unavailable(format!("приложение не ответило за {TIMEOUT:?}")),
+        Err(_) => Verdict::Unreachable(format!("приложение не ответило за {TIMEOUT:?}")),
     }
 }
 
@@ -204,20 +210,34 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
                 other => Status::failed_precondition(other.to_string()),
             })
         }
-        Verdict::Unavailable(why) => {
-            // Громко: это отказ в обслуживании записи, а не рядовая ошибка ввода.
-            metrics::counter!("write_gate_denied_total", "reason" => "unavailable").increment(1);
-            tracing::error!(owner, slug, why, "write verdict not received, refusing (fail-closed)");
-            // FAILED_PRECONDITION, а НЕ Unavailable. Внешнее правило (Gitaly STYLE)
-            // прямо запрещает отдавать Unavailable из хендлера: этот код значит
-            // «повтори», и ставит его интерцептор для срывов транспорта. Здесь же
-            // состояние системы: спросить предусловие не удалось, и повтор ничего не
-            // изменит, пока приложение молчит (AIP-193). Причина в трейлере остаётся
-            // прежней, поэтому клиент, который решает по ней, ничего не заметит.
+        // ДВЕ разные беды — два разных кода, и это ровно то, чего требуют оба
+        // источника сразу. Срыв СВЯЗИ преходящ: клиенту честно сказать «повтори»,
+        // и код для этого `Unavailable` (Gitaly запрещает отдавать его как общий
+        // «что-то не вышло», но именно для ретраибельного случая он и существует).
+        // Непонятый ОТВЕТ повтором не лечится: приложение ответило, но не то —
+        // это расхождение контракта, то есть `FailedPrecondition` по AIP-193.
+        // Раньше оба случая ехали одним кодом, и различить их клиент не мог.
+        Verdict::Unreachable(why) => {
+            metrics::counter!("write_gate_denied_total", "reason" => "unreachable").increment(1);
+            tracing::error!(
+                owner,
+                slug,
+                why,
+                "write verdict not received (transport), refusing (fail-closed)"
+            );
+            Err(reason::status(
+                Code::Unavailable,
+                Reason::GateUnavailable,
+                "write precondition check unavailable",
+            ))
+        }
+        Verdict::Malformed(why) => {
+            metrics::counter!("write_gate_denied_total", "reason" => "malformed").increment(1);
+            tracing::error!(owner, slug, why, "write verdict not understood, refusing (fail-closed)");
             Err(reason::status(
                 Code::FailedPrecondition,
                 Reason::GateUnavailable,
-                "write precondition check unavailable",
+                "write precondition verdict not understood",
             ))
         }
     }
@@ -242,8 +262,8 @@ mod tests {
             br#"[{"allow":true}]"#,     // массив вместо объекта
         ] {
             assert!(
-                matches!(parse_verdict(body), Verdict::Unavailable(_)),
-                "тело {:?} обязано читаться как «спросить не удалось»",
+                matches!(parse_verdict(body), Verdict::Malformed(_)),
+                "тело {:?} обязано читаться как «ответ непонятен»",
                 String::from_utf8_lossy(body)
             );
         }
