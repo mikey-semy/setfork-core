@@ -135,6 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
                 let total = rows.len();
                 let (mut in_sync, mut boot, mut appended, mut projected, mut conflicts) = (0, 0, 0, 0, 0);
+                let mut restored = 0;
                 for (id, handle, slug) in rows {
                     let bare = git::repo::repo_path(id);
                     let _guard = git::repo::repo_guard(&pool, id).await?;
@@ -143,6 +144,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(git::version::SyncOutcome::Bootstrapped { versions }) => {
                             boot += 1;
                             println!("  {handle}/{slug}: repo created ({versions} versions)");
+                        }
+                        Ok(git::version::SyncOutcome::MainRestored { version }) => {
+                            restored += 1;
+                            println!("  {handle}/{slug}: main was missing, restored from tag v{version}");
                         }
                         Ok(git::version::SyncOutcome::Appended { from, to }) => {
                             appended += 1;
@@ -166,8 +171,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 println!(
-                    "sync-repos: total {total}; in sync {in_sync}, created {boot}, caught up {appended}, \
-                     projected {projected}, conflicts {conflicts}"
+                    "sync-repos: total {total}; in sync {in_sync}, created {boot}, main restored {restored}, \
+                     caught up {appended}, projected {projected}, conflicts {conflicts}"
                 );
                 if conflicts > 0 {
                     return Err(format!("{conflicts} repos need manual intervention").into());

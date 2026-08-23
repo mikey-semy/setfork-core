@@ -102,7 +102,7 @@ fn досыпка_настоящей_версии_коммит_создаёт() 
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn репо_без_главной_ветки_пересобирается_из_базы() {
+async fn репо_без_главной_ветки_чинится_возвратом_ссылки() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "healer").await;
     let list_id: Uuid = sqlx::query_scalar(
@@ -129,6 +129,19 @@ async fn репо_без_главной_ветки_пересобирается_
     assert_eq!(first, SyncOutcome::Bootstrapped { versions: 2 }, "репо материализовано из истории БД");
     let tip_before = commits_on_main(&bare);
 
+    // МЕТА СПИСКА ПРАВИТСЯ ПОСЛЕ материализации — и это главное в пробе.
+    // `load_bundle_data` берёт сегодняшние title/desc/tags для ВСЕХ версий, поэтому
+    // пересборка из БД дала бы ДРУГИЕ деревья и другие SHA. Без этой правки проба
+    // не различала бы «вернули ссылку» и «переписали историю»: с неизменной метой
+    // SHA совпадают, и уничтожение канона выглядело бы зелёным (P1 авто-ревью #100).
+    sqlx::query(
+        "update templates set title = '{\"en\":\"Переименован после материализации\"}' where id = $1",
+    )
+    .bind(list_id)
+    .execute(&pool)
+    .await
+    .expect("правка меты");
+
     // Главная ветка исчезла, теги целы — состояние, которое выравнивание считало синхронным.
     {
         let repo = git2::Repository::open_bare(&bare).expect("open");
@@ -138,8 +151,20 @@ async fn репо_без_главной_ветки_пересобирается_
     }
 
     let healed = version::sync_repo_with_db(&pool, list_id, &bare).await.expect("выравнивание");
-    assert_eq!(healed, SyncOutcome::Bootstrapped { versions: 2 }, "потерю main лечит пересборка");
-    assert_eq!(commits_on_main(&bare), tip_before, "история та же (SHA детерминированы)");
+    assert_eq!(
+        healed,
+        SyncOutcome::MainRestored { version: 2 },
+        "ссылка возвращена, а не история пересобрана"
+    );
+    assert_eq!(commits_on_main(&bare), tip_before, "ТЕ ЖЕ коммиты: канон не переписан");
+    {
+        let repo = git2::Repository::open_bare(&bare).expect("open");
+        assert_eq!(
+            repo.refname_to_id("refs/heads/main").expect("main вернулся"),
+            repo.refname_to_id("refs/tags/v2").expect("тег v2 цел"),
+            "main стоит на коммите своего тега"
+        );
+    }
 
     // Идемпотентность: повтор ничего не пересобирает и не плодит.
     let again = version::sync_repo_with_db(&pool, list_id, &bare).await.expect("повтор");

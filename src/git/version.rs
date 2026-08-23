@@ -25,6 +25,8 @@ pub enum SyncOutcome {
     InSync,
     /// Репо не было на диске — материализовано из истории БД целиком.
     Bootstrapped { versions: usize },
+    /// Ветка `main` пропала при целых объектах — возвращена на коммит своего тега.
+    MainRestored { version: i32 },
     /// Git отставал от БД (наследие ленивой досыпки) — версии дописаны.
     Appended { from: i32, to: i32 },
     /// Git был на одну версию впереди (сбой прошлой проекции) — tip спроецирован в БД.
@@ -72,11 +74,43 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
     // Замер линзы 02 §4: после удаления main снимок отдавал null и после
     // выравнивания ветка не появлялась. Лечим тем же, чем отсутствующий каталог, —
     // пересборкой из БД (SHA детерминированы, объекты на месте, история та же).
-    if !has_main && let Some(outcome) = bootstrap_from_db(pool, id, bare).await? {
-        tracing::warn!(%id, "repo had no main branch, rebuilt from db (heal)");
-        return Ok(outcome);
+    if !has_main {
+        // Объекты и теги целы — значит история НА МЕСТЕ, пропала только ссылка.
+        // Возвращаем main на коммит старшего тега, а не пересобираем из БД:
+        // `load_bundle_data` берёт СЕГОДНЯШНЮЮ мету списка для ВСЕХ версий, поэтому
+        // после любой правки названия пересборка дала бы другие деревья и другие
+        // SHA, форсом перевесила бы теги vN на эту синтетику и выбросила принятые
+        // пуши и коммиты слияния — то есть уничтожила бы ровно тот канон, который
+        // лечение обязано спасти (находка авто-ревью на #100, P1).
+        if have > 0 {
+            restore_main_from_tag(bare, have).await?;
+            tracing::warn!(%id, version = have, "main was missing, restored from tag v{have} (heal)");
+            let outcome = align_by_counters(pool, id, bare, current, have).await?;
+            return Ok(match outcome {
+                SyncOutcome::InSync => SyncOutcome::MainRestored { version: have },
+                other => other,
+            });
+        }
+        // Тегов нет вовсе — восстанавливать нечего, история только в БД.
+        if let Some(outcome) = bootstrap_from_db(pool, id, bare).await? {
+            tracing::warn!(%id, "repo had neither main nor version tags, rebuilt from db (heal)");
+            return Ok(outcome);
+        }
     }
 
+    align_by_counters(pool, id, bare, current, have).await
+}
+
+/// Выравнивание по счётчикам: `have` (старший тег vN) против `current_version`.
+/// Вынесено из `sync_repo_with_db`, чтобы лечение пропавшей ветки могло пройти
+/// этот же путь и не дублировать его вторым описанием.
+async fn align_by_counters(
+    pool: &PgPool,
+    id: Uuid,
+    bare: &Path,
+    current: i32,
+    have: i32,
+) -> Result<SyncOutcome, sqlx::Error> {
     if have == current {
         // Равенство счётчиков ещё не синхронность: если проекция push/merge упала
         // ДО постановки тега, main уже впереди, а тега vN нет — по счётчикам всё
@@ -116,7 +150,7 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
             // ensure создал его под список без версий) — это «список до первой
             // версии»: current_version тут дефолт колонки, выравнивать нечего.
             // Рассинхроном считается только «main есть, а строк нет».
-            if have == 0 && !has_main {
+            if have == 0 && !main_exists(bare).await? {
                 return Ok(SyncOutcome::InSync);
             }
             return Ok(SyncOutcome::Conflict { have, current });
@@ -151,6 +185,38 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
          git-projection-catchup"
     );
     Ok(SyncOutcome::Conflict { have, current })
+}
+
+/// Есть ли у репо main (пустой bare списка до первой версии его не имеет).
+/// Спрашивается только в ветке «тегов нет и строк истории нет», поэтому отдельным
+/// чтением: на горячем пути состояние рефов уже прочитано одним `refs_state`.
+async fn main_exists(bare: &Path) -> Result<bool, sqlx::Error> {
+    let bare_chk = bare.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        git2::Repository::open_bare(&bare_chk).is_ok_and(|r| r.refname_to_id(MAIN_REF).is_ok())
+    })
+    .await
+    .map_err(join_err)
+}
+
+/// Возвращает `refs/heads/main` на коммит тега `v<ver>`. Через ту же точку
+/// обновления main, что и запись версий: проверки состава дерева обязаны
+/// действовать и на лечении — иначе оно стало бы дырой в правилах хука.
+async fn restore_main_from_tag(bare: &Path, ver: i32) -> Result<(), sqlx::Error> {
+    let bare2 = bare.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let repo = git2::Repository::open_bare(&bare2).map_err(|e| e.to_string())?;
+        let oid = repo
+            .refname_to_id(&format!("refs/tags/v{ver}"))
+            .map_err(|e| format!("тег v{ver} не читается: {e}"))?;
+        crate::git::update::update_main(&repo, oid, None, "setfork: restore main from tag")
+            .map_err(|e| e.to_string())?;
+        let _ = repo.set_head(MAIN_REF);
+        Ok(())
+    })
+    .await
+    .map_err(join_err)?
+    .map_err(join_err)
 }
 
 /// Собирает историю списка из БД в bare-репо. `None` — версий в БД нет вовсе
