@@ -88,6 +88,13 @@ fn diff_lines(expected: &str, actual: &str) -> String {
 ///
 /// Шаг 1: `UPDATE_GOLDEN=1` — показать, ЧТО изменилось, и упасть.
 /// Шаг 2: `UPDATE_GOLDEN=accept` — принять показанное.
+/// Расхождения копятся, а не роняют прогон на первом же.
+///
+/// Иначе показ обрывается на первой фикстуре, остальные человек не видит — и
+/// следующий шаг («принять») запишет в том числе то, чего ему не показывали.
+/// Тогда двухшаговость перестаёт быть двухшаговостью (P1 авто-ревью на #102).
+static РАСХОЖДЕНИЯ: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
 fn compare_or_update(rel: &str, actual: &str) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
     let mode = std::env::var("UPDATE_GOLDEN").unwrap_or_default();
@@ -101,12 +108,6 @@ fn compare_or_update(rel: &str, actual: &str) {
         return;
     }
 
-    if mode == "accept" {
-        std::fs::write(&path, actual).unwrap();
-        eprintln!("golden: обновлён {rel}");
-        return;
-    }
-
     let expected = existing.unwrap_or_else(|| {
         panic!(
             "нет фикстуры {rel} — сгенерируй: UPDATE_GOLDEN=1 cargo test --test golden -- --include-ignored"
@@ -114,17 +115,30 @@ fn compare_or_update(rel: &str, actual: &str) {
     });
     let (e, a) = (expected.replace("\r\n", "\n"), actual.replace("\r\n", "\n"));
     if e == a {
+        return; // совпало — принимать нечего, файл не трогаем даже в режиме accept
+    }
+    if mode == "accept" {
+        std::fs::write(&path, actual).unwrap();
+        eprintln!("golden: обновлён {rel}");
         return;
     }
-    if mode == "1" {
-        panic!(
-            "golden-фикстура {rel} РАЗОШЛАСЬ. Что именно:\n{}\n\
-             Это либо починка формата, либо поломка — решает человек.\n\
-             Принять показанное: UPDATE_GOLDEN=accept cargo test --test golden -- --include-ignored",
-            diff_lines(&e, &a)
-        );
+    РАСХОЖДЕНИЯ
+        .lock()
+        .expect("копилка расхождений")
+        .push(format!("golden-фикстура {rel} РАЗОШЛАСЬ. Что именно:\n{}", diff_lines(&e, &a)));
+}
+
+/// Зовётся В КОНЦЕ проверки: только здесь видно ВСЕ расхождения разом.
+fn assert_golden_ok() {
+    let собранное = std::mem::take(&mut *РАСХОЖДЕНИЯ.lock().expect("копилка расхождений"));
+    if собранное.is_empty() {
+        return;
     }
-    panic!("разъезд golden-фикстуры {rel}:\n{}", diff_lines(&e, &a));
+    panic!(
+        "{}\nЭто либо починка формата, либо поломка — решает человек.\n\
+         Принять ПОКАЗАННОЕ ВЫШЕ: UPDATE_GOLDEN=accept cargo test --test golden -- --include-ignored",
+        собранное.join("\n")
+    );
 }
 
 #[tokio::test]
@@ -162,4 +176,8 @@ async fn golden_domain_read_and_materialization() {
     drop(repo);
     let _ = std::fs::remove_dir_all(&tmp);
     compare_or_update("tests/fixtures/golden-tip.txt", &format!("{tip}\n"));
+
+    // ВСЕ расхождения — одним отказом и в конце: иначе человек увидит первое и
+    // примет вслепую остальные.
+    assert_golden_ok();
 }
