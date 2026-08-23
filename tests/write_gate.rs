@@ -145,14 +145,43 @@ async fn несуществующий_список_это_not_found() {
 async fn ошибка_приложения_останавливает_запись() {
     let stub = Stub::start("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("500 не пропускает");
+    // Срыв СВЯЗИ — преходящая беда, и клиенту честно сказать «повтори»: код
+    // Unavailable существует ровно для этого. Непонятый ОТВЕТ приложения едет
+    // другим кодом (см. пробу мусора ниже) — повтор его не лечит. Причину
+    // проверяем тоже: код различает случаи, а контракт держится на ней.
     assert_eq!(err.code(), tonic::Code::Unavailable);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
+}
+
+/// 4xx — НЕ то же, что 5xx, и это главная развилка ответа.
+///
+/// Приложение ответило и отказалось отвечать по существу: разошлись токены канала,
+/// сменился путь, включился чужой обработчик. Повтор такого не лечит, а сказать
+/// клиенту «повтори» значит обречь пуш долбиться в неверную настройку бесконечно —
+/// на git-пути это ещё и 503 с Retry-After наружу (находка своего прохода ревью
+/// по #101).
+#[tokio::test]
+async fn отказ_спрашивать_не_выдаётся_за_срыв_связи() {
+    for resp in [
+        "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n",
+        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
+    ] {
+        let stub = Stub::start(resp);
+        let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("4xx не пропускает");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition, "{resp}");
+        assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
+    }
 }
 
 #[tokio::test]
 async fn мусор_в_ответе_останавливает_запись() {
     let stub = Stub::start(Box::leak(http("<html>что-то пошло не так</html>").into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("мусор не пропускает");
-    assert_eq!(err.code(), tonic::Code::Unavailable);
+    // Приложение ОТВЕТИЛО, но не то: повтор этого не лечит, и код обязан отличаться
+    // от срыва связи — иначе клиент, повторяющий Unavailable, будет долбиться в
+    // расхождение контракта до посинения.
+    assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
 }
 
 /// Самый важный край: приложения нет вообще. Отказ, а не «пропустим на всякий».
@@ -165,6 +194,7 @@ async fn недоступное_приложение_останавливает_
     };
     let err = ensure_writable_at(&addr, "mike", "list").await.expect_err("недоступность не пропускает");
     assert_eq!(err.code(), tonic::Code::Unavailable);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
 }
 
 /// Регрессия P1 авто-ревью core#71: заголовки пришли, тело залипло.
@@ -182,6 +212,7 @@ async fn залипшее_тело_ответа_не_держит_запись_�
     let started = std::time::Instant::now();
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("залипание не пропускает");
     assert_eq!(err.code(), tonic::Code::Unavailable);
+    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
     assert!(
         started.elapsed() < std::time::Duration::from_secs(15),
         "отказ пришёл по таймауту, а не по обрыву"
