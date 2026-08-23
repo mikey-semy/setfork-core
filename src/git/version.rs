@@ -37,7 +37,8 @@ pub enum SyncOutcome {
 /// Выравнивает репо списка с БД. Вызывать ПОД репо-локом (`repo::repo_guard`).
 ///
 /// Ветки:
-/// * репо нет → bootstrap всей истории из БД (восстановление/первое касание);
+/// * репо нет (или есть каталог, но нет `main` при непустой истории) → bootstrap
+///   всей истории из БД (восстановление/первое касание);
 /// * `max_tag == current`, но main УШЁЛ ВПЕРЁД тега → непроецированный
 ///   push/merge-коммит (проекция упала ДО постановки тега) — спроецировать tip;
 /// * `max_tag < current` → дописать недостающие версии (одноразовый долг
@@ -56,22 +57,25 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
     };
 
     if !bare.exists() {
-        let versions = db::load_bundle_data(pool, id).await?;
-        if versions.is_empty() {
-            return Ok(SyncOutcome::InSync); // материализовать нечего
-        }
-        let n = versions.len();
-        let bare2 = bare.to_path_buf();
-        tokio::task::spawn_blocking(move || bundle::bootstrap_bare(&versions, &bare2))
-            .await
-            .map_err(join_err)?
-            .map_err(join_err)?;
-        return Ok(SyncOutcome::Bootstrapped { versions: n });
+        // Версий в БД нет вовсе — материализовать нечего.
+        return Ok(bootstrap_from_db(pool, id, bare).await?.unwrap_or(SyncOutcome::InSync));
     }
 
-    let bare_tag = bare.to_path_buf();
-    let have =
-        tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag)).await.map_err(join_err)?;
+    let bare_state = bare.to_path_buf();
+    let (has_main, have) =
+        tokio::task::spawn_blocking(move || bundle::refs_state(&bare_state)).await.map_err(join_err)?;
+
+    // Каталог на месте, а ГЛАВНОЙ ВЕТКИ нет. По счётчикам это состояние
+    // неотличимо от синхронного (теги-то целы), поэтому ни одна ветка ниже его не
+    // берёт, а `tag_on_tip` на нечитаемом ref'е отвечает «тег на вершине» — и репо
+    // остаётся без main навсегда: клон пуст, зеркало пусто, само не починится.
+    // Замер линзы 02 §4: после удаления main снимок отдавал null и после
+    // выравнивания ветка не появлялась. Лечим тем же, чем отсутствующий каталог, —
+    // пересборкой из БД (SHA детерминированы, объекты на месте, история та же).
+    if !has_main && let Some(outcome) = bootstrap_from_db(pool, id, bare).await? {
+        tracing::warn!(%id, "repo had no main branch, rebuilt from db (heal)");
+        return Ok(outcome);
+    }
 
     if have == current {
         // Равенство счётчиков ещё не синхронность: если проекция push/merge упала
@@ -112,13 +116,15 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
             // ensure создал его под список без версий) — это «список до первой
             // версии»: current_version тут дефолт колонки, выравнивать нечего.
             // Рассинхроном считается только «main есть, а строк нет».
-            if have == 0 && !main_exists(bare).await? {
+            if have == 0 && !has_main {
                 return Ok(SyncOutcome::InSync);
             }
             return Ok(SyncOutcome::Conflict { have, current });
         }
         let bare2 = bare.to_path_buf();
-        tokio::task::spawn_blocking(move || bundle::append_versions(&bare2, &versions))
+        // Досыпка, а не обычная запись: версия может УЖЕ лежать коммитом (потерян
+        // тег, а не коммит), и тогда её надо дотегировать, а не коммитить второй раз.
+        tokio::task::spawn_blocking(move || bundle::append_missing_versions(&bare2, &versions))
             .await
             .map_err(join_err)?
             .map_err(join_err)?;
@@ -147,19 +153,27 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
     Ok(SyncOutcome::Conflict { have, current })
 }
 
-/// Есть ли у репо main (пустой bare списка до первой версии его не имеет).
-async fn main_exists(bare: &Path) -> Result<bool, sqlx::Error> {
-    let bare_chk = bare.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        git2::Repository::open_bare(&bare_chk).is_ok_and(|r| r.refname_to_id(MAIN_REF).is_ok())
-    })
-    .await
-    .map_err(join_err)
+/// Собирает историю списка из БД в bare-репо. `None` — версий в БД нет вовсе
+/// (материализовать нечего); повторный вызов поверх существующего каталога
+/// безопасен: SHA детерминированы, объекты уже на месте, теги ставятся заново.
+async fn bootstrap_from_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<Option<SyncOutcome>, sqlx::Error> {
+    let versions = db::load_bundle_data(pool, id).await?;
+    if versions.is_empty() {
+        return Ok(None);
+    }
+    let n = versions.len();
+    let bare2 = bare.to_path_buf();
+    tokio::task::spawn_blocking(move || bundle::bootstrap_bare(&versions, &bare2))
+        .await
+        .map_err(join_err)?
+        .map_err(join_err)?;
+    Ok(Some(SyncOutcome::Bootstrapped { versions: n }))
 }
 
-/// Тег `v<ver>` указывает ровно на tip main? Ошибки чтения (нет main, нет тега)
-/// считаем «на месте»: sync не должен мешать чтению из-за нечитаемого ref'а —
-/// расхождение счётчиков поймают другие ветки.
+/// Тег `v<ver>` указывает ровно на tip main? Ошибки чтения считаем «на месте»:
+/// sync не должен мешать чтению из-за нечитаемого ref'а. Единственное состояние,
+/// которое так проглатывалось молча, — отсутствие main; его теперь ловит
+/// отдельная ветка ВЫШЕ по коду, до сравнения счётчиков.
 async fn tag_on_tip(bare: &Path, ver: i32) -> Result<bool, sqlx::Error> {
     let bare_chk = bare.to_path_buf();
     tokio::task::spawn_blocking(move || -> bool {

@@ -95,6 +95,10 @@ reasons! {
     GateUnavailable => "GATE_UNAVAILABLE",
     /// Имя тега зарезервировано под версии (`vN`).
     ReservedTagName => "RESERVED_TAG_NAME",
+    /// Репозиторий списка разошёлся с базой так, что автолечение не берётся
+    /// (посторонний тег `v<число>`, расхождение истории). Повтор не поможет —
+    /// нужен оператор по runbook git-projection-catchup.
+    OutOfSync => "OUT_OF_SYNC",
 }
 
 /// Статус с причиной в трейлере.
