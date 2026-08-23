@@ -6,8 +6,11 @@
 //! скриптами фронта (scripts/golden-domain-read.ts) — тот путь кросс-репный
 //! и остаётся ручным.
 //!
-//! Обновление фикстур: UPDATE_GOLDEN=1 TEST_DATABASE_URL=... \
-//!   cargo test --test golden -- --include-ignored
+//! Обновление фикстур — В ДВА ШАГА (см. `compare_or_update`):
+//!   1) UPDATE_GOLDEN=1      TEST_DATABASE_URL=... cargo test --test golden -- --include-ignored
+//!      — показывает, ЧТО изменилось, и падает;
+//!   2) UPDATE_GOLDEN=accept TEST_DATABASE_URL=... cargo test --test golden -- --include-ignored
+//!      — принимает показанное.
 mod support;
 
 use setfork_core::{db, git::bundle, services};
@@ -51,21 +54,77 @@ insert into steps (id, version_id, n, "type", content, title, "desc", command, l
     sqlx::raw_sql(sqlx::AssertSqlSafe(sql)).execute(pool).await.expect("seed fixed dataset");
 }
 
-/// Сравнивает с фикстурой (нормализуя CRLF) или переписывает её при UPDATE_GOLDEN=1.
+/// Показывает первые расхождения построчно — чтобы принимать было ЧТО смотреть.
+fn diff_lines(expected: &str, actual: &str) -> String {
+    let (mut out, mut shown) = (String::new(), 0);
+    let (e, a): (Vec<_>, Vec<_>) = (expected.lines().collect(), actual.lines().collect());
+    for i in 0..e.len().max(a.len()) {
+        let (was, now) =
+            (e.get(i).copied().unwrap_or("<нет строки>"), a.get(i).copied().unwrap_or("<нет строки>"));
+        if was == now {
+            continue;
+        }
+        out.push_str(&format!("  строка {}:\n    было:  {was}\n    стало: {now}\n", i + 1));
+        shown += 1;
+        if shown == 10 {
+            out.push_str("  … остальные расхождения не показаны\n");
+            break;
+        }
+    }
+    if out.is_empty() {
+        "  (различий по строкам нет — расходятся окончания строк или хвост файла)\n".into()
+    } else {
+        out
+    }
+}
+
+/// Сравнивает с фикстурой (нормализуя CRLF) или обновляет её — В ДВА ШАГА.
+///
+/// Обновление намеренно НЕ делается одним движением. Golden-фикстуры — это байтовая
+/// сверка с TS, то есть единственное место, где ловится разъезд двух реализаций
+/// формата. Флаг, который молча переписывает эталон, позволяет узаконить сломанный
+/// вывод одним нажатием — и тогда проверка перестаёт быть проверкой (линза 07 §3;
+/// у скриншот-эталонов фронта процедура двухшаговая ровно поэтому).
+///
+/// Шаг 1: `UPDATE_GOLDEN=1` — показать, ЧТО изменилось, и упасть.
+/// Шаг 2: `UPDATE_GOLDEN=accept` — принять показанное.
 fn compare_or_update(rel: &str, actual: &str) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
-    if std::env::var("UPDATE_GOLDEN").is_ok() {
+    let mode = std::env::var("UPDATE_GOLDEN").unwrap_or_default();
+    let existing = std::fs::read_to_string(&path).ok();
+
+    // Фикстуры ещё нет: сверять не с чем, показывать нечего — пишем сразу.
+    if existing.is_none() && !mode.is_empty() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, actual).unwrap();
+        eprintln!("golden: создан {rel}");
+        return;
+    }
+
+    if mode == "accept" {
         std::fs::write(&path, actual).unwrap();
         eprintln!("golden: обновлён {rel}");
         return;
     }
-    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+
+    let expected = existing.unwrap_or_else(|| {
         panic!(
             "нет фикстуры {rel} — сгенерируй: UPDATE_GOLDEN=1 cargo test --test golden -- --include-ignored"
         )
     });
-    assert_eq!(expected.replace("\r\n", "\n"), actual.replace("\r\n", "\n"), "разъезд golden-фикстуры {rel}");
+    let (e, a) = (expected.replace("\r\n", "\n"), actual.replace("\r\n", "\n"));
+    if e == a {
+        return;
+    }
+    if mode == "1" {
+        panic!(
+            "golden-фикстура {rel} РАЗОШЛАСЬ. Что именно:\n{}\n\
+             Это либо починка формата, либо поломка — решает человек.\n\
+             Принять показанное: UPDATE_GOLDEN=accept cargo test --test golden -- --include-ignored",
+            diff_lines(&e, &a)
+        );
+    }
+    panic!("разъезд golden-фикстуры {rel}:\n{}", diff_lines(&e, &a));
 }
 
 #[tokio::test]
