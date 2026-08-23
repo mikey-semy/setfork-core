@@ -9,7 +9,7 @@
 use crate::db;
 use crate::git::bundle;
 use sqlx::{PgPool, Postgres, Transaction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use tokio::sync::Mutex as AsyncMutex;
@@ -25,6 +25,31 @@ fn root() -> PathBuf {
 /// Путь bare-репо списка. pub — нужен CLI sync-repos и git-first пути записи.
 pub fn repo_path(id: Uuid) -> PathBuf {
     root().join(format!("{}.git", id))
+}
+
+/// Каталоги репозиториев на томе, которым не соответствует ни один список.
+///
+/// Правило намеренно УЗКОЕ: берём только имена вида `<uuid>.git`, всё остальное в
+/// каталоге данных не наше и не наше дело. Вызывающий обязан передать НЕПУСТОЙ
+/// набор живых списков — пустой набор значит «база не та», а не «списков нет».
+pub fn orphan_repo_dirs(root: &std::path::Path, live: &HashSet<Uuid>) -> std::io::Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(root)? {
+        let path = entry?.path();
+        let Some(id) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".git"))
+            .and_then(|stem| Uuid::parse_str(stem).ok())
+        else {
+            continue;
+        };
+        if !live.contains(&id) {
+            out.push(path);
+        }
+    }
+    out.sort();
+    Ok(out)
 }
 
 // Пер-репо async-лок В ПРЕДЕЛАХ ПРОЦЕССА — быстрый путь, чтобы конкурентные
@@ -194,5 +219,36 @@ mod tests {
         let b = Uuid::from_u128(0x0fed_cba9_8765_4321_8877_6655_4433_2211);
         assert_eq!(advisory_key(a), advisory_key(a), "same UUID → same key");
         assert_ne!(advisory_key(a), advisory_key(b), "different UUIDs → different keys");
+    }
+}
+
+#[cfg(test)]
+mod orphan_tests {
+    use super::*;
+
+    /// Правило отбора «лишних» репозиториев проверяется здесь, а не только глазами в
+    /// CLI: команда УДАЛЯЕТ данные, и ошибка в имени каталога стоила бы истории
+    /// живого списка.
+    #[test]
+    fn берём_только_репо_несуществующих_списков() {
+        let root = std::env::temp_dir().join(format!("sf-orphan-{}", Uuid::new_v4()));
+        let live_id = Uuid::new_v4();
+        let dead_id = Uuid::new_v4();
+        for name in [
+            format!("{live_id}.git"),
+            format!("{dead_id}.git"),
+            "не-uuid.git".to_string(), // чужой каталог — не наше дело
+            format!("{dead_id}"),      // без .git — тоже не наше
+            "README".to_string(),
+        ] {
+            std::fs::create_dir_all(root.join(name)).expect("mkdir");
+        }
+        let live: HashSet<Uuid> = [live_id].into_iter().collect();
+
+        let orphans = orphan_repo_dirs(&root, &live).expect("обход");
+
+        assert_eq!(orphans.len(), 1, "лишним признан ровно один каталог: {orphans:?}");
+        assert!(orphans[0].ends_with(format!("{dead_id}.git")));
+        std::fs::remove_dir_all(&root).ok();
     }
 }

@@ -120,6 +120,50 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
+            // Осиротевшие репозитории: список удалён из БД, а его bare-репо осталось
+            // на томе навсегда — с полной историей версий (находка F4 линзы 02).
+            // Это и лишний диск, и содержимое, которое автор считает удалённым.
+            //
+            // РУЧНАЯ команда, а не автоматика: удаление данных обязано быть решением
+            // человека. По умолчанию только ПОКАЗЫВАЕТ; сносит с `--apply`.
+            //   gc-repos [--apply]
+            "gc-repos" => {
+                require_git_data_dir()?;
+                let apply = args.iter().any(|a| a == "--apply");
+                let root = std::path::PathBuf::from(std::env::var("GIT_DATA_DIR")?);
+                let ids: Vec<uuid::Uuid> =
+                    sqlx::query_scalar("select id from templates").fetch_all(&pool).await?;
+                // Fail-closed: пустая выборка почти наверняка значит «не та база», а не
+                // «списков нет». Снести по такой выборке ВЕСЬ том нельзя.
+                if ids.is_empty() {
+                    return Err(
+                        "в базе нет ни одного списка — отказываюсь считать все репозитории лишними".into()
+                    );
+                }
+                let live: std::collections::HashSet<uuid::Uuid> = ids.into_iter().collect();
+                let paths = git::repo::orphan_repo_dirs(&root, &live)?;
+                let (mut orphans, mut bytes) = (0u64, 0u64);
+                for path in paths {
+                    let size = git::bundle::repo_size_bytes(&path);
+                    orphans += 1;
+                    bytes += size;
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+                    println!("  {} ({} КБ){}", name, size / 1024, if apply { " — удаляю" } else { "" });
+                    if apply {
+                        std::fs::remove_dir_all(&path)?;
+                    }
+                }
+                println!(
+                    "gc-repos: orphan repos {orphans}, {} КБ{}",
+                    bytes / 1024,
+                    if apply {
+                        " — удалены"
+                    } else {
+                        " (показ; удалить: gc-repos --apply)"
+                    }
+                );
+                return Ok(());
+            }
             // Одноразовый догон после снятия ленивой досыпки (Ф1) и общий
             // инструмент выравнивания: каждому списку — репо, синхронное с БД.
             // Идемпотентен, безопасен к повторному запуску. Конфликты (посторонний
