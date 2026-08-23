@@ -221,19 +221,25 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                         .collect()
                 })
                 .unwrap_or_default();
-            // Блочная модель: type/content несём только у не-step блоков.
+            // ЧТЕНИЕ СТРОГОЕ, и это осознанно. Раньше здесь стояло `.ok()`, которое
+            // глушило ЛЮБУЮ беду декодирования и подставляло дефолт. От отсутствия
+            // колонки оно не спасало вовсе — все колонки перечислены в SELECT выше,
+            // и пропавшую база не отдаст в принципе, — а вот СМЕНУ ТИПА прятало:
+            // замер линзы 04 §3 показал, что после `needs_human boolean → text` список
+            // читается успешно и у всех шагов пометка «нужен человек» становится
+            // false. Молчаливая потеря на чтении хуже громкого отказа: сайт остаётся
+            // рабочим и врёт.
             let block_type: Option<String> =
-                sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| !is_step_type(t));
+                sr.try_get::<Option<String>, _>("type")?.filter(|t| !is_step_type(t));
             let content: serde_json::Value = if block_type.is_some() {
-                sr.try_get::<serde_json::Value, _>("content").unwrap_or(serde_json::Value::Null)
+                sr.try_get::<Option<serde_json::Value>, _>("content")?.unwrap_or(serde_json::Value::Null)
             } else {
                 serde_json::Value::Null
             };
             let vid: Uuid = sr.get("version_id");
             // Идентичность блока сквозь версии. Колонка обязательна в схеме:
             // деплой Rust идёт ПОСЛЕ применения схемы (db:push), как и раньше.
-            let block_id: Option<String> =
-                sr.try_get::<Option<Uuid>, _>("block_id").ok().flatten().map(|u| u.to_string());
+            let block_id: Option<String> = sr.try_get::<Option<Uuid>, _>("block_id")?.map(|u| u.to_string());
             steps_by_ver.entry(vid).or_default().push(SerStep {
                 n: sr.get("n"),
                 block_type,
@@ -243,15 +249,14 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 desc: loc(&sr.get::<serde_json::Value, _>("desc")),
                 command: sr.get::<String, _>("command"),
                 // Ф2a-довесок: картинка и пометка — честное содержимое канона.
-                image_key: sr.try_get::<Option<String>, _>("image_key").ok().flatten(),
+                image_key: sr.try_get::<Option<String>, _>("image_key")?,
                 level: sr.get::<String, _>("level"),
-                needs_human: sr.try_get::<bool, _>("needs_human").unwrap_or(false),
+                needs_human: sr.try_get::<Option<bool>, _>("needs_human")?.unwrap_or(false),
                 needs_human_ask: sr
-                    .try_get::<serde_json::Value, _>("needs_human_ask")
-                    .ok()
+                    .try_get::<Option<serde_json::Value>, _>("needs_human_ask")?
                     .map(|v| loc(&v))
                     .filter(|a| !a.is_empty()),
-                danger: sr.try_get::<bool, _>("danger").unwrap_or(false),
+                danger: sr.try_get::<Option<bool>, _>("danger")?.unwrap_or(false),
                 why: loc(&sr.get::<serde_json::Value, _>("why")),
                 section: loc(&sr.get::<serde_json::Value, _>("section")),
                 subtasks,
@@ -534,16 +539,19 @@ pub(crate) async fn current_marks(
     .await?;
     let mut out = std::collections::HashMap::new();
     for r in rows {
-        if let Ok(Some(id)) = r.try_get::<Option<Uuid>, _>("block_id") {
+        // Строго, по той же причине, что и в load_bundle_data: `.ok()` здесь могло
+        // спрятать только смену типа, а не отсутствие колонки, и превращало разъезд
+        // схемы в тихую потерю надстроек (линза 04 §3).
+        if let Some(id) = r.try_get::<Option<Uuid>, _>("block_id")? {
             out.insert(
                 id,
                 CarryOver {
-                    needs_human: r.try_get::<bool, _>("needs_human").unwrap_or(false),
+                    needs_human: r.try_get::<Option<bool>, _>("needs_human")?.unwrap_or(false),
                     needs_human_ask: r
-                        .try_get::<serde_json::Value, _>("needs_human_ask")
+                        .try_get::<Option<serde_json::Value>, _>("needs_human_ask")?
                         .unwrap_or(serde_json::json!({})),
-                    image_key: r.try_get::<Option<String>, _>("image_key").ok().flatten(),
-                    danger: r.try_get::<bool, _>("danger").unwrap_or(false),
+                    image_key: r.try_get::<Option<String>, _>("image_key")?,
+                    danger: r.try_get::<Option<bool>, _>("danger")?.unwrap_or(false),
                 },
             );
         }

@@ -245,3 +245,46 @@ async fn блок_с_негодным_content_не_роняет_проекцию
     }
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// РАЗЪЕЗД СХЕМЫ ОБЯЗАН БЫТЬ ГРОМКИМ.
+///
+/// Линза 04 §3, замер: раньше чтение шагов глушило любую беду декодирования и
+/// подставляло дефолт. От отсутствия колонки это не спасало (все колонки названы в
+/// SELECT — пропавшую база не отдаст), зато прятало СМЕНУ ТИПА: после
+/// `needs_human boolean → text` список читался успешно, и у всех шагов пометка
+/// «здесь нужен человек» становилась false. Сайт остаётся рабочим и врёт — хуже,
+/// чем честный отказ.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn смена_типа_колонки_не_проходит_молча() {
+    let pool = support::pool_with_schema().await;
+    let id = seed(
+        &pool,
+        "loudtype",
+        None,
+        "($1, 1, '55555555-5555-5555-5555-555555555555', 'step', '{}', '{\"en\":\"Шаг\"}', '{}', '', \
+          null, 'required', true, '{}', false, '{}', '{}', '[]', '[]')",
+    )
+    .await;
+    assert!(db::load_bundle_data(&pool, id).await.expect("до правки схемы")[0].steps[0].needs_human);
+
+    sqlx::query("alter table steps alter column needs_human type text using needs_human::text")
+        .execute(&pool)
+        .await
+        .expect("смена типа");
+
+    // Свежий пул: в проде после применения схемы соединения новые, и кэш планов
+    // (он даёт СВОЙ отказ на старом соединении) ситуацию не спасает.
+    let url = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let schema: String = sqlx::query_scalar("select current_schema()").fetch_one(&pool).await.expect("схема");
+    let sep = if url.contains('?') { '&' } else { '?' };
+    let fresh = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&format!("{url}{sep}options=-csearch_path%3D{schema}"))
+        .await
+        .expect("свежий пул");
+
+    let res = db::load_bundle_data(&fresh, id).await;
+
+    assert!(res.is_err(), "чтение обязано ОТКАЗАТЬ, а не отдать список с потерянными пометками");
+}
