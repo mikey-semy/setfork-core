@@ -456,11 +456,14 @@ pub fn max_tag_version(bare: &Path) -> i32 {
 /// Выравнивание спрашивает и то и другое на КАЖДОМ чтении списка (его зовёт
 /// `ensure_repo`), поэтому два отдельных чтения означали два открытия репо и два
 /// прыжка в блокирующий пул на ровном месте.
-pub fn refs_state(bare: &Path) -> (bool, i32) {
-    match Repository::open_bare(bare) {
-        Ok(r) => (r.refname_to_id(MAIN_REF).is_ok(), max_tag_in(&r)),
-        Err(_) => (false, 0),
-    }
+/// `None` — репозиторий НЕ ОТКРЫЛСЯ. Это отдельный ответ, а не `(false, 0)`:
+/// «каталог есть, но не читается» (обрубленный HEAD после сбоя, частичное
+/// восстановление тома, права/дескрипторы) неотличимо от «ветки и тегов нет», и
+/// лечение приняло бы битое репо за пустое — то есть переписало бы историю из БД
+/// вместо того, чтобы громко отказать.
+pub fn refs_state(bare: &Path) -> Option<(bool, i32)> {
+    let repo = Repository::open_bare(bare).ok()?;
+    Some((repo.refname_to_id(MAIN_REF).is_ok(), max_tag_in(&repo)))
 }
 
 fn max_tag_in(repo: &Repository) -> i32 {

@@ -150,6 +150,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
                     println!("  {} ({} КБ){}", name, size / 1024, if apply { " — удаляю" } else { "" });
                     if apply {
+                        // Список мог родиться ПОКА мы обходили том: снимок живых id
+                        // сделан до обхода, и по нему свежий репозиторий выглядит
+                        // лишним. Перед сносом спрашиваем базу заново — версии из неё
+                        // восстановимы, а принятые пуши, ветки и человеческие теги нет.
+                        let stem = name.strip_suffix(".git").unwrap_or(&name);
+                        let still_gone: Option<uuid::Uuid> =
+                            sqlx::query_scalar("select id from templates where id = $1::uuid")
+                                .bind(stem)
+                                .fetch_optional(&pool)
+                                .await?;
+                        if still_gone.is_some() {
+                            println!("    {name}: список появился за время обхода — не трогаю");
+                            orphans -= 1;
+                            bytes -= size;
+                            continue;
+                        }
                         std::fs::remove_dir_all(&path)?;
                     }
                 }

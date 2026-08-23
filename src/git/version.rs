@@ -65,8 +65,14 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
     }
 
     let bare_state = bare.to_path_buf();
-    let (has_main, have) =
-        tokio::task::spawn_blocking(move || bundle::refs_state(&bare_state)).await.map_err(join_err)?;
+    let Some((has_main, have)) =
+        tokio::task::spawn_blocking(move || bundle::refs_state(&bare_state)).await.map_err(join_err)?
+    else {
+        // Каталог есть, а репозиторий не открывается. Молчать нельзя, и лечить
+        // пересборкой — тем более: битое репо не пустое, в нём могут лежать
+        // принятые пуши и ветки предложений.
+        return Err(join_err(format!("repo at {} exists but cannot be opened", bare.display())));
+    };
 
     // Каталог на месте, а ГЛАВНОЙ ВЕТКИ нет. По счётчикам это состояние
     // неотличимо от синхронного (теги-то целы), поэтому ни одна ветка ниже его не
@@ -99,8 +105,13 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
                 other => other,
             });
         }
-        // Тегов нет вовсе — восстанавливать нечего, история только в БД.
-        if let Some(outcome) = bootstrap_from_db(pool, id, bare).await? {
+        // Пересобираем из БД ТОЛЬКО когда тегов нет вовсе. Если теги есть, а нужного
+        // нет (дыра в истории: `v1, v2, v5` при `current = 3`), пересборка переписала
+        // бы целую историю и форсом сдвинула бы все теги — под видом лечения. Такое
+        // расхождение обязано дойти до человека конфликтом, а не «вылечиться».
+        if have == 0
+            && let Some(outcome) = bootstrap_from_db(pool, id, bare).await?
+        {
             tracing::warn!(%id, "repo had neither main nor version tags, rebuilt from db (heal)");
             return Ok(outcome);
         }

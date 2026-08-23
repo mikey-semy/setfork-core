@@ -251,3 +251,89 @@ async fn посторонний_тег_выше_версии_не_станови
 
     std::fs::remove_dir_all(&root).ok();
 }
+
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn нечитаемое_репо_не_лечится_пересборкой() {
+    // Каталог есть, а репозиторий не открывается: обрубленный HEAD после сбоя,
+    // частичное восстановление тома, права. Раньше это состояние было НЕОТЛИЧИМО от
+    // «ветки и тегов нет» — и лечение приняло бы битое репо за пустое, переписав
+    // историю из БД поверх принятых пушей и веток предложений (находка своего
+    // прохода ревью по #100).
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "brokenrepo").await;
+    let list_id: Uuid = sqlx::query_scalar(
+        "insert into templates (owner_id, slug, title, current_version) \
+         values ($1, 'broken', '{\"en\":\"Broken\"}', 1) returning id",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .expect("seed template");
+    sqlx::query("insert into template_versions (template_id, version, note) values ($1, 1, 'v1')")
+        .bind(list_id)
+        .execute(&pool)
+        .await
+        .expect("seed v1");
+
+    let root = std::env::temp_dir().join(format!("setfork-broken-{}", Uuid::new_v4()));
+    let bare = root.join("repo.git");
+    std::fs::create_dir_all(bare.join("objects")).expect("каталог");
+    std::fs::write(bare.join("HEAD"), "мусор вместо ссылки\n").expect("битый HEAD");
+
+    let res = version::sync_repo_with_db(&pool, list_id, &bare).await;
+
+    assert!(res.is_err(), "нечитаемое репо обязано ОТКАЗАТЬ, а не пересобраться молча");
+    assert!(!bare.join("refs/heads/main").exists(), "лечение не трогало каталог");
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn дыра_в_тегах_не_лечится_пересборкой() {
+    // Теги есть, но нужного нет: `v1, v2` при `current_version = 3` и пропавшем main.
+    // Пересборка переписала бы целую историю и форсом сдвинула бы теги — под видом
+    // лечения. Такое обязано дойти до человека, а не «вылечиться».
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "taggap").await;
+    let list_id: Uuid = sqlx::query_scalar(
+        "insert into templates (owner_id, slug, title, current_version) \
+         values ($1, 'gap', '{\"en\":\"Gap\"}', 1) returning id",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .expect("seed template");
+    sqlx::query("insert into template_versions (template_id, version, note) values ($1, 1, 'v1')")
+        .bind(list_id)
+        .execute(&pool)
+        .await
+        .expect("seed v1");
+
+    let root = std::env::temp_dir().join(format!("setfork-gap-{}", Uuid::new_v4()));
+    let bare = root.join("repo.git");
+    version::sync_repo_with_db(&pool, list_id, &bare).await.expect("материализация");
+    let history = commits_on_main(&bare);
+
+    // База ушла вперёд, а в репо появился ПОСТОРОННИЙ старший тег: нужного `v3` нет.
+    sqlx::query("update templates set current_version = 3 where id = $1")
+        .bind(list_id)
+        .execute(&pool)
+        .await
+        .expect("сдвиг current_version");
+    {
+        let repo = git2::Repository::open_bare(&bare).expect("open");
+        let obj = repo.find_object(history[0], Some(git2::ObjectType::Commit)).expect("obj");
+        repo.tag_lightweight("v5", &obj, true).expect("тег v5");
+        repo.find_reference("refs/heads/main").expect("main").delete().expect("удалить main");
+    }
+
+    let outcome = version::sync_repo_with_db(&pool, list_id, &bare).await.expect("выравнивание");
+
+    assert_eq!(outcome, SyncOutcome::Conflict { have: 5, current: 3 }, "дыра названа конфликтом");
+    let repo = git2::Repository::open_bare(&bare).expect("open");
+    assert_eq!(repo.refname_to_id("refs/tags/v1").expect("тег v1"), history[0], "теги не сдвинуты");
+
+    std::fs::remove_dir_all(&root).ok();
+}
