@@ -126,8 +126,10 @@ pub fn list_json(v: &VersionData) -> String {
             m.insert("command".into(), serde_json::json!(s.command));
             // Ф2a-довесок: новые поля пишутся ТОЛЬКО при наличии — байты списков
             // без картинок/пометок не меняются (та же дисциплина, что blockId/kind).
-            if let Some(ik) = &s.image_key {
-                m.insert("imageKey".into(), serde_json::Value::String(ik.clone()));
+            // Пустой ключ в файл не пишем: в каноне пустое значение ЗНАЧИТ «снять
+            // картинку», и писать его у шага, где картинки и так нет, — писать шум.
+            if let Some(ik) = s.image_key.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+                m.insert("imageKey".into(), serde_json::Value::String(ik.to_string()));
             }
             m.insert("level".into(), serde_json::json!(s.level));
             if s.needs_human {
@@ -338,7 +340,13 @@ pub const GITATTRIBUTES: &str = "README.md linguist-generated=true\n";
 /// корне обязан быть отвергнут, каталог `steps` проверяется по содержимому.
 pub fn tree_path_allowed(path: &str) -> bool {
     matches!(path, "README.md" | "list.json" | ".gitattributes")
-        || (path.starts_with("steps/") && path.ends_with(".md") && !path[6..].contains('/'))
+        || path
+            .strip_prefix("steps/")
+            .and_then(|name| name.strip_suffix(".md"))
+            // Имя обязано быть НЕПУСТЫМ: `steps/.md` шелльное правило (`[^/]+`)
+            // отвергает, а прежняя проверка здесь пропускала — две реализации
+            // одного правила расходились, и мягче была наша (F7 линзы 02).
+            .is_some_and(|stem| !stem.is_empty() && !stem.contains('/'))
 }
 
 /// Полный набор файлов версии (Ф2b): ровно ДВА представления — README.md

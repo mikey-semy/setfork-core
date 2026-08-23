@@ -160,6 +160,68 @@ fn обычный_файл_с_именем_steps_отвергается() {
     assert!(!out.status.success(), "файл steps в корне обязан быть отвергнут: {err}");
 }
 
+// Имена версий принадлежат серверу — и на ОБЕИХ дверях. На веб-двери правило
+// стояло с самого начала (`ReservedTagName`), а через git владелец мог поставить
+// `v99` руками: старший тег становился 99 при текущей версии 1, выравнивание
+// объявляло Conflict, и запись в список останавливалась до оператора
+// (05-F2, замер соседней сессии).
+#[test]
+fn тег_с_именем_версии_не_принимается_пушем() {
+    let root = tmp("tree-vtag");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::write(work.join("list.json"), "{}").ok(); // содержимое не важно: судим ИМЯ рефа
+    git_ok(&work, &["tag", "v99"]);
+    git_ok(&work, &["tag", "v1.0"]);
+    git_ok(&work, &["tag", "release-1"]);
+
+    let out = git(&work, &["push", "origin", "refs/tags/v99"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "имя версии обязано быть отвергнуто: {err}");
+    assert!(err.contains("v99"), "отказ обязан назвать сам тег: {err}");
+
+    // Человеческие имена остаются доступными — правило про «v и только цифры».
+    for name in ["v1.0", "release-1"] {
+        let out = git(&work, &["push", "origin", &format!("refs/tags/{name}")]);
+        assert!(out.status.success(), "тег {name} — не имя версии: {}", String::from_utf8_lossy(&out.stderr));
+    }
+}
+
+// Линза 02 §7 нашла ДВА расхождения между Rust-правилом и его шелльным близнецом
+// в хуке. Оба здесь и закреплены: правило одно, реализации две, и разъезжаться
+// им нельзя ни в какую сторону.
+#[test]
+fn правило_путей_совпадает_с_хуком_на_граничных_именах() {
+    // F7: пустое имя. Шелльное `[^/]+` его отвергает, Rust — пропускал.
+    assert!(!tree_path_allowed("steps/.md"), "пустое имя файла — не путь канона");
+    assert!(!tree_path_allowed("steps/"), "каталог сам по себе не разрешён");
+    assert!(!tree_path_allowed("steps/a/b.md"), "вложенность запрещена обеими реализациями");
+    // Разрешённое остаётся разрешённым, включая не-ASCII (см. пробу пуша ниже).
+    assert!(tree_path_allowed("steps/шаг.md"), "кириллица в имени законна");
+    assert!(tree_path_allowed("steps/01-first.md"));
+    assert!(
+        tree_path_allowed("README.md")
+            && tree_path_allowed("list.json")
+            && tree_path_allowed(".gitattributes")
+    );
+}
+
+// F6: хук судил по ЭКРАНИРОВАННОМУ пути — `ls-tree` заключает не-ASCII имена в
+// кавычки, и якорное правило по ним не совпадало. Законный файл отвергался из-за
+// формы вывода, а не из-за содержания. Проверяем настоящим пушем.
+#[test]
+fn имя_с_кириллицей_проходит_хук() {
+    let root = tmp("tree-utf8");
+    let (_bare, work) = repo_pair(&root.0);
+    std::fs::create_dir_all(work.join("steps")).expect("mkdir steps");
+    std::fs::write(work.join("steps").join("шаг.md"), "# шаг\n").expect("файл с кириллицей");
+    git_ok(&work, &["add", "-A"]);
+    git_ok(&work, &["commit", "-q", "-m", "шаг с кириллицей"]);
+
+    let out = git(&work, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "законное имя не должно отвергаться из-за кавычек в выводе ls-tree: {err}");
+}
+
 // Регрессия P2 авто-ревью: гитлинк libgit2 отдаёт как ObjectType::Commit, и
 // «судим только блобы» пропускало подмодуль мимо правила целиком.
 #[test]

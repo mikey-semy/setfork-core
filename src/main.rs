@@ -120,6 +120,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 return Ok(());
             }
+            // Осиротевшие репозитории: список удалён из БД, а его bare-репо осталось
+            // на томе навсегда — с полной историей версий (находка F4 линзы 02).
+            // Это и лишний диск, и содержимое, которое автор считает удалённым.
+            //
+            // РУЧНАЯ команда, а не автоматика: удаление данных обязано быть решением
+            // человека. По умолчанию только ПОКАЗЫВАЕТ; сносит с `--apply`.
+            //   gc-repos [--apply]
+            "gc-repos" => {
+                require_git_data_dir()?;
+                let apply = args.iter().any(|a| a == "--apply");
+                let root = std::path::PathBuf::from(std::env::var("GIT_DATA_DIR")?);
+                let ids: Vec<uuid::Uuid> =
+                    sqlx::query_scalar("select id from templates").fetch_all(&pool).await?;
+                // Fail-closed: пустая выборка почти наверняка значит «не та база», а не
+                // «списков нет». Снести по такой выборке ВЕСЬ том нельзя.
+                if ids.is_empty() {
+                    return Err(
+                        "в базе нет ни одного списка — отказываюсь считать все репозитории лишними".into()
+                    );
+                }
+                let live: std::collections::HashSet<uuid::Uuid> = ids.into_iter().collect();
+                let paths = git::repo::orphan_repo_dirs(&root, &live)?;
+                let (mut orphans, mut bytes) = (0u64, 0u64);
+                for path in paths {
+                    let size = git::bundle::repo_size_bytes(&path);
+                    orphans += 1;
+                    bytes += size;
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+                    println!("  {} ({} КБ){}", name, size / 1024, if apply { " — удаляю" } else { "" });
+                    if apply {
+                        // Список мог родиться ПОКА мы обходили том: снимок живых id
+                        // сделан до обхода, и по нему свежий репозиторий выглядит
+                        // лишним. Перед сносом спрашиваем базу заново — версии из неё
+                        // восстановимы, а принятые пуши, ветки и человеческие теги нет.
+                        let stem = name.strip_suffix(".git").unwrap_or(&name);
+                        let still_gone: Option<uuid::Uuid> =
+                            sqlx::query_scalar("select id from templates where id = $1::uuid")
+                                .bind(stem)
+                                .fetch_optional(&pool)
+                                .await?;
+                        if still_gone.is_some() {
+                            println!("    {name}: список появился за время обхода — не трогаю");
+                            orphans -= 1;
+                            bytes -= size;
+                            continue;
+                        }
+                        std::fs::remove_dir_all(&path)?;
+                    }
+                }
+                println!(
+                    "gc-repos: orphan repos {orphans}, {} КБ{}",
+                    bytes / 1024,
+                    if apply {
+                        " — удалены"
+                    } else {
+                        " (показ; удалить: gc-repos --apply)"
+                    }
+                );
+                return Ok(());
+            }
             // Одноразовый догон после снятия ленивой досыпки (Ф1) и общий
             // инструмент выравнивания: каждому списку — репо, синхронное с БД.
             // Идемпотентен, безопасен к повторному запуску. Конфликты (посторонний
@@ -135,6 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
                 let total = rows.len();
                 let (mut in_sync, mut boot, mut appended, mut projected, mut conflicts) = (0, 0, 0, 0, 0);
+                let mut restored = 0;
                 for (id, handle, slug) in rows {
                     let bare = git::repo::repo_path(id);
                     let _guard = git::repo::repo_guard(&pool, id).await?;
@@ -143,6 +204,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(git::version::SyncOutcome::Bootstrapped { versions }) => {
                             boot += 1;
                             println!("  {handle}/{slug}: repo created ({versions} versions)");
+                        }
+                        Ok(git::version::SyncOutcome::MainRestored { version }) => {
+                            restored += 1;
+                            println!("  {handle}/{slug}: main was missing, restored from tag v{version}");
                         }
                         Ok(git::version::SyncOutcome::Appended { from, to }) => {
                             appended += 1;
@@ -166,8 +231,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 println!(
-                    "sync-repos: total {total}; in sync {in_sync}, created {boot}, caught up {appended}, \
-                     projected {projected}, conflicts {conflicts}"
+                    "sync-repos: total {total}; in sync {in_sync}, created {boot}, main restored {restored}, \
+                     caught up {appended}, projected {projected}, conflicts {conflicts}"
                 );
                 if conflicts > 0 {
                     return Err(format!("{conflicts} repos need manual intervention").into());

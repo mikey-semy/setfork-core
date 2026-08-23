@@ -19,6 +19,10 @@ const V1_ID: &str = "10000000-0000-0000-0000-000000000001";
 const V2_ID: &str = "20000000-0000-0000-0000-000000000002";
 
 async fn seed_fixed(pool: &PgPool) {
+    // type/content засеваются ЯВНО ('step'/{}), а не NULL: в схеме фронта обе колонки
+    // NOT NULL, и фикстура в форме NULL описывала строку, которой в настоящей базе
+    // быть не может (линза 04 §1). На вывод это не влияет — 'step' и NULL значат для
+    // канона одно и то же, — но фикстура снова описывает реальность.
     // created_at фиксированы: ts версии участвует в SHA коммита материализации.
     let sql = format!(
         r#"
@@ -32,14 +36,14 @@ insert into template_versions (id, template_id, version, note, created_at) value
  ('{V1_ID}', '{LIST_ID}', 1, 'initial',    '2026-01-02T03:04:05Z'),
  ('{V2_ID}', '{LIST_ID}', 2, 'add config', '2026-01-02T10:20:30Z');
 insert into steps (id, version_id, n, "type", content, title, "desc", command, level, why, section, subtasks, refs) values
- ('30000000-0000-0000-0000-000000000001', '{V1_ID}', 1, null, null, '{{"en":"Install Redis"}}', '{{"en":"Grab the binary"}}', 'apt install redis',
+ ('30000000-0000-0000-0000-000000000001', '{V1_ID}', 1, 'step', '{{}}', '{{"en":"Install Redis"}}', '{{"en":"Grab the binary"}}', 'apt install redis',
   'required', '{{"en":"speed"}}', '{{"en":"Setup"}}',
   '[{{"en":"check version"}}]', '[{{"label":{{"en":"docs"}},"url":"https://redis.io"}}]'),
- ('30000000-0000-0000-0000-000000000002', '{V2_ID}', 1, null, null, '{{"en":"Install Redis"}}', '{{"en":"Grab the binary"}}', 'apt install redis',
+ ('30000000-0000-0000-0000-000000000002', '{V2_ID}', 1, 'step', '{{}}', '{{"en":"Install Redis"}}', '{{"en":"Grab the binary"}}', 'apt install redis',
   'required', '{{"en":"speed"}}', '{{"en":"Setup"}}', '[]', '[]'),
  ('30000000-0000-0000-0000-000000000003', '{V2_ID}', 2, 'text', '{{"md":"Intro **context**"}}', '{{}}', '{{}}', '',
   'required', '{{}}', '{{}}', '[]', '[]'),
- ('30000000-0000-0000-0000-000000000004', '{V2_ID}', 3, null, null, '{{"en":"Configure"}}', '{{}}', 'redis-cli config set',
+ ('30000000-0000-0000-0000-000000000004', '{V2_ID}', 3, 'step', '{{}}', '{{"en":"Configure"}}', '{{}}', 'redis-cli config set',
   'recommended', '{{}}', '{{"en":"Setup"}}', '[]', '[]');
 "#
     );

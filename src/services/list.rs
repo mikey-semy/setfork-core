@@ -317,9 +317,14 @@ fn web_version_status(e: version::WebVersionError) -> Status {
                 "list moved on: it is at v{current}, the edit is based on v{expected} — read it again and re-apply"
             ),
         ),
-        version::WebVersionError::OutOfSync { have, current } => Status::failed_precondition(format!(
-            "repo out of sync (git v{have}, db v{current}) — см. runbook git-projection-catchup"
-        )),
+        // FAILED_PRECONDITION с причиной: повтор бессмыслен (в отличие от STALE),
+        // это состояние чинит оператор. Без причины в трейлере фронт не мог отличить
+        // его от прочих предусловий и показывал безымянный сбой.
+        version::WebVersionError::OutOfSync { have, current } => crate::reason::status(
+            Code::FailedPrecondition,
+            crate::reason::Reason::OutOfSync,
+            format!("repo out of sync (git v{have}, db v{current}) - see runbook git-projection-catchup"),
+        ),
         version::WebVersionError::Db(e) => db_status(e),
         version::WebVersionError::Git(e) => Status::internal(format!("git commit failed: {e}")),
         // Канон записан, проекция отстала: повтор сохранения сам долечит

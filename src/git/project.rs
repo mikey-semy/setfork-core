@@ -216,7 +216,11 @@ fn parse_steps(steps_raw: &[RawStep]) -> Vec<ProjStep> {
             continue;
         }
         let step = ProjStep {
-            image_key: s.image_key.clone().filter(|k| !k.trim().is_empty()),
+            // Пустое значение НЕ схлопываем в «поля нет»: у картинки тристейт, и
+            // пустой ключ — это «снять картинку». Схлопывание здесь и делало снятие
+            // через git невозможным (F9 линзы 02): проекция видела `None` и честно
+            // возвращала старый ключ переносом.
+            image_key: s.image_key.clone(),
             needs_human: s.needs_human,
             needs_human_ask: s.needs_human_ask.clone().filter(|a| !a.trim().is_empty()),
             danger: s.danger,
@@ -398,6 +402,16 @@ mod tests {
         assert_eq!(strip_v_prefix("version 2"), "version 2"); // не vN:
         assert_eq!(strip_v_prefix("v7: "), "");
         assert_eq!(strip_v_prefix("v: x"), "v: x"); // «v» без цифр — не префикс версии
+        // Срез идёт по БАЙТАМ, и линза 02 §8 требует проверить его многобайтовыми
+        // строками. Паника невозможна по построению: счётчик двигают только сравнения
+        // с ASCII, а байт-продолжение UTF-8 (>= 0x80) ни одному из них не равен, значит
+        // срез всегда попадает на границу символа. Проверка держит это утверждение —
+        // достаточно кому-то добавить в цикл разбор не-ASCII, и она покраснеет паникой.
+        assert_eq!(strip_v_prefix("v12: шаг «первый» — ещё"), "шаг «первый» — ещё");
+        assert_eq!(strip_v_prefix("v9:  🚀 запуск"), "🚀 запуск");
+        assert_eq!(strip_v_prefix("вводная: не версия"), "вводная: не версия");
+        assert_eq!(strip_v_prefix("v5:"), ""); // «v5:» без текста — заметка пустая
+        assert_eq!(strip_v_prefix("💥"), "💥");
     }
 
     // ── parse_steps: правила набора/фильтрации ────────────────────────────────

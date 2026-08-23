@@ -25,6 +25,8 @@ pub enum SyncOutcome {
     InSync,
     /// Репо не было на диске — материализовано из истории БД целиком.
     Bootstrapped { versions: usize },
+    /// Ветка `main` пропала при целых объектах — возвращена на коммит своего тега.
+    MainRestored { version: i32 },
     /// Git отставал от БД (наследие ленивой досыпки) — версии дописаны.
     Appended { from: i32, to: i32 },
     /// Git был на одну версию впереди (сбой прошлой проекции) — tip спроецирован в БД.
@@ -38,6 +40,8 @@ pub enum SyncOutcome {
 ///
 /// Ветки:
 /// * репо нет → bootstrap всей истории из БД (восстановление/первое касание);
+/// * каталог есть, а `main` нет → вернуть `main` на коммит старшего тега `vN`
+///   (история цела, пропала ссылка); тегов нет вовсе → bootstrap из БД;
 /// * `max_tag == current`, но main УШЁЛ ВПЕРЁД тега → непроецированный
 ///   push/merge-коммит (проекция упала ДО постановки тега) — спроецировать tip;
 /// * `max_tag < current` → дописать недостающие версии (одноразовый долг
@@ -56,23 +60,76 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
     };
 
     if !bare.exists() {
-        let versions = db::load_bundle_data(pool, id).await?;
-        if versions.is_empty() {
-            return Ok(SyncOutcome::InSync); // материализовать нечего
-        }
-        let n = versions.len();
-        let bare2 = bare.to_path_buf();
-        tokio::task::spawn_blocking(move || bundle::bootstrap_bare(&versions, &bare2))
-            .await
-            .map_err(join_err)?
-            .map_err(join_err)?;
-        return Ok(SyncOutcome::Bootstrapped { versions: n });
+        // Версий в БД нет вовсе — материализовать нечего.
+        return Ok(bootstrap_from_db(pool, id, bare).await?.unwrap_or(SyncOutcome::InSync));
     }
 
-    let bare_tag = bare.to_path_buf();
-    let have =
-        tokio::task::spawn_blocking(move || bundle::max_tag_version(&bare_tag)).await.map_err(join_err)?;
+    let bare_state = bare.to_path_buf();
+    let Some((has_main, have)) =
+        tokio::task::spawn_blocking(move || bundle::refs_state(&bare_state)).await.map_err(join_err)?
+    else {
+        // Каталог есть, а репозиторий не открывается. Молчать нельзя, и лечить
+        // пересборкой — тем более: битое репо не пустое, в нём могут лежать
+        // принятые пуши и ветки предложений.
+        return Err(join_err(format!("repo at {} exists but cannot be opened", bare.display())));
+    };
 
+    // Каталог на месте, а ГЛАВНОЙ ВЕТКИ нет. По счётчикам это состояние
+    // неотличимо от синхронного (теги-то целы), поэтому ни одна ветка ниже его не
+    // берёт, а `tag_on_tip` на нечитаемом ref'е отвечает «тег на вершине» — и репо
+    // оставалось без main навсегда: клон пуст, зеркало пусто, само не починится.
+    // Замер линзы 02 §4: после удаления main снимок отдавал null и после
+    // выравнивания ветка не появлялась.
+    if !has_main {
+        // Объекты и теги целы — значит история НА МЕСТЕ, пропала только ссылка.
+        // Возвращаем main на коммит нашего тега, а не пересобираем из БД:
+        // `load_bundle_data` берёт СЕГОДНЯШНЮЮ мету списка для ВСЕХ версий, поэтому
+        // после любой правки названия пересборка дала бы другие деревья и другие
+        // SHA, форсом перевесила бы теги vN на эту синтетику и выбросила принятые
+        // пуши и коммиты слияния — то есть уничтожила бы ровно тот канон, который
+        // лечение обязано спасти (находка авто-ревью на #100, P1).
+        //
+        // Тег берём НЕ старший, а тот, что отвечает ТЕКУЩЕЙ версии базы (или ниже,
+        // если БД ушла вперёд). Восстановление по старшему подняло бы main на
+        // ПОСТОРОННИЙ тег `v<current+1>` — до починки #59 такое имя мог занять
+        // релиз, — и следующая же проверка сочла бы это хвостом прерванной записи и
+        // спроецировала чужой коммит новой версией, причём на обычном ЧТЕНИИ
+        // (второй P1 авто-ревью на #100). Ниже своей версии подниматься безопасно:
+        // это наш собственный коммит, а недостающие версии допишет досыпка.
+        let restore_ver = have.min(current);
+        if restore_ver > 0 && restore_main_from_tag(bare, restore_ver).await? {
+            tracing::warn!(%id, version = restore_ver, "main was missing, restored from tag v{restore_ver} (heal)");
+            let outcome = align_by_counters(pool, id, bare, current, have).await?;
+            return Ok(match outcome {
+                SyncOutcome::InSync => SyncOutcome::MainRestored { version: restore_ver },
+                other => other,
+            });
+        }
+        // Пересобираем из БД ТОЛЬКО когда тегов нет вовсе. Если теги есть, а нужного
+        // нет (дыра в истории: `v1, v2, v5` при `current = 3`), пересборка переписала
+        // бы целую историю и форсом сдвинула бы все теги — под видом лечения. Такое
+        // расхождение обязано дойти до человека конфликтом, а не «вылечиться».
+        if have == 0
+            && let Some(outcome) = bootstrap_from_db(pool, id, bare).await?
+        {
+            tracing::warn!(%id, "repo had neither main nor version tags, rebuilt from db (heal)");
+            return Ok(outcome);
+        }
+    }
+
+    align_by_counters(pool, id, bare, current, have).await
+}
+
+/// Выравнивание по счётчикам: `have` (старший тег vN) против `current_version`.
+/// Вынесено из `sync_repo_with_db`, чтобы лечение пропавшей ветки могло пройти
+/// этот же путь и не дублировать его вторым описанием.
+async fn align_by_counters(
+    pool: &PgPool,
+    id: Uuid,
+    bare: &Path,
+    current: i32,
+    have: i32,
+) -> Result<SyncOutcome, sqlx::Error> {
     if have == current {
         // Равенство счётчиков ещё не синхронность: если проекция push/merge упала
         // ДО постановки тега, main уже впереди, а тега vN нет — по счётчикам всё
@@ -118,7 +175,9 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
             return Ok(SyncOutcome::Conflict { have, current });
         }
         let bare2 = bare.to_path_buf();
-        tokio::task::spawn_blocking(move || bundle::append_versions(&bare2, &versions))
+        // Досыпка, а не обычная запись: версия может УЖЕ лежать коммитом (потерян
+        // тег, а не коммит), и тогда её надо дотегировать, а не коммитить второй раз.
+        tokio::task::spawn_blocking(move || bundle::append_missing_versions(&bare2, &versions))
             .await
             .map_err(join_err)?
             .map_err(join_err)?;
@@ -148,6 +207,8 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
 }
 
 /// Есть ли у репо main (пустой bare списка до первой версии его не имеет).
+/// Спрашивается только в ветке «тегов нет и строк истории нет», поэтому отдельным
+/// чтением: на горячем пути состояние рефов уже прочитано одним `refs_state`.
 async fn main_exists(bare: &Path) -> Result<bool, sqlx::Error> {
     let bare_chk = bare.to_path_buf();
     tokio::task::spawn_blocking(move || {
@@ -157,9 +218,49 @@ async fn main_exists(bare: &Path) -> Result<bool, sqlx::Error> {
     .map_err(join_err)
 }
 
-/// Тег `v<ver>` указывает ровно на tip main? Ошибки чтения (нет main, нет тега)
-/// считаем «на месте»: sync не должен мешать чтению из-за нечитаемого ref'а —
-/// расхождение счётчиков поймают другие ветки.
+/// Возвращает `refs/heads/main` на коммит тега `v<ver>`. Через ту же точку
+/// обновления main, что и запись версий: проверки состава дерева обязаны
+/// действовать и на лечении — иначе оно стало бы дырой в правилах хука.
+/// `false` — тега `v<ver>` нет (восстанавливать не по чему); ветка при этом не
+/// трогается вовсе, и решение остаётся за выравниванием по счётчикам.
+async fn restore_main_from_tag(bare: &Path, ver: i32) -> Result<bool, sqlx::Error> {
+    let bare2 = bare.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<bool, String> {
+        let repo = git2::Repository::open_bare(&bare2).map_err(|e| e.to_string())?;
+        let Ok(oid) = repo.refname_to_id(&format!("refs/tags/v{ver}")) else {
+            return Ok(false);
+        };
+        crate::git::update::update_main(&repo, oid, None, "setfork: restore main from tag")
+            .map_err(|e| e.to_string())?;
+        let _ = repo.set_head(MAIN_REF);
+        Ok(true)
+    })
+    .await
+    .map_err(join_err)?
+    .map_err(join_err)
+}
+
+/// Собирает историю списка из БД в bare-репо. `None` — версий в БД нет вовсе
+/// (материализовать нечего); повторный вызов поверх существующего каталога
+/// безопасен: SHA детерминированы, объекты уже на месте, теги ставятся заново.
+async fn bootstrap_from_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<Option<SyncOutcome>, sqlx::Error> {
+    let versions = db::load_bundle_data(pool, id).await?;
+    if versions.is_empty() {
+        return Ok(None);
+    }
+    let n = versions.len();
+    let bare2 = bare.to_path_buf();
+    tokio::task::spawn_blocking(move || bundle::bootstrap_bare(&versions, &bare2))
+        .await
+        .map_err(join_err)?
+        .map_err(join_err)?;
+    Ok(Some(SyncOutcome::Bootstrapped { versions: n }))
+}
+
+/// Тег `v<ver>` указывает ровно на tip main? Ошибки чтения считаем «на месте»:
+/// sync не должен мешать чтению из-за нечитаемого ref'а. Единственное состояние,
+/// которое так проглатывалось молча, — отсутствие main; его теперь ловит
+/// отдельная ветка ВЫШЕ по коду, до сравнения счётчиков.
 async fn tag_on_tip(bare: &Path, ver: i32) -> Result<bool, sqlx::Error> {
     let bare_chk = bare.to_path_buf();
     tokio::task::spawn_blocking(move || -> bool {

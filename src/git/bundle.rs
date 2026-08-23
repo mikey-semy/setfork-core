@@ -204,6 +204,21 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     "      fi",
     "      ;;",
     "  esac",
+    // Имена версий принадлежат СЕРВЕРУ, и до этой проверки правило жило только на
+    // веб-двери (`is_version_tag` в services/git_core). Владелец мог запушить
+    // `refs/tags/v99` руками, после чего старший тег становился 99 при текущей
+    // версии 1, выравнивание объявляло Conflict — и запись в список останавливалась
+    // до вмешательства оператора. Правило слово в слово то же: `v` + только цифры;
+    // человеческие теги (`v1.0`, `release-1`) остаются доступными.
+    "  case \"$ref\" in",
+    "    refs/tags/v*)",
+    "      ver=${ref#refs/tags/v}",
+    "      case \"$ver\" in",
+    "        ''|*[!0-9]*) ;;",
+    "        *) msg reserved_tag_name \"$ref\" >&2; exit 1 ;;",
+    "      esac",
+    "      ;;",
+    "  esac",
     "  if [ \"$ref\" = \"refs/heads/main\" ]; then",
     "    if [ \"$new\" = \"$zero\" ]; then",
     "      msg main_no_delete >&2",
@@ -223,7 +238,11 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     // печатает каждый OID один раз, и лишний файл с байтами разрешённого не
     // появлялся в выводе вовсе (авто-ревью core#70, P1).
     "  for c in $(git rev-list \"$new\" --not --all </dev/null); do",
-    r#"    bad=$(git ls-tree -r --name-only "$c" </dev/null | grep -v -E '^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md)$' | sort -u | head -5)"#,
+    // core.quotePath=false — ИНАЧЕ не-ASCII имена печатаются в кавычках и с
+    // \\xNN-экранированием, якорное правило по ним не совпадает, и законный
+    // `steps/шаг.md` отвергается из-за ФОРМЫ ВЫВОДА, а не из-за содержания
+    // (F6 линзы 02: в отказе было видно `"steps/шаг.md"` — с кавычками).
+    r#"    bad=$(git -c core.quotePath=false ls-tree -r --name-only "$c" </dev/null | grep -v -E '^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md)$' | sort -u | head -5)"#,
     "    if [ -n \"$bad\" ]; then",
     "      msg tree_allowlist >&2",
     "      msg tree_foreign_header \"$c\" >&2",
@@ -366,12 +385,88 @@ pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<Opti
     Ok(tip.map(|o| o.to_string()))
 }
 
+/// Лежат ли ВСЕ версии `versions` уже коммитами в хвосте main (сверху вниз,
+/// по деревьям)? Вернёт их коммиты по порядку версий, иначе None.
+fn tail_commits(
+    repo: &Repository,
+    tip: Oid,
+    versions: &[VersionData],
+) -> Result<Option<Vec<Oid>>, git2::Error> {
+    let mut oids = Vec::with_capacity(versions.len());
+    let mut cur = Some(tip);
+    for v in versions.iter().rev() {
+        let Some(oid) = cur else { return Ok(None) };
+        let commit = repo.find_commit(oid)?;
+        if commit.tree_id() != build_tree(repo, v)? {
+            return Ok(None);
+        }
+        oids.push(oid);
+        cur = commit.parent_ids().next();
+    }
+    oids.reverse();
+    Ok(Some(oids))
+}
+
+/// Досыпка версий при ВЫРАВНИВАНИИ (не обычная запись).
+///
+/// Отличие от `append_versions`: версия, которая уже лежит коммитом на main
+/// (потерян тег, а не коммит), получает тег обратно на СВОЙ коммит, а не второй
+/// коммит с тем же деревом. Замер линзы 02 §4: удаление тега v2 заставляло
+/// досыпку положить пустой коммит-двойник и перевесить тег на него — канон
+/// записывал событие, которого не было, а diff версии выходил пустым.
+///
+/// Обычная запись версии этой поблажки не получает намеренно: там совпадение
+/// деревьев значит «сохранили без изменений», и подменять новый коммит тегом на
+/// старом нельзя — версия в БД уже своя.
+///
+/// Смешанное состояние (новые версии лежат, старых нет) досыпкой не чинится —
+/// вставить коммит в середину истории нельзя; такое уходит в прежний путь.
+pub fn append_missing_versions(bare: &Path, versions: &[VersionData]) -> io::Result<Option<String>> {
+    if versions.is_empty() {
+        return Ok(None);
+    }
+    let tip = (|| -> Result<Option<Oid>, MainUpdateError> {
+        let repo = Repository::open_bare(bare)?;
+        let parent = repo.refname_to_id(MAIN_REF).ok();
+        if let Some(tip) = parent
+            && let Some(oids) = tail_commits(&repo, tip, versions)?
+        {
+            for (v, oid) in versions.iter().zip(oids) {
+                let obj = repo.find_object(oid, Some(ObjectType::Commit))?;
+                repo.tag_lightweight(&format!("v{}", v.version), &obj, true)?;
+            }
+            return Ok(Some(tip));
+        }
+        build_history(&repo, versions, parent)
+    })()
+    .map_err(upd_io)?;
+    gc_auto(bare);
+    Ok(tip.map(|o| o.to_string()))
+}
+
 /// Максимальный номер версии среди тегов v* (git2).
 pub fn max_tag_version(bare: &Path) -> i32 {
-    let repo = match Repository::open_bare(bare) {
-        Ok(r) => r,
-        Err(_) => return 0,
-    };
+    match Repository::open_bare(bare) {
+        Ok(r) => max_tag_in(&r),
+        Err(_) => 0,
+    }
+}
+
+/// Есть ли `main` и какова максимальная версия по тегам — ОДНИМ открытием репо.
+/// Выравнивание спрашивает и то и другое на КАЖДОМ чтении списка (его зовёт
+/// `ensure_repo`), поэтому два отдельных чтения означали два открытия репо и два
+/// прыжка в блокирующий пул на ровном месте.
+/// `None` — репозиторий НЕ ОТКРЫЛСЯ. Это отдельный ответ, а не `(false, 0)`:
+/// «каталог есть, но не читается» (обрубленный HEAD после сбоя, частичное
+/// восстановление тома, права/дескрипторы) неотличимо от «ветки и тегов нет», и
+/// лечение приняло бы битое репо за пустое — то есть переписало бы историю из БД
+/// вместо того, чтобы громко отказать.
+pub fn refs_state(bare: &Path) -> Option<(bool, i32)> {
+    let repo = Repository::open_bare(bare).ok()?;
+    Some((repo.refname_to_id(MAIN_REF).is_ok(), max_tag_in(&repo)))
+}
+
+fn max_tag_in(repo: &Repository) -> i32 {
     let names = match repo.tag_names(Some("v*")) {
         Ok(n) => n,
         Err(_) => return 0,

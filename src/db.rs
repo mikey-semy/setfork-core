@@ -221,19 +221,25 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                         .collect()
                 })
                 .unwrap_or_default();
-            // Блочная модель: type/content несём только у не-step блоков.
+            // ЧТЕНИЕ СТРОГОЕ, и это осознанно. Раньше здесь стояло `.ok()`, которое
+            // глушило ЛЮБУЮ беду декодирования и подставляло дефолт. От отсутствия
+            // колонки оно не спасало вовсе — все колонки перечислены в SELECT выше,
+            // и пропавшую база не отдаст в принципе, — а вот СМЕНУ ТИПА прятало:
+            // замер линзы 04 §3 показал, что после `needs_human boolean → text` список
+            // читается успешно и у всех шагов пометка «нужен человек» становится
+            // false. Молчаливая потеря на чтении хуже громкого отказа: сайт остаётся
+            // рабочим и врёт.
             let block_type: Option<String> =
-                sr.try_get::<Option<String>, _>("type").ok().flatten().filter(|t| !is_step_type(t));
+                sr.try_get::<Option<String>, _>("type")?.filter(|t| !is_step_type(t));
             let content: serde_json::Value = if block_type.is_some() {
-                sr.try_get::<serde_json::Value, _>("content").unwrap_or(serde_json::Value::Null)
+                sr.try_get::<Option<serde_json::Value>, _>("content")?.unwrap_or(serde_json::Value::Null)
             } else {
                 serde_json::Value::Null
             };
             let vid: Uuid = sr.get("version_id");
             // Идентичность блока сквозь версии. Колонка обязательна в схеме:
             // деплой Rust идёт ПОСЛЕ применения схемы (db:push), как и раньше.
-            let block_id: Option<String> =
-                sr.try_get::<Option<Uuid>, _>("block_id").ok().flatten().map(|u| u.to_string());
+            let block_id: Option<String> = sr.try_get::<Option<Uuid>, _>("block_id")?.map(|u| u.to_string());
             steps_by_ver.entry(vid).or_default().push(SerStep {
                 n: sr.get("n"),
                 block_type,
@@ -243,15 +249,14 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 desc: loc(&sr.get::<serde_json::Value, _>("desc")),
                 command: sr.get::<String, _>("command"),
                 // Ф2a-довесок: картинка и пометка — честное содержимое канона.
-                image_key: sr.try_get::<Option<String>, _>("image_key").ok().flatten(),
+                image_key: sr.try_get::<Option<String>, _>("image_key")?,
                 level: sr.get::<String, _>("level"),
-                needs_human: sr.try_get::<bool, _>("needs_human").unwrap_or(false),
+                needs_human: sr.try_get::<Option<bool>, _>("needs_human")?.unwrap_or(false),
                 needs_human_ask: sr
-                    .try_get::<serde_json::Value, _>("needs_human_ask")
-                    .ok()
+                    .try_get::<Option<serde_json::Value>, _>("needs_human_ask")?
                     .map(|v| loc(&v))
                     .filter(|a| !a.is_empty()),
-                danger: sr.try_get::<bool, _>("danger").unwrap_or(false),
+                danger: sr.try_get::<Option<bool>, _>("danger")?.unwrap_or(false),
                 why: loc(&sr.get::<serde_json::Value, _>("why")),
                 section: loc(&sr.get::<serde_json::Value, _>("section")),
                 subtasks,
@@ -479,10 +484,20 @@ fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid, CarryOver>
         title: loc_val(&s.title),
         desc: loc_val(&s.desc),
         command: s.command.trim().to_string(),
-        // Ф2a-довесок: канон несёт imageKey — файл теперь источник. Отсутствие
-        // поля (старый клон) — фолбэк на перенос по block_id, чтобы push старого
-        // клона не стирал картинку (P1 авто-ревью #63).
-        image_key: s.image_key.clone().or_else(|| carry.image_key.clone()),
+        // Ф2a-довесок: канон несёт imageKey — файл теперь источник. ТРИСТЕЙТ, как у
+        // needs_human: поля нет (старый клон) → перенос по block_id, чтобы push
+        // старого клона не стирал картинку (P1 авто-ревью #63); значение есть →
+        // файл источник; ПУСТОЕ значение → явное снятие картинки пушем.
+        //
+        // Без последней ветки картинку нельзя было снять через git вовсе: любой
+        // способ сказать «её нет» читался как «не знаю» и возвращал старый ключ
+        // (F9 линзы 02). Пустая строка вдобавок доезжала в колонку как есть, и
+        // has_image (image_key.is_some()) выставлялся у шага БЕЗ картинки.
+        image_key: match s.image_key.as_deref().map(str::trim) {
+            Some("") => None,
+            Some(k) => Some(k.to_string()),
+            None => carry.image_key.clone(),
+        },
         level: Level::parse(&s.level),
         why: loc_val(&s.why),
         section: loc_val(&s.section),
@@ -524,16 +539,19 @@ pub(crate) async fn current_marks(
     .await?;
     let mut out = std::collections::HashMap::new();
     for r in rows {
-        if let Ok(Some(id)) = r.try_get::<Option<Uuid>, _>("block_id") {
+        // Строго, по той же причине, что и в load_bundle_data: `.ok()` здесь могло
+        // спрятать только смену типа, а не отсутствие колонки, и превращало разъезд
+        // схемы в тихую потерю надстроек (линза 04 §3).
+        if let Some(id) = r.try_get::<Option<Uuid>, _>("block_id")? {
             out.insert(
                 id,
                 CarryOver {
-                    needs_human: r.try_get::<bool, _>("needs_human").unwrap_or(false),
+                    needs_human: r.try_get::<Option<bool>, _>("needs_human")?.unwrap_or(false),
                     needs_human_ask: r
-                        .try_get::<serde_json::Value, _>("needs_human_ask")
+                        .try_get::<Option<serde_json::Value>, _>("needs_human_ask")?
                         .unwrap_or(serde_json::json!({})),
-                    image_key: r.try_get::<Option<String>, _>("image_key").ok().flatten(),
-                    danger: r.try_get::<bool, _>("danger").unwrap_or(false),
+                    image_key: r.try_get::<Option<String>, _>("image_key")?,
+                    danger: r.try_get::<Option<bool>, _>("danger")?.unwrap_or(false),
                 },
             );
         }
@@ -609,6 +627,11 @@ pub fn ser_step_from_row(n: i32, r: &StepRow) -> SerStep {
 
 /// Метаданные списка из list.json (title/desc/tags/ordered/kind) — порт project.ts patch.
 /// None = поле отсутствовало в list.json → не трогаем.
+/// Мета списка из запушенного канона. ОДНОЙ транзакцией: полей четыре, и сбой на
+/// третьем оставлял бы мету наполовину применённой — то есть базу в состоянии,
+/// которого нет ни в одном коммите (линза проверки 04 §7). Восстановилось бы это
+/// только следующим пушем, а до тех пор список показывал бы новый заголовок со
+/// старыми тегами.
 pub async fn update_meta(
     pool: &PgPool,
     template_id: Uuid,
@@ -618,20 +641,21 @@ pub async fn update_meta(
     ordered: Option<bool>,
     kind: Option<String>,
 ) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
     if let Some(t) = title
         && !t.trim().is_empty()
     {
         sqlx::query("update templates set title = $1::jsonb where id = $2")
             .bind(loc_val(&t))
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(d) = desc {
         sqlx::query("update templates set \"desc\" = $1::jsonb where id = $2")
             .bind(loc_val(&d))
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(tg) = tags {
@@ -639,14 +663,14 @@ pub async fn update_meta(
         sqlx::query("update templates set tags = $1 where id = $2")
             .bind(&tg)
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     if let Some(o) = ordered {
         sqlx::query("update templates set ordered = $1 where id = $2")
             .bind(o)
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
     // kind из push: пишем только валидное значение (санитизация чужого git-входа,
@@ -656,10 +680,10 @@ pub async fn update_meta(
         sqlx::query("update templates set list_kind = $1 where id = $2")
             .bind(&k)
             .bind(template_id)
-            .execute(pool)
+            .execute(&mut *tx)
             .await?;
     }
-    Ok(())
+    tx.commit().await
 }
 
 #[cfg(test)]

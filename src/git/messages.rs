@@ -37,6 +37,11 @@ pub struct HookMessage {
 /// Каталог. Добавляя строку в хук, добавляй её СЮДА, а не в тело скрипта.
 pub const HOOK_MESSAGES: &[HookMessage] = &[
     HookMessage {
+        key: "reserved_tag_name",
+        en: "SetFork: tag %s is reserved for versions (v + digits) and is set by the server",
+        ru: "SetFork: имя %s зарезервировано под версии (v и цифры), его ставит сервер",
+    },
+    HookMessage {
         key: "main_no_delete",
         en: "SetFork: the main branch is protected from deletion",
         ru: "SetFork: ветка main защищена от удаления",
