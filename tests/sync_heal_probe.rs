@@ -173,3 +173,81 @@ async fn репо_без_главной_ветки_чинится_возврат
 
     std::fs::remove_dir_all(&root).ok();
 }
+
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn посторонний_тег_выше_версии_не_становится_версией() {
+    // Второй P1 авто-ревью на #100. Если main пропал, а старший тег `v<N+1>` —
+    // ПОСТОРОННИЙ (до починки #59 такое имя мог занять релиз), восстановление «по
+    // старшему тегу» подняло бы на него main, и следующая же проверка сочла бы это
+    // хвостом прерванной записи: чужой коммит стал бы версией N+1 в базе, причём на
+    // обычном ЧТЕНИИ, без единого запроса на запись.
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "foreigntag").await;
+    let list_id: Uuid = sqlx::query_scalar(
+        "insert into templates (owner_id, slug, title, current_version) \
+         values ($1, 'foreign', '{\"en\":\"Foreign\"}', 1) returning id",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .expect("seed template");
+    sqlx::query("insert into template_versions (template_id, version, note) values ($1, 1, 'v1')")
+        .bind(list_id)
+        .execute(&pool)
+        .await
+        .expect("seed v1");
+
+    let root = std::env::temp_dir().join(format!("setfork-foreign-{}", Uuid::new_v4()));
+    let bare = root.join("repo.git");
+    assert_eq!(
+        version::sync_repo_with_db(&pool, list_id, &bare).await.expect("материализация"),
+        SyncOutcome::Bootstrapped { versions: 1 }
+    );
+    let v1 = commits_on_main(&bare)[0];
+
+    // ПОСТОРОННИЙ коммит с именем версии: дерево валидное (иначе его отвергнет сама
+    // точка обновления main), но версией он не является — это чужой релиз.
+    {
+        let repo = git2::Repository::open_bare(&bare).expect("open");
+        let base = repo.find_commit(v1).expect("v1");
+        let sig = git2::Signature::new("Кто-то", "someone@example.com", &git2::Time::new(1_800_000_000, 0))
+            .unwrap();
+        let oid = repo
+            .commit(None, &sig, &sig, "release 1.0", &base.tree().expect("tree"), &[&base])
+            .expect("посторонний коммит");
+        let obj = repo.find_object(oid, Some(git2::ObjectType::Commit)).expect("obj");
+        repo.tag_lightweight("v2", &obj, true).expect("чужой тег v2");
+        repo.find_reference("refs/heads/main").expect("main").delete().expect("удалить main");
+    }
+
+    let outcome = version::sync_repo_with_db(&pool, list_id, &bare).await.expect("выравнивание");
+
+    let cur: i32 = sqlx::query_scalar("select current_version from templates where id = $1")
+        .bind(list_id)
+        .fetch_one(&pool)
+        .await
+        .expect("current");
+    let rows: i64 = sqlx::query_scalar("select count(*) from template_versions where template_id = $1")
+        .bind(list_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(cur, 1, "чужой коммит НЕ стал версией");
+    assert_eq!(rows, 1, "строк версий по-прежнему одна");
+    assert_eq!(
+        outcome,
+        SyncOutcome::Conflict { have: 2, current: 1 },
+        "расхождение названо конфликтом, а не вылечено"
+    );
+    {
+        let repo = git2::Repository::open_bare(&bare).expect("open");
+        assert_eq!(
+            repo.refname_to_id("refs/heads/main").expect("main вернулся"),
+            v1,
+            "main стоит на СВОЁМ v1"
+        );
+    }
+
+    std::fs::remove_dir_all(&root).ok();
+}

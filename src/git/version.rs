@@ -76,18 +76,26 @@ pub async fn sync_repo_with_db(pool: &PgPool, id: Uuid, bare: &Path) -> Result<S
     // выравнивания ветка не появлялась.
     if !has_main {
         // Объекты и теги целы — значит история НА МЕСТЕ, пропала только ссылка.
-        // Возвращаем main на коммит старшего тега, а не пересобираем из БД:
+        // Возвращаем main на коммит нашего тега, а не пересобираем из БД:
         // `load_bundle_data` берёт СЕГОДНЯШНЮЮ мету списка для ВСЕХ версий, поэтому
         // после любой правки названия пересборка дала бы другие деревья и другие
         // SHA, форсом перевесила бы теги vN на эту синтетику и выбросила принятые
         // пуши и коммиты слияния — то есть уничтожила бы ровно тот канон, который
         // лечение обязано спасти (находка авто-ревью на #100, P1).
-        if have > 0 {
-            restore_main_from_tag(bare, have).await?;
-            tracing::warn!(%id, version = have, "main was missing, restored from tag v{have} (heal)");
+        //
+        // Тег берём НЕ старший, а тот, что отвечает ТЕКУЩЕЙ версии базы (или ниже,
+        // если БД ушла вперёд). Восстановление по старшему подняло бы main на
+        // ПОСТОРОННИЙ тег `v<current+1>` — до починки #59 такое имя мог занять
+        // релиз, — и следующая же проверка сочла бы это хвостом прерванной записи и
+        // спроецировала чужой коммит новой версией, причём на обычном ЧТЕНИИ
+        // (второй P1 авто-ревью на #100). Ниже своей версии подниматься безопасно:
+        // это наш собственный коммит, а недостающие версии допишет досыпка.
+        let restore_ver = have.min(current);
+        if restore_ver > 0 && restore_main_from_tag(bare, restore_ver).await? {
+            tracing::warn!(%id, version = restore_ver, "main was missing, restored from tag v{restore_ver} (heal)");
             let outcome = align_by_counters(pool, id, bare, current, have).await?;
             return Ok(match outcome {
-                SyncOutcome::InSync => SyncOutcome::MainRestored { version: have },
+                SyncOutcome::InSync => SyncOutcome::MainRestored { version: restore_ver },
                 other => other,
             });
         }
@@ -202,17 +210,19 @@ async fn main_exists(bare: &Path) -> Result<bool, sqlx::Error> {
 /// Возвращает `refs/heads/main` на коммит тега `v<ver>`. Через ту же точку
 /// обновления main, что и запись версий: проверки состава дерева обязаны
 /// действовать и на лечении — иначе оно стало бы дырой в правилах хука.
-async fn restore_main_from_tag(bare: &Path, ver: i32) -> Result<(), sqlx::Error> {
+/// `false` — тега `v<ver>` нет (восстанавливать не по чему); ветка при этом не
+/// трогается вовсе, и решение остаётся за выравниванием по счётчикам.
+async fn restore_main_from_tag(bare: &Path, ver: i32) -> Result<bool, sqlx::Error> {
     let bare2 = bare.to_path_buf();
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
+    tokio::task::spawn_blocking(move || -> Result<bool, String> {
         let repo = git2::Repository::open_bare(&bare2).map_err(|e| e.to_string())?;
-        let oid = repo
-            .refname_to_id(&format!("refs/tags/v{ver}"))
-            .map_err(|e| format!("тег v{ver} не читается: {e}"))?;
+        let Ok(oid) = repo.refname_to_id(&format!("refs/tags/v{ver}")) else {
+            return Ok(false);
+        };
         crate::git::update::update_main(&repo, oid, None, "setfork: restore main from tag")
             .map_err(|e| e.to_string())?;
         let _ = repo.set_head(MAIN_REF);
-        Ok(())
+        Ok(true)
     })
     .await
     .map_err(join_err)?
