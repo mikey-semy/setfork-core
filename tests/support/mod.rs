@@ -88,8 +88,8 @@ create table steps (
   n integer not null,
   -- Стабильная идентичность блока сквозь версии (nullable — старые строки).
   block_id uuid,
-  "type" text,
-  content jsonb,
+  "type" text not null default 'step',
+  content jsonb not null default '{}'::jsonb,
   title jsonb not null default '{}'::jsonb,
   "desc" jsonb not null default '{}'::jsonb,
   command text not null default '',
@@ -175,6 +175,18 @@ pub async fn pool_with_schema() -> PgPool {
         "TEST_DATABASE_URL не задан — интеграционные тесты требуют Postgres \
          (bash scripts/ci-local.sh поднимет эфемерный)",
     );
+    // Прогон против НАСТОЯЩЕЙ схемы фронта (линза 04 §4): снимок ниже — это то, что
+    // ядро ОЖИДАЕТ от Postgres, и совпадение с источником правды (drizzle) он сам не
+    // доказывает. С `TEST_USE_EXISTING_SCHEMA=1` тесты идут по схеме, накатанной
+    // `drizzle-kit push` из фронта, и всё, что упало, — настоящий разъезд.
+    // Схема при этом ОБЩАЯ, поэтому так гоняют разово и на одноразовой базе.
+    if std::env::var("TEST_USE_EXISTING_SCHEMA").is_ok() {
+        return PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&url)
+            .await
+            .expect("пул на существующей схеме");
+    }
     let schema = format!("t_{}", Uuid::new_v4().simple());
 
     let admin =
