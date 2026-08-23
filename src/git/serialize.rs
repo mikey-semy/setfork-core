@@ -338,7 +338,13 @@ pub const GITATTRIBUTES: &str = "README.md linguist-generated=true\n";
 /// корне обязан быть отвергнут, каталог `steps` проверяется по содержимому.
 pub fn tree_path_allowed(path: &str) -> bool {
     matches!(path, "README.md" | "list.json" | ".gitattributes")
-        || (path.starts_with("steps/") && path.ends_with(".md") && !path[6..].contains('/'))
+        || path
+            .strip_prefix("steps/")
+            .and_then(|name| name.strip_suffix(".md"))
+            // Имя обязано быть НЕПУСТЫМ: `steps/.md` шелльное правило (`[^/]+`)
+            // отвергает, а прежняя проверка здесь пропускала — две реализации
+            // одного правила расходились, и мягче была наша (F7 линзы 02).
+            .is_some_and(|stem| !stem.is_empty() && !stem.contains('/'))
 }
 
 /// Полный набор файлов версии (Ф2b): ровно ДВА представления — README.md

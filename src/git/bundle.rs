@@ -223,7 +223,11 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     // печатает каждый OID один раз, и лишний файл с байтами разрешённого не
     // появлялся в выводе вовсе (авто-ревью core#70, P1).
     "  for c in $(git rev-list \"$new\" --not --all </dev/null); do",
-    r#"    bad=$(git ls-tree -r --name-only "$c" </dev/null | grep -v -E '^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md)$' | sort -u | head -5)"#,
+    // core.quotePath=false — ИНАЧЕ не-ASCII имена печатаются в кавычках и с
+    // \\xNN-экранированием, якорное правило по ним не совпадает, и законный
+    // `steps/шаг.md` отвергается из-за ФОРМЫ ВЫВОДА, а не из-за содержания
+    // (F6 линзы 02: в отказе было видно `"steps/шаг.md"` — с кавычками).
+    r#"    bad=$(git -c core.quotePath=false ls-tree -r --name-only "$c" </dev/null | grep -v -E '^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md)$' | sort -u | head -5)"#,
     "    if [ -n \"$bad\" ]; then",
     "      msg tree_allowlist >&2",
     "      msg tree_foreign_header \"$c\" >&2",
