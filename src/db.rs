@@ -75,8 +75,10 @@ pub async fn connect(url: &str, max: u32) -> Result<PgPool, sqlx::Error> {
 /// соединению на push (аудит 2026-07-20, P1-5). acquire_timeout выше обычного —
 /// очередь тяжёлых git-операций легитимна, быстрый отказ тут вреден.
 pub async fn connect_lock_pool(url: &str) -> Result<PgPool, sqlx::Error> {
+    let max = crate::config::lock_pool_max();
+    tracing::info!(max, "lock pool for repo advisory locks");
     PgPoolOptions::new()
-        .max_connections(4)
+        .max_connections(max)
         .acquire_timeout(std::time::Duration::from_secs(30))
         .test_before_acquire(true)
         .connect(url)
