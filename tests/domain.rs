@@ -535,6 +535,89 @@ async fn issues_numbering_status_and_comments() {
     assert!(closed.is_some(), "closed_at выставлен");
 }
 
+/// СОСТАВ И ПОРЯДОК СОАВТОРОВ — закрепление поведения перед переписыванием запроса.
+///
+/// Проба написана ДО правки и на СТАРОМ коде зелёная: иначе «оптимизация» проверялась
+/// бы сама собой. Держит четыре свойства, которые легко потерять, сливая три запроса
+/// в один: владелец первым и с нулём; владелец не задваивается, даже если он же автор
+/// предложения; остальные по убыванию принятых; автор без единого принятого всё равно
+/// в списке.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn состав_соавторов_и_порядок() {
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "owner-c").await;
+    let many = support::seed_user(&pool, "many-c").await;
+    let one = support::seed_user(&pool, "one-c").await;
+    let none = support::seed_user(&pool, "none-c").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+    let read = ListReadSvc { pool: pool.clone() };
+    let collab = CollabWriteSvc { pool: pool.clone() };
+
+    let created = write
+        .create(Request::new(create_req(&owner.to_string(), "contribs")))
+        .await
+        .expect("create")
+        .into_inner();
+
+    // Предложения: у `many` два принятых, у `one` одно, у `none` только открытое,
+    // и одно — от САМОГО владельца (он не должен появиться дважды).
+    let mut принять = Vec::new();
+    for (автор, принятых, всего) in [(many, 2, 2), (one, 1, 1), (none, 0, 1), (owner, 1, 1)]
+    {
+        for i in 0..всего {
+            let s = collab
+                .create_suggestion(Request::new(CreateSuggestionRequest {
+                    list_id: created.id.clone(),
+                    author_id: автор.to_string(),
+                    note: format!("правка {i}"),
+                    steps: vec![step("Proposed")],
+                }))
+                .await
+                .expect("suggestion")
+                .into_inner();
+            if i < принятых {
+                принять.push(s.id);
+            }
+        }
+    }
+    for id in принять {
+        sqlx::query("update suggestions set status = 'accepted' where id = $1::uuid")
+            .bind(&id)
+            .execute(&pool)
+            .await
+            .expect("accept");
+    }
+
+    let c = read
+        .get_contributors(Request::new(ListId { id: created.id.clone() }))
+        .await
+        .expect("contributors")
+        .into_inner()
+        .contributors;
+
+    let имена: Vec<&str> = c.iter().map(|x| x.handle.as_str()).collect();
+    assert_eq!(
+        имена,
+        vec!["owner-c", "many-c", "one-c", "none-c"],
+        "владелец первым, дальше по убыванию принятых"
+    );
+    assert_eq!(c[0].accepted, 0, "у владельца ноль, как в TS-паритете — даже с принятым предложением");
+    assert_eq!(c[1].accepted, 2);
+    assert_eq!(c[2].accepted, 1);
+    assert_eq!(c[3].accepted, 0, "автор без принятых всё равно в списке");
+    assert_eq!(имена.iter().filter(|x| **x == "owner-c").count(), 1, "владелец не задваивается");
+
+    // Несуществующий список — пустой ответ, а не отказ.
+    let пусто = read
+        .get_contributors(Request::new(ListId { id: uuid::Uuid::new_v4().to_string() }))
+        .await
+        .expect("несуществующий список — не ошибка")
+        .into_inner()
+        .contributors;
+    assert!(пусто.is_empty());
+}
+
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn suggestion_roundtrip_and_contributors() {

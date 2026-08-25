@@ -216,54 +216,50 @@ impl ListRead for ListReadSvc {
 
     async fn get_contributors(&self, req: Request<ListId>) -> Result<Response<ContributorsResponse>, Status> {
         let id = parse_id(&req.into_inner().id)?;
-        let tpl = sqlx::query("select owner_id from templates where id = $1 limit 1")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(db_status)?;
-        let Some(tpl) = tpl else {
-            return Ok(Response::new(ContributorsResponse { contributors: vec![] }));
-        };
-        let owner_id: Uuid = tpl.get("owner_id");
-
-        let mut out: Vec<Contributor> = Vec::new();
-        let owner = sqlx::query("select handle, avatar_url from users where id = $1 limit 1")
-            .bind(owner_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(db_status)?;
-        if let Some(o) = owner {
-            out.push(Contributor {
-                handle: o.get("handle"),
-                avatar_ref: o.get::<Option<String>, _>("avatar_url").unwrap_or_default(),
-                accepted: 0, // TS: Infinity для сортировки → 0 в выдаче
-            });
-        }
-
+        // ОДИН запрос вместо трёх. Раньше было: строка списка → строка владельца по
+        // owner_id → агрегат по предложениям. Первые два — N+1 на одну строку, третий
+        // от owner_id вообще не зависел. На нашей нагрузке это не «медленно» (замер
+        // 24.08: ядро почти простаивает), но три round trip'а там, где хватает одного,
+        // остаются тремя и под нагрузкой — шаг 3 трека производительности.
+        //
+        // Порядок и состав закреплены пробой `состав_соавторов_и_порядок`, написанной
+        // ДО этой правки и зелёной на прежнем коде: владелец первым и с нулём (паритет
+        // с TS), он же не задваивается, если сам автор предложения; остальные по
+        // убыванию принятых; автор без единого принятого всё равно в списке.
         let rows = sqlx::query(
-            "select u.handle, u.avatar_url, s.author_id, \
-                    (count(*) filter (where s.status = 'accepted'))::int as accepted \
-             from suggestions s join users u on u.id = s.author_id \
-             where s.template_id = $1 \
-             group by u.handle, u.avatar_url, s.author_id \
-             order by accepted desc",
+            "with owner_row as ( \
+                 select u.handle, u.avatar_url, 0::int as accepted, 0::int as ord \
+                 from templates t join users u on u.id = t.owner_id \
+                 where t.id = $1 \
+             ), contrib as ( \
+                 select u.handle, u.avatar_url, \
+                        (count(*) filter (where s.status = 'accepted'))::int as accepted, \
+                        1::int as ord \
+                 from suggestions s \
+                 join users u on u.id = s.author_id \
+                 join templates t on t.id = s.template_id \
+                 where s.template_id = $1 and s.author_id <> t.owner_id \
+                 group by u.handle, u.avatar_url \
+             ) \
+             select handle, avatar_url, accepted, ord from owner_row \
+             union all \
+             select handle, avatar_url, accepted, ord from contrib \
+             order by ord, accepted desc",
         )
         .bind(id)
         .fetch_all(&self.pool)
         .await
         .map_err(db_status)?;
-        for r in rows {
-            let author: Uuid = r.get("author_id");
-            if author == owner_id {
-                continue; // владелец уже первым
-            }
-            out.push(Contributor {
+
+        let contributors = rows
+            .into_iter()
+            .map(|r| Contributor {
                 handle: r.get("handle"),
                 avatar_ref: r.get::<Option<String>, _>("avatar_url").unwrap_or_default(),
                 accepted: r.get("accepted"),
-            });
-        }
-        Ok(Response::new(ContributorsResponse { contributors: out }))
+            })
+            .collect();
+        Ok(Response::new(ContributorsResponse { contributors }))
     }
 }
 
