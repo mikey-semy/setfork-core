@@ -11,7 +11,9 @@
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
-use setfork_core::pb::{CommitToBranchRequest, CreateBranchRequest, MergeBranchRequest, RepoRef};
+use setfork_core::pb::{
+    CommitToBranchRequest, CreateBranchRequest, ListContent, MergeBranchRequest, ParseCanonRequest, RepoRef,
+};
 use setfork_core::pb_domain::list_write_server::ListWrite;
 use setfork_core::pb_domain::{CreateListRequest, LocaleText, NewStep};
 use setfork_core::services::git_core::GitCoreSvc;
@@ -45,6 +47,7 @@ fn step(title: &str) -> NewStep {
         content_json: String::new(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
     }
 }
 
@@ -66,6 +69,18 @@ fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
 /// Два слияния РАЗНЫХ веток в один список одновременно. Обе правки обязаны
 /// оказаться в main: лок должен выстроить их в очередь, а не дать второму
 /// затереть первого.
+/// Канон ТЕКСТОМ → содержимое для записи. Пробы правят канон подстрокой (так же
+/// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
+/// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
+/// проверять своё, а не форму запроса.
+async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+    git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
+        .await
+        .expect("канон разбирается")
+        .into_inner()
+        .content
+}
+
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn параллельные_слияния_не_затирают_друг_друга() {
@@ -85,6 +100,7 @@ async fn параллельные_слияния_не_затирают_друг_
             status: String::new(),
             origin: String::new(),
             forked_from_id: String::new(),
+            moderation: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый"), step("Второй"), step("Третий"), step("Четвёртый")],
         }))
@@ -118,7 +134,7 @@ async fn параллельные_слияния_не_затирают_друг_
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-a".into(),
-        list_json: base.replacen("Второй", "Второй (ветка A)", 1).into_bytes(),
+        content: содержимое(&git, rr.clone(), base.replacen("Второй", "Второй (ветка A)", 1)).await,
         message: "правка A".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -129,7 +145,7 @@ async fn параллельные_слияния_не_затирают_друг_
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-b".into(),
-        list_json: base.replacen("Четвёртый", "Четвёртый (ветка B)", 1).into_bytes(),
+        content: содержимое(&git, rr.clone(), base.replacen("Четвёртый", "Четвёртый (ветка B)", 1)).await,
         message: "правка B".into(),
         expected_tip: String::new(),
         author_name: "Боря".into(),

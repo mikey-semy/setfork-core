@@ -11,7 +11,9 @@
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
-use setfork_core::pb::{CommitToBranchRequest, CreateBranchRequest, RepoRef, UpdateBranchRequest};
+use setfork_core::pb::{
+    CommitToBranchRequest, CreateBranchRequest, ListContent, ParseCanonRequest, RepoRef, UpdateBranchRequest,
+};
 use setfork_core::pb_domain::list_write_server::ListWrite;
 use setfork_core::pb_domain::{CreateListRequest, LocaleText, NewStep};
 use setfork_core::services::git_core::GitCoreSvc;
@@ -45,6 +47,7 @@ fn step(title: &str) -> NewStep {
         content_json: String::new(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
     }
 }
 
@@ -61,6 +64,10 @@ fn proj(title: &str) -> setfork_core::git::project::ProjStep {
         section: String::new(),
         subtasks: vec![],
         refs: vec![],
+        image_key: None,
+        needs_human: None,
+        needs_human_ask: None,
+        danger: None,
     }
 }
 
@@ -83,6 +90,18 @@ fn tip(bare: &std::path::Path, refname: &str) -> String {
     git2::Repository::open_bare(bare).expect("open").refname_to_id(refname).expect("ref").to_string()
 }
 
+/// Канон ТЕКСТОМ → содержимое для записи. Пробы правят канон подстрокой (так же
+/// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
+/// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
+/// проверять своё, а не форму запроса.
+async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+    git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
+        .await
+        .expect("канон разбирается")
+        .into_inner()
+        .content
+}
+
 #[tokio::test]
 #[ignore = "ПАДАЕТ: legacy steps/*.md против канона веток (только list.json) → git2 даёт conflict там, где git CLI сливает; на проде формы нет ни в одном из 37 репо"]
 async fn влить_main_в_ветку_сохраняет_обе_стороны() {
@@ -102,6 +121,7 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
             status: String::new(),
             origin: String::new(),
             forked_from_id: String::new(),
+            moderation: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый"), step("Второй"), step("Третий"), step("Четвёртый")],
         }))
@@ -142,7 +162,12 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-u".into(),
-        list_json: base.replacen("Четвёртый", "Четвёртый (моя правка)", 1).into_bytes(),
+        content: содержимое(
+            &git,
+            rr.clone(),
+            base.replacen("Четвёртый", "Четвёртый (моя правка)", 1),
+        )
+        .await,
         message: "правка автора".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -235,18 +260,10 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
         println!("GIT2 С find_renames: has_conflicts={}", idx.has_conflicts());
     }
 
-    // И обычное слияние предложения в main — оно тоже идёт через merge_commits.
-    let merge_err = git
-        .merge_branch(Request::new(setfork_core::pb::MergeBranchRequest {
-            repo: rr.clone(),
-            name: "pr-u".into(),
-            mode: String::new(),
-            message: String::new(),
-        }))
-        .await
-        .err()
-        .map(|e| format!("{:?}: {}", e.code(), e.message()));
-    println!("MERGE ПРЕДЛОЖЕНИЯ В MAIN: {merge_err:?}");
+    // Здесь раньше стоял ещё один шаг РАССЛЕДОВАНИЯ — слияние предложения В MAIN, — и к
+    // предмету пробы он отношения не имеет: она про «влить main В ВЕТКУ». Пока то
+    // слияние падало конфликтом, шаг был безобиден; когда перестало — двигал main и
+    // ронял проверку ниже. Убран: проба сторожит своё, а не хранит следы поиска.
 
     let res = git
         .update_branch(Request::new(UpdateBranchRequest { repo: rr.clone(), name: "pr-u".into() }))
@@ -302,6 +319,7 @@ async fn повторное_обновление_без_изменений_от�
             status: String::new(),
             origin: String::new(),
             forked_from_id: String::new(),
+            moderation: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый")],
         }))
@@ -328,7 +346,13 @@ async fn повторное_обновление_без_изменений_от�
         .expect_err("вливать нечего — ветка идентична main");
     println!("NOOP: {:?} — {}", err.code(), err.message());
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
-    assert_eq!(err.message(), "nothing-to-merge");
+    // ПРИЧИНА из трейлера, а не текст: раньше здесь стояло `== "nothing-to-merge"`, и
+    // проба покраснела ровно тогда, когда текст стал человеческим. Контракт держится
+    // на машинной причине (И1), текст можно менять свободно.
+    assert_eq!(
+        err.metadata().get(setfork_core::reason::REASON_KEY).and_then(|v| v.to_str().ok()),
+        Some("NOTHING_TO_MERGE")
+    );
 }
 
 /// Границы находки: какие изменения в main ломают слияние предложения.
@@ -360,6 +384,7 @@ async fn какие_изменения_main_ломают_слияние() {
                 status: String::new(),
                 origin: String::new(),
                 forked_from_id: String::new(),
+                moderation: String::new(),
                 note: "v1".into(),
                 steps: vec![step("Первый"), step("Второй"), step("Третий"), step("Четвёртый")],
             }))
@@ -396,7 +421,12 @@ async fn какие_изменения_main_ломают_слияние() {
         git.commit_to_branch(Request::new(CommitToBranchRequest {
             repo: rr.clone(),
             branch: "pr".into(),
-            list_json: base.replacen("Второй", "Второй (правка автора)", 1).into_bytes(),
+            content: содержимое(
+                &git,
+                rr.clone(),
+                base.replacen("Второй", "Второй (правка автора)", 1),
+            )
+            .await,
             message: "правка".into(),
             expected_tip: String::new(),
             author_name: "Аня".into(),

@@ -40,6 +40,7 @@ fn step(title: &str) -> NewStep {
         content_json: String::new(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
     }
 }
 
@@ -61,6 +62,7 @@ async fn параллельное_создание_задач_на_продов�
             status: String::new(),
             origin: String::new(),
             forked_from_id: String::new(),
+            moderation: String::new(),
             note: "v1".into(),
             steps: vec![step("Шаг")],
         }))
@@ -140,6 +142,7 @@ async fn параллельное_создание_предложений_на_�
             status: String::new(),
             origin: String::new(),
             forked_from_id: String::new(),
+            moderation: String::new(),
             note: "v1".into(),
             steps: vec![step("Шаг")],
         }))
