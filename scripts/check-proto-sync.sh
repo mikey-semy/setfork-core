@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Сверка proto-контрактов с копией во фронте: README требует держать их
-# синхронными (аудит 2026-07-20, P2-10). Кросс-репный гейт — гоняется локально
-# (ci-local.sh); в GitHub CI чекаута фронта нет, там пропускается сам собой.
+# синхронными (аудит 2026-07-20, P2-10). Кросс-репный гейт: гоняется и локально
+# (ci-local.sh), и в GitHub-CI — с 12.08 там есть клон фронта по секрету
+# FRONTEND_RO_TOKEN (шаг «Свежий клон фронта» в ci.yml). До этого чекаута не было,
+# и шапка ещё год утверждала бы, что гейт «пропускается сам собой».
 #
 # Сравниваем с ЗАКОММИЧЕННЫМ ref'ом фронта (дефолт origin/master), а не с его
 # рабочей копией: рабочая копия бывает несвежей/грязной и давала ложные разъезды
@@ -162,6 +164,68 @@ check_issue_codes() {
   compare_sets "коды придирок канона" "$ours_list" "$front_list" "src/git/canon.rs" "$theirs"
 }
 check_issue_codes
+
+# ФОРМА ИМЕНИ СЕРВЕРНОЙ ВЕТКИ. Ядро её СОЗДАЁТ (`magic.rs`, author_branch), фронт
+# УЗНАЁТ регуляркой (`branch-label.ts`, SERVER_BRANCH) — одно правило, две реализации,
+# и сверить их было нечем (09-F1). Форма уже менялась однажды: 03.08 ник заменили
+# идентификатором, и обе стороны правили руками в один день.
+#
+# Цена разъезда тихая: серверная ветка перестаёт узнаваться, и в селекторе веток
+# вместо подписи «правка из терминала» появляется сырой `u/<uuid>/main`.
+#
+# Сверяем не текст правил (они на разных языках), а ПОВЕДЕНИЕ на образцах: имя,
+# собранное правилом ядра, фронт обязан узнать, а заведомо чужое — не узнать.
+check_branch_shape() {
+  local theirs='src/features/git/branch-label.ts' front_src
+  if ! front_src=$(git -C "$FRONT" show "$REF:$theirs" 2>/dev/null); then
+    echo "proto-sync: $REF:$theirs НЕ ЧИТАЕТСЯ — переименован или удалён?"
+    fail=1
+    return 0
+  fi
+  # Шаблон ядра: format!("u/{actor_id}/{base}") → образец с настоящим uuid и base=main.
+  # Ищем по СМЫСЛУ (единственный format! с {actor_id}), а не по порядку строк:
+  # format!-ов в файле пять, и «первый попавшийся» молча уехал бы на чужой.
+  local core_fmt sample alien
+  core_fmt=$(grep -oE 'format!\("[^"]*\{actor_id\}[^"]*"\)' src/git/magic.rs | head -1 | sed 's/format!("//; s/")//')
+  if [[ -z "$core_fmt" ]]; then
+    echo "proto-sync: не удалось извлечь шаблон имени ветки из src/git/magic.rs — проверка сломана, чини её"
+    fail=1
+    return 0
+  fi
+  sample=${core_fmt/\{actor_id\}/11111111-2222-3333-4444-555555555555}
+  sample=${sample/\{base\}/main}
+  if [[ "$sample" == *"{"* ]]; then
+    echo "proto-sync: в шаблоне имени ветки появилась незнакомая подстановка ($core_fmt) —"
+    echo "  образец собрать нечем, проверка сломана. Научи её новой подстановке."
+    fail=1
+    return 0
+  fi
+  alien="feature/my-branch"
+
+  # Регулярка фронта → форма для grep: берём тело между `/^` и `$/i`; в JS слэш
+  # экранирован (`\\/`), в ERE это лишнее.
+  local rx
+  rx=$(printf '%s\n' "$front_src" | sed -n 's|.*SERVER_BRANCH *= *//*\^\(.*\)[$]/i.*|\1|p' | head -1)
+  if [[ -z "$rx" ]]; then
+    echo "proto-sync: не удалось извлечь SERVER_BRANCH из $theirs — проверка сломана, чини её"
+    fail=1
+    return 0
+  fi
+  rx=${rx//\\\//\/}
+
+  if ! printf '%s\n' "$sample" | grep -Eiq "^${rx}$"; then
+    echo "proto-sync: имя ветки, которое СОЗДАЁТ ядро ($sample), фронт НЕ УЗНАЁТ:"
+    echo "  ядро:  src/git/magic.rs → $core_fmt"
+    echo "  фронт: $theirs → $rx"
+    echo "  цена: в селекторе веток вместо подписи появится сырой идентификатор"
+    fail=1
+  fi
+  if printf '%s\n' "$alien" | grep -Eiq "^${rx}$"; then
+    echo "proto-sync: правило фронта узнаёт ЧУЖУЮ ветку ($alien) как серверную — оно слишком широкое"
+    fail=1
+  fi
+}
+check_branch_shape
 
 if [[ $fail -eq 0 ]]; then
   echo "proto-sync: OK (идентичны с $FRONT@$REF)"
