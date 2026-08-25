@@ -37,6 +37,10 @@ services:
       # Rate-limit RPC: обычные/тяжёлые методы, запросов в минуту (0 = выкл).
       SETFORK_RPC_RPM: ${SETFORK_RPC_RPM:-600}
       SETFORK_RPC_RPM_HEAVY: ${SETFORK_RPC_RPM_HEAVY:-60}
+      # Потолок одновременных git-операций (мини-пул под advisory-локи). Список
+      # переменных здесь ЯВНЫЙ, `env_file` не подключён — не пробросишь, и ручка,
+      # описанная в .env.example, в локальном стенде не работает вовсе.
+      SETFORK_LOCK_POOL_MAX: ${SETFORK_LOCK_POOL_MAX:-4}
     ports:
       - '${CORE_PORT:-50051}:50051'
       - '${METRICS_PORT:-9464}:9464' # Prometheus /metrics
