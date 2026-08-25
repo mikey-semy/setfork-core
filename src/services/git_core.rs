@@ -549,6 +549,11 @@ fn commit_resolved(
     // Коммит без ref-обновления; main двигает ТОЛЬКО update_main (валидация как у pre-receive).
     let merged = repo.commit(None, &sig, &sig, &msg, &tree, &parents).map_err(internal)?;
     update_main(repo, merged, Some(main_tip), &format!("merge {branch}: resolved")).map_err(main_status)?;
+    // Упаковка и на пути СЛИЯНИЯ: git2-запись авто-gc не триггерит, а merge-коммит с
+    // деревьями объекты создаёт. Ниже порога `gc --auto` почти no-op, поэтому цена
+    // вызова нулевая, а без него репо, живущее одними предложениями и слияниями,
+    // не паковалось бы никогда (замер линзы 06 §4).
+    crate::git::bundle::gc_auto(repo.path());
     Ok(merged.to_string())
 }
 
@@ -916,30 +921,67 @@ impl GitCore for GitCoreSvc {
         // Merge двигает main → критическая секция с проекцией (как receive_pack).
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let (tip, ff) = with_repo(bare.clone(), move |repo| {
-            let branch_tip = repo
-                .refname_to_id(&format!("refs/heads/{name}"))
-                .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "branch not found"))?;
-            let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
-            let (ahead, _behind) = repo.graph_ahead_behind(branch_tip, main_tip).map_err(internal)?;
-            if ahead == 0 {
-                return Err(reason::status(
-                    Code::FailedPrecondition,
-                    Reason::NothingToMerge,
-                    "branch is not ahead of base",
-                ));
-            }
-            // SQUASH: один коммит с ОДНИМ родителем (main). История ветки в main
-            // не уезжает — это и есть смысл режима. Вклад авторов не теряется:
-            // он переносится трейлерами Co-authored-by, как это делает GitHub.
-            //
-            // Проверка идёт ДО fast-forward: при squash даже перематываемую ветку
-            // сплющиваем, иначе выбор режима работал бы через раз — в зависимости
-            // от того, ушёл ли main вперёд.
-            if squash {
+            // Упаковка — на ОБЩЕМ пути успеха, а не у каждого выхода. Выходов здесь три
+            // (squash, fast-forward, merge-коммит), и первая версия правки поставила gc
+            // только у последнего: squash уходит раньше и копил бы объекты дальше
+            // (замечание авто-ревью на #106). Один вызов на все ветки не даст этому
+            // повториться при четвёртом режиме слияния.
+            let исход = (|| -> Result<(String, bool), Status> {
+                let branch_tip = repo
+                    .refname_to_id(&format!("refs/heads/{name}"))
+                    .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "branch not found"))?;
+                let main_tip = repo.refname_to_id(MAIN_REF).map_err(internal)?;
+                let (ahead, _behind) = repo.graph_ahead_behind(branch_tip, main_tip).map_err(internal)?;
+                if ahead == 0 {
+                    return Err(reason::status(
+                        Code::FailedPrecondition,
+                        Reason::NothingToMerge,
+                        "branch is not ahead of base",
+                    ));
+                }
+                // SQUASH: один коммит с ОДНИМ родителем (main). История ветки в main
+                // не уезжает — это и есть смысл режима. Вклад авторов не теряется:
+                // он переносится трейлерами Co-authored-by, как это делает GitHub.
+                //
+                // Проверка идёт ДО fast-forward: при squash даже перематываемую ветку
+                // сплющиваем, иначе выбор режима работал бы через раз — в зависимости
+                // от того, ушёл ли main вперёд.
+                if squash {
+                    let ours = repo.find_commit(main_tip).map_err(internal)?;
+                    let theirs = repo.find_commit(branch_tip).map_err(internal)?;
+                    // Дерево берём merge-ом, а не деревом ветки: main мог уйти вперёд,
+                    // и дерево ветки откатило бы чужие изменения.
+                    let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
+                    if idx.has_conflicts() {
+                        return Err(reason::status(
+                            Code::FailedPrecondition,
+                            Reason::Conflict,
+                            "merge does not apply cleanly",
+                        ));
+                    }
+                    let tree_id = idx.write_tree_to(repo).map_err(internal)?;
+                    let tree = repo.find_tree(tree_id).map_err(internal)?;
+                    let title = if message.trim().is_empty() {
+                        format!("Squashed branch '{name}'")
+                    } else {
+                        message.trim().to_string()
+                    };
+                    let msg = with_coauthors(repo, branch_tip, main_tip, &title);
+                    let sig = merge_sig()?;
+                    let squashed = repo.commit(None, &sig, &sig, &msg, &tree, &[&ours]).map_err(internal)?;
+                    update_main(repo, squashed, Some(main_tip), &format!("merge {name}: squash"))
+                        .map_err(main_status)?;
+                    return Ok((squashed.to_string(), false));
+                }
+                // main — предок ветки → fast-forward: двигаем ref (через единую точку).
+                if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) {
+                    update_main(repo, branch_tip, Some(main_tip), &format!("merge {name}: fast-forward"))
+                        .map_err(main_status)?;
+                    return Ok((branch_tip.to_string(), true));
+                }
+                // Расхождение → merge-commit; конфликт индекса = failed_precondition.
                 let ours = repo.find_commit(main_tip).map_err(internal)?;
                 let theirs = repo.find_commit(branch_tip).map_err(internal)?;
-                // Дерево берём merge-ом, а не деревом ветки: main мог уйти вперёд,
-                // и дерево ветки откатило бы чужие изменения.
                 let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
                 if idx.has_conflicts() {
                     return Err(reason::status(
@@ -950,42 +992,17 @@ impl GitCore for GitCoreSvc {
                 }
                 let tree_id = idx.write_tree_to(repo).map_err(internal)?;
                 let tree = repo.find_tree(tree_id).map_err(internal)?;
-                let title = if message.trim().is_empty() {
-                    format!("Squashed branch '{name}'")
-                } else {
-                    message.trim().to_string()
-                };
-                let msg = with_coauthors(repo, branch_tip, main_tip, &title);
                 let sig = merge_sig()?;
-                let squashed = repo.commit(None, &sig, &sig, &msg, &tree, &[&ours]).map_err(internal)?;
-                update_main(repo, squashed, Some(main_tip), &format!("merge {name}: squash"))
-                    .map_err(main_status)?;
-                return Ok((squashed.to_string(), false));
+                let msg = format!("Merge branch '{name}'");
+                let merged =
+                    repo.commit(None, &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
+                update_main(repo, merged, Some(main_tip), &format!("merge {name}")).map_err(main_status)?;
+                Ok((merged.to_string(), false))
+            })();
+            if исход.is_ok() {
+                crate::git::bundle::gc_auto(repo.path());
             }
-            // main — предок ветки → fast-forward: двигаем ref (через единую точку).
-            if repo.graph_descendant_of(branch_tip, main_tip).unwrap_or(false) {
-                update_main(repo, branch_tip, Some(main_tip), &format!("merge {name}: fast-forward"))
-                    .map_err(main_status)?;
-                return Ok((branch_tip.to_string(), true));
-            }
-            // Расхождение → merge-commit; конфликт индекса = failed_precondition.
-            let ours = repo.find_commit(main_tip).map_err(internal)?;
-            let theirs = repo.find_commit(branch_tip).map_err(internal)?;
-            let mut idx = repo.merge_commits(&ours, &theirs, None).map_err(internal)?;
-            if idx.has_conflicts() {
-                return Err(reason::status(
-                    Code::FailedPrecondition,
-                    Reason::Conflict,
-                    "merge does not apply cleanly",
-                ));
-            }
-            let tree_id = idx.write_tree_to(repo).map_err(internal)?;
-            let tree = repo.find_tree(tree_id).map_err(internal)?;
-            let sig = merge_sig()?;
-            let msg = format!("Merge branch '{name}'");
-            let merged = repo.commit(None, &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
-            update_main(repo, merged, Some(main_tip), &format!("merge {name}")).map_err(main_status)?;
-            Ok((merged.to_string(), false))
+            исход
         })
         .await?;
         // main сдвинулся → проекция новой версии (0 = list.json не изменился).
