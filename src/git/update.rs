@@ -33,7 +33,7 @@ fn first_foreign_path(tree: &git2::Tree<'_>) -> Result<Option<String>, git2::Err
         if entry.kind() == Some(git2::ObjectType::Tree) {
             return TreeWalkResult::Ok;
         }
-        let path = format!("{dir}{}", entry.name().unwrap_or("<не-utf8>"));
+        let path = format!("{dir}{}", entry.name().unwrap_or("<non-utf8>"));
         if tree_path_allowed(&path) {
             TreeWalkResult::Ok
         } else {
@@ -70,7 +70,7 @@ impl std::fmt::Display for MainUpdateError {
             MainUpdateError::MissingListJson => write!(f, "list.json is required at the repo root"),
             MainUpdateError::ForeignPath(p) => write!(
                 f,
-                "в дереве списка разрешены только README.md, list.json и .gitattributes; лишний путь: {p}"
+                "only README.md, list.json and .gitattributes are allowed in a list tree; foreign path: {p}"
             ),
             MainUpdateError::NonFastForward => write!(f, "non-fast-forward update of main is forbidden"),
             MainUpdateError::Stale => write!(f, "main moved concurrently (stale expected tip)"),

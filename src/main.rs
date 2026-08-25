@@ -136,9 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Fail-closed: пустая выборка почти наверняка значит «не та база», а не
                 // «списков нет». Снести по такой выборке ВЕСЬ том нельзя.
                 if ids.is_empty() {
-                    return Err(
-                        "в базе нет ни одного списка — отказываюсь считать все репозитории лишними".into()
-                    );
+                    return Err("no lists in the database - refusing to treat every repo as orphaned".into());
                 }
                 let live: std::collections::HashSet<uuid::Uuid> = ids.into_iter().collect();
                 let paths = git::repo::orphan_repo_dirs(&root, &live)?;
@@ -148,7 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     orphans += 1;
                     bytes += size;
                     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
-                    println!("  {} ({} КБ){}", name, size / 1024, if apply { " — удаляю" } else { "" });
+                    println!("  {} ({} KB){}", name, size / 1024, if apply { " - removing" } else { "" });
                     if apply {
                         // Список мог родиться ПОКА мы обходили том: снимок живых id
                         // сделан до обхода, и по нему свежий репозиторий выглядит
@@ -161,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 .fetch_optional(&pool)
                                 .await?;
                         if still_gone.is_some() {
-                            println!("    {name}: список появился за время обхода — не трогаю");
+                            println!("    {name}: list appeared during the sweep - leaving it alone");
                             orphans -= 1;
                             bytes -= size;
                             continue;
@@ -170,13 +168,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 println!(
-                    "gc-repos: orphan repos {orphans}, {} КБ{}",
+                    "gc-repos: orphan repos {orphans}, {} KB{}",
                     bytes / 1024,
-                    if apply {
-                        " — удалены"
-                    } else {
-                        " (показ; удалить: gc-repos --apply)"
-                    }
+                    if apply { " - removed" } else { " (dry run; to delete: gc-repos --apply)" }
                 );
                 return Ok(());
             }
@@ -387,7 +381,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    tracing::info!(%addr, "setfork-core git-core listening");
     // Auth канала Next↔ядро: общий Bearer-токен (SETFORK_CORE_TOKEN). Ядро НЕ делает
     // пользовательской авторизации (BFF-модель: весь гейт владения/модерации — на фронте),
     // поэтому токен канала — ЕДИНСТВЕННАЯ граница доступа ко всей записи/чтению контента.
@@ -408,6 +401,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(_) => tracing::info!("channel secured with a Bearer token"),
         None => tracing::warn!("SETFORK_ALLOW_INSECURE=1: channel WITHOUT authorization (local dev only)"),
     }
+    // Строка «listening» стоит ЗДЕСЬ, а не раньше проверок: раньше она печаталась до
+    // отказа по отсутствующему токену, и в логах последними двумя строками шло
+    // «listening», а следом «STOPPED». Оператор, ищущий в логах факт старта, получал
+    // ложное подтверждение (линза 10). Сокет к этому моменту ещё не открыт — открывает
+    // его `serve_with_shutdown` ниже, — но все причины НЕ стартовать уже пройдены.
+    tracing::info!(%addr, "setfork-core git-core listening");
     let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
         let got = req.metadata().get("authorization").and_then(|v| v.to_str().ok());
         if auth_ok(token, got) { Ok(req) } else { Err(Status::unauthenticated("invalid core token")) }
@@ -490,8 +489,12 @@ fn init_tracing() {
 
 /// Сверка канала: заголовок authorization против ожидаемого `Bearer <token>`.
 /// None = канал открыт явным опт-аутом (SETFORK_ALLOW_INSECURE=1, локальный dev).
-/// constant-time не нужен: токен длинный и случайный, тайминг не течёт полезно,
-/// но сравнение всё равно полное (eq по всей строке).
+/// constant-time здесь НЕ применяется, и это осознанно: токен длинный и случайный,
+/// а угадывать его по времени ответа пришлось бы через сеть и gRPC, где шум на
+/// порядки больше разницы. ⚠️ Не путать с «сравнение полное»: `==` для `str` идёт
+/// через `memcmp` и выходит по первому различию — раньше здесь было написано
+/// обратное (линза 10). Если токен когда-нибудь станет коротким или предсказуемым,
+/// менять надо не комментарий, а сравнение.
 fn auth_ok(expected: Option<&str>, got: Option<&str>) -> bool {
     match expected {
         None => true,
@@ -504,7 +507,7 @@ fn auth_ok(expected: Option<&str>, got: Option<&str>) -> bool {
 fn require_git_data_dir() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::var("GIT_DATA_DIR").unwrap_or_default();
     if root.trim().is_empty() {
-        return Err("GIT_DATA_DIR не задан (общий с фронтом том git-объектов, см. README)".into());
+        return Err("GIT_DATA_DIR is not set (git object volume shared with the frontend, see README)".into());
     }
     std::fs::create_dir_all(&root).map_err(|e| format!("GIT_DATA_DIR '{root}' is not writable: {e}"))?;
     Ok(())
@@ -513,12 +516,12 @@ fn require_git_data_dir() -> Result<(), Box<dyn std::error::Error>> {
 /// Ждёт первый из сигналов остановки: Ctrl-C (SIGINT) или SIGTERM (docker stop / k8s).
 async fn wait_for_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c().await.expect("не удалось повесить обработчик Ctrl-C");
+        tokio::signal::ctrl_c().await.expect("could not install the Ctrl-C handler");
     };
     #[cfg(unix)]
     let terminate = async {
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("не удалось повесить обработчик SIGTERM")
+            .expect("could not install the SIGTERM handler")
             .recv()
             .await;
     };

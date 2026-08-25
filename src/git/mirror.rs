@@ -40,7 +40,7 @@ pub fn decrypt_token(stored_b64: &str, secret: &str) -> Option<String> {
     let (iv, rest) = raw.split_at(12);
     let (tag, ct) = rest.split_at(16);
     let key_bytes = Sha256::digest(format!("mirror:{secret}").as_bytes());
-    let key = Key::<Aes256Gcm>::try_from(key_bytes.as_slice()).expect("sha256 = 32 байта");
+    let key = Key::<Aes256Gcm>::try_from(key_bytes.as_slice()).expect("sha256 digest is 32 bytes");
     let cipher = Aes256Gcm::new(&key);
     let nonce = Nonce::try_from(iv).ok()?;
     // RustCrypto ждёт постфиксный тег (ct||tag); Node кладёт tag ПЕРЕД ct.
@@ -54,7 +54,7 @@ pub fn decrypt_token(stored_b64: &str, secret: &str) -> Option<String> {
 #[cfg(test)]
 pub fn encrypt_token(plain: &str, secret: &str) -> String {
     let key_bytes = Sha256::digest(format!("mirror:{secret}").as_bytes());
-    let key = Key::<Aes256Gcm>::try_from(key_bytes.as_slice()).expect("sha256 = 32 байта");
+    let key = Key::<Aes256Gcm>::try_from(key_bytes.as_slice()).expect("sha256 digest is 32 bytes");
     let cipher = Aes256Gcm::new(&key);
     // Случайный nonce из os-rng через uuid (фича getrandom у aes-gcm не включена;
     // для теста формата этого достаточно, прод шифрует фронт).
@@ -153,7 +153,7 @@ async fn run_push(
     refspecs: &[&str],
 ) -> Result<(), String> {
     if !valid_mirror_url(url) {
-        return Err("mirror URL must be https://host/owner/repo (без кредов в URL)".to_string());
+        return Err("mirror URL must be https://host/owner/repo (no credentials in the URL)".to_string());
     }
     let pushurl = url_with_token(url, token).ok_or("bad mirror URL")?;
     let bare_s = bare.to_string_lossy().to_string();
@@ -168,8 +168,8 @@ async fn run_push(
         .output();
     let out = match tokio::time::timeout(Duration::from_secs(60), child).await {
         Ok(Ok(out)) => out,
-        Ok(Err(e)) => return Err(format!("git push не запустился: {e}")),
-        Err(_) => return Err("git push: таймаут 60с (сеть/форджа не отвечает)".to_string()),
+        Ok(Err(e)) => return Err(format!("git push failed to start: {e}")),
+        Err(_) => return Err("git push timed out after 60s (network or forge not responding)".to_string()),
     };
     if out.status.success() {
         Ok(())

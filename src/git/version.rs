@@ -488,7 +488,7 @@ pub async fn commit_web_version(
     let bare2 = bare.to_path_buf();
     let sha = match tokio::task::spawn_blocking(move || bundle::append_versions(&bare2, &[vdata])).await {
         Ok(Ok(Some(sha))) => sha,
-        Ok(Ok(None)) => return Err(WebVersionError::Git("append_versions: нечего коммитить".into())),
+        Ok(Ok(None)) => return Err(WebVersionError::Git("append_versions: nothing to commit".into())),
         Ok(Err(e)) => return Err(WebVersionError::Git(e.to_string())),
         Err(e) => return Err(WebVersionError::Git(e.to_string())),
     };

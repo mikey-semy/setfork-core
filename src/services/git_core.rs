@@ -725,7 +725,7 @@ impl GitCore for GitCoreSvc {
             tracing::warn!(
                 owner = %repo.owner,
                 slug = %repo.slug,
-                "push without a role: frontend predates Ф5, contributor namespace rule is not applied"
+                "push without a role: frontend predates phase 5, contributor namespace rule is not applied"
             );
         }
         let role = actor_role.clone();
