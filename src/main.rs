@@ -335,6 +335,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if shutting.load(std::sync::atomic::Ordering::Relaxed) {
                     break;
                 }
+                // Снимок пула — ДО пробы, а не после. Проба берёт соединение из этого же
+                // пула и держит его, пока идёт `select 1`: замер после неё показывал бы
+                // на одно свободное меньше, чем есть. При пуле из одного соединения это
+                // ровно «db_pool_idle 0» ВСЕГДА — то есть прибор, по которому судят о
+                // насыщении пула, врал бы в сторону тревоги (замер на проде 24.08).
+                metrics::gauge!("db_pool_size").set(pool_h.size() as f64);
+                metrics::gauge!("db_pool_idle").set(pool_h.num_idle() as f64);
                 let ok = tokio::time::timeout(
                     std::time::Duration::from_secs(3),
                     sqlx::query("select 1").execute(&pool_h),
@@ -343,8 +350,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(|r| r.is_ok())
                 .unwrap_or(false);
                 metrics::gauge!("db_healthy").set(if ok { 1.0 } else { 0.0 });
-                metrics::gauge!("db_pool_size").set(pool_h.size() as f64);
-                metrics::gauge!("db_pool_idle").set(pool_h.num_idle() as f64);
                 if ok != healthy {
                     healthy = ok;
                     if ok {
