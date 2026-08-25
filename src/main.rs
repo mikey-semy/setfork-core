@@ -381,7 +381,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    tracing::info!(%addr, "setfork-core git-core listening");
     // Auth канала Next↔ядро: общий Bearer-токен (SETFORK_CORE_TOKEN). Ядро НЕ делает
     // пользовательской авторизации (BFF-модель: весь гейт владения/модерации — на фронте),
     // поэтому токен канала — ЕДИНСТВЕННАЯ граница доступа ко всей записи/чтению контента.
@@ -402,6 +401,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(_) => tracing::info!("channel secured with a Bearer token"),
         None => tracing::warn!("SETFORK_ALLOW_INSECURE=1: channel WITHOUT authorization (local dev only)"),
     }
+    // Строка «listening» стоит ЗДЕСЬ, а не раньше проверок: раньше она печаталась до
+    // отказа по отсутствующему токену, и в логах последними двумя строками шло
+    // «listening», а следом «STOPPED». Оператор, ищущий в логах факт старта, получал
+    // ложное подтверждение (линза 10). Сокет к этому моменту ещё не открыт — открывает
+    // его `serve_with_shutdown` ниже, — но все причины НЕ стартовать уже пройдены.
+    tracing::info!(%addr, "setfork-core git-core listening");
     let check_auth = move |req: Request<()>| -> Result<Request<()>, Status> {
         let got = req.metadata().get("authorization").and_then(|v| v.to_str().ok());
         if auth_ok(token, got) { Ok(req) } else { Err(Status::unauthenticated("invalid core token")) }
@@ -484,8 +489,12 @@ fn init_tracing() {
 
 /// Сверка канала: заголовок authorization против ожидаемого `Bearer <token>`.
 /// None = канал открыт явным опт-аутом (SETFORK_ALLOW_INSECURE=1, локальный dev).
-/// constant-time не нужен: токен длинный и случайный, тайминг не течёт полезно,
-/// но сравнение всё равно полное (eq по всей строке).
+/// constant-time здесь НЕ применяется, и это осознанно: токен длинный и случайный,
+/// а угадывать его по времени ответа пришлось бы через сеть и gRPC, где шум на
+/// порядки больше разницы. ⚠️ Не путать с «сравнение полное»: `==` для `str` идёт
+/// через `memcmp` и выходит по первому различию — раньше здесь было написано
+/// обратное (линза 10). Если токен когда-нибудь станет коротким или предсказуемым,
+/// менять надо не комментарий, а сравнение.
 fn auth_ok(expected: Option<&str>, got: Option<&str>) -> bool {
     match expected {
         None => true,

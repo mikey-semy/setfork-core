@@ -3,7 +3,7 @@
 Rust git-ядро SetFork (Gitaly-стиль): обслуживает тяжёлые git-операции и доменные
 read/write-порты для Next-BFF по gRPC. Контракты — `proto/git.proto` (GitCore) и
 `proto/domain_read.proto` (ListRead/ListWrite/CurationRead/CurationWrite/CollabWrite);
-это копии из sethub-app, держать синхронными.
+это копии из `setfork-frontend`, держать синхронными (гейт — `scripts/check-proto-sync.sh`).
 
 ## Структура
 
@@ -14,6 +14,9 @@ src/
 ├─ config.rs           вся конфигурация из env, один раз на старте, с валидацией
 ├─ pb.rs, pb_domain.rs сгенерённые tonic-модули (setfork.git.v1 / setfork.domain.v1)
 ├─ blocks.rs           блочная модель: is_step/нормализация type/content (одно место)
+├─ gate.rs             проверка права на запись: обратный вызов в приложение (ADR-0015)
+├─ reason.rs           машинный код причины отказа в трейлере ответа (И1, AIP-193)
+├─ throttle.rs         схлопывание фоновых пушей зеркала окном (throttle, не debounce)
 ├─ services/           gRPC-сервисы по доменам (транспортный слой)
 │  ├─ git_core.rs      GitCore: smart-HTTP, ветки/теги/merge/bundle
 │  ├─ list.rs          ListRead + ListWrite (зеркало list-store.adapter.ts)
@@ -26,6 +29,14 @@ src/
 │  ├─ bundle.rs        материализация репо из истории версий, bundle, pre-receive hook
 │  ├─ project.rs       обратное чтение состояния списка из git-дерева (проекция в БД)
 │  ├─ repo.rs          персистентные bare-репо (GIT_DATA_DIR), пер-репо локи + lock-пул
+│  ├─ version.rs       ЕДИНСТВЕННЫЙ путь записи версии + самолечение репо (Ф1)
+│  ├─ write.rs         коммит list.json: сборка дерева и родителя
+│  ├─ update.rs        движение main: правило состава дерева, не-fast-forward, гонка
+│  ├─ canon.rs         канонический вид list.json (байты, по которым считается sha)
+│  ├─ history.rs       чтение истории: ветки, теги, дифф версий
+│  ├─ magic.rs         пространство имён веток `u/<id>/…` и refs/for/main
+│  ├─ messages.rs      каталог сообщений хука, двуязычный (И2)
+│  ├─ mirror.rs        пуш зеркала в GitHub/GitLab (Ф3), шифрование токена
 │  └─ smart_http.rs    git smart-HTTP (порт smart-http.ts; стриминговый stdin)
 ├─ db.rs               sqlx/Postgres: пулы (основной + lock), запросы под git-проекцию
 ├─ ratelimit.rs        tower-layer: скользящее окно per-метод (heavy/обычный бюджеты)
@@ -44,10 +55,26 @@ cargo test             # юнит + roundtrip с настоящим git
 cargo run              # gRPC-сервер на 127.0.0.1:50051 (SETFORK_CORE_ADDR — override)
 ```
 
-Обязательное окружение сервера: `DATABASE_URL`, `GIT_DATA_DIR` (общий с фронтом том
-bare-репо), `SETFORK_CORE_TOKEN` (Bearer-токен канала; без него старт только с
-`SETFORK_ALLOW_INSECURE=1` — локальный dev). Rate-limit: `SETFORK_RPC_RPM`,
-`SETFORK_RPC_RPM_HEAVY` (0 = выключить).
+Обязательное окружение сервера — **четыре** переменных, и ядро останавливается на старте,
+если любой нет (fail-fast: молча деградировать до открытой двери нельзя):
+
+| переменная | без неё |
+|---|---|
+| `DATABASE_URL` | не к чему подключаться |
+| `GIT_DATA_DIR` | нет тома bare-репо (общий с фронтом) |
+| `SETFORK_CORE_TOKEN` | канал без авторизации — полный обход владения и модерации |
+| `SETFORK_APP_URL` | некого спросить «можно ли писать» (ADR-0015): заморозка и архив перестают действовать на git-путях |
+
+Последние две можно снять только явным опт-аутом `SETFORK_ALLOW_INSECURE=1` — это локальный
+dev, не режим прода.
+
+Полный перечень остального окружения с объяснением «зачем» — в `.env.example`; ручки границ
+приёма (`SETFORK_MAX_RECV_MB`, `SETFORK_MAX_PACK_MB`, `SETFORK_REPO_LIMIT_MB`), окно зеркала,
+размер lock-пула и rate-limit (`SETFORK_RPC_RPM`, `SETFORK_RPC_RPM_HEAVY`, 0 = выключить)
+живут там.
+
+⚠️ Дефолты в образе ДРУГИЕ, чем при `cargo run`: `Dockerfile` ставит `SETFORK_CORE_ADDR=0.0.0.0:50051`
+и `SETFORK_METRICS_ADDR=0.0.0.0:9464` — иначе снаружи контейнера не достучаться.
 
 ## Наблюдаемость
 
@@ -57,17 +84,25 @@ bare-репо), `SETFORK_CORE_TOKEN` (Bearer-токен канала; без н�
 - **Метрики** — Prometheus на `SETFORK_METRICS_ADDR` (дефолт `127.0.0.1:9464`, `/metrics`;
   `0`/`off` — выключить): `rpc_requests_total{method,code}`, `rpc_duration_seconds{method}`,
   `rpc_rate_limited_total{method}`, `projection_failures_total{op}`, `db_healthy`,
-  `db_pool_size`, `db_pool_idle`.
+  `db_pool_size`, `db_pool_idle`, `write_gate_denied_total{reason}` (отказы гейта записи),
+  `repo_bytes`, `repo_catchup_versions_total`, `version_tag_conflicts_total`,
+  `mirror_push_total{result}`, `mirror_push_duration_seconds{result}`.
 - **Health** (grpc.health.v1) — привязан к БД: фоновая проба `SELECT 1` каждые 5с,
   при недоступности БД сервис уходит в NOT_SERVING (оркестратор уводит трафик) и
   возвращается в SERVING после восстановления.
 - **Reflection** (v1 + v1alpha) — `grpcurl -plaintext host:50051 list` работает без
   локальных proto-файлов.
 
-## Golden-сверка с TS
+## Режимы CLI
 
-CLI-режимы гоняют тот же код-пас, что и RPC, без транспорта — байты/JSON сверяются
-со скриптами sethub-app:
+Бинарь ядра — не только сервер: первый аргумент выбирает режим, и без аргументов
+запускается gRPC-сервер. ⚠️ Неизвестный режим (опечатка в имени команды) тоже запускает
+сервер, а не сообщает об ошибке.
+
+### Golden-сверка с TS
+
+Гоняют тот же код-пас, что и RPC, без транспорта — байты/JSON сверяются со скриптами
+фронта:
 
 ```sh
 cargo run -- bundle            <owner> <slug> <out>
@@ -76,6 +111,17 @@ cargo run -- advertise-receive <owner> <slug> <out>
 cargo run -- upload-pack       <owner> <slug> <body> <out>
 cargo run -- domain-read       <owner> <slug> <out.json>
 ```
+
+### Операторские режимы
+
+```sh
+cargo run -- reproject  <owner> <slug>   # проекция одного списка из текущего main-tip
+cargo run -- sync-repos                  # выровнять ВСЕ репо с БД (идемпотентно)
+cargo run -- gc-repos                    # показать бесхозные репо; --apply чтобы удалить
+```
+
+Порядок разбора и все исходы `sync-repos` — в рунбуке
+[git-projection-catchup](https://github.com/mikey-semy/setfork-hq/blob/master/runbooks/git-projection-catchup.md).
 
 ## Восстановление после сбоя проекции
 
