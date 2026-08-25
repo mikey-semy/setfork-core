@@ -189,7 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await?;
                 let total = rows.len();
                 let (mut in_sync, mut boot, mut appended, mut projected, mut conflicts) = (0, 0, 0, 0, 0);
-                let mut restored = 0;
+                let (mut restored, mut unversioned) = (0, 0);
                 for (id, handle, slug) in rows {
                     let bare = git::repo::repo_path(id);
                     let _guard = git::repo::repo_guard(&pool, id).await?;
@@ -211,6 +211,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             projected += 1;
                             println!("  {handle}/{slug}: tip projected into db -> v{version}");
                         }
+                        Ok(git::version::SyncOutcome::TipNotVersioned { current }) => {
+                            unversioned += 1;
+                            println!(
+                                "  {handle}/{slug}: main is ahead of v{current} but its tip has no \
+                                 readable list.json - no action needed, but the canon does not parse"
+                            );
+                        }
                         Ok(git::version::SyncOutcome::Conflict { have, current }) => {
                             conflicts += 1;
                             println!(
@@ -226,7 +233,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 println!(
                     "sync-repos: total {total}; in sync {in_sync}, created {boot}, main restored {restored}, \
-                     caught up {appended}, projected {projected}, conflicts {conflicts}"
+                     caught up {appended}, projected {projected}, tip not versioned {unversioned}, \
+                     conflicts {conflicts}"
                 );
                 if conflicts > 0 {
                     return Err(format!("{conflicts} repos need manual intervention").into());

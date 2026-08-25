@@ -209,7 +209,15 @@ async fn битый_tip_не_блокирует_запись() {
     let broken_tip = commit_raw_list_json_on_main(&bare, b"definitely not json");
 
     let sync = sync_repo_with_db(&pool, list_id, &bare).await.expect("sync");
-    assert_eq!(sync, SyncOutcome::InSync, "битый tip — не версия и не блокер");
+    // Исход НАЗВАН отдельно (26.08, 10-F9): раньше это было `InSync`, и итоговая строка
+    // отчёта `sync-repos` считала такой список синхронным. Смысл прежний — рук не требует,
+    // запись ложится поверх, — но «синхронно» и «канон на вершине не читается» это разные
+    // вещи, и оператор обязан видеть вторую.
+    assert_eq!(
+        sync,
+        SyncOutcome::TipNotVersioned { current: 1 },
+        "битый tip — не версия и не блокер, но и не «синхронно»"
+    );
 
     let out = commit_web_version(
         &pool,
