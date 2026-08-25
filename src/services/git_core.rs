@@ -549,6 +549,11 @@ fn commit_resolved(
     // Коммит без ref-обновления; main двигает ТОЛЬКО update_main (валидация как у pre-receive).
     let merged = repo.commit(None, &sig, &sig, &msg, &tree, &parents).map_err(internal)?;
     update_main(repo, merged, Some(main_tip), &format!("merge {branch}: resolved")).map_err(main_status)?;
+    // Упаковка и на пути СЛИЯНИЯ: git2-запись авто-gc не триггерит, а merge-коммит с
+    // деревьями объекты создаёт. Ниже порога `gc --auto` почти no-op, поэтому цена
+    // вызова нулевая, а без него репо, живущее одними предложениями и слияниями,
+    // не паковалось бы никогда (замер линзы 06 §4).
+    crate::git::bundle::gc_auto(repo.path());
     Ok(merged.to_string())
 }
 
@@ -985,6 +990,7 @@ impl GitCore for GitCoreSvc {
             let msg = format!("Merge branch '{name}'");
             let merged = repo.commit(None, &sig, &sig, &msg, &tree, &[&ours, &theirs]).map_err(internal)?;
             update_main(repo, merged, Some(main_tip), &format!("merge {name}")).map_err(main_status)?;
+            crate::git::bundle::gc_auto(repo.path());
             Ok((merged.to_string(), false))
         })
         .await?;
