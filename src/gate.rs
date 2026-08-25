@@ -125,14 +125,14 @@ enum Verdict {
 /// Неожиданная форма — это НЕ «можно»: непонятый ответ значит «спросить не удалось».
 fn parse_verdict(body: &[u8]) -> Verdict {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
-        return Verdict::Malformed("вердикт не разобрался как JSON".into());
+        return Verdict::Malformed("verdict did not parse as JSON".into());
     };
     match v.get("allow").and_then(|a| a.as_bool()) {
         Some(true) => Verdict::Allow,
         Some(false) => {
             Verdict::Deny(v.get("reason").and_then(|r| r.as_str()).unwrap_or("denied").to_string())
         }
-        None => Verdict::Malformed("в вердикте нет поля allow".into()),
+        None => Verdict::Malformed("verdict has no 'allow' field".into()),
     }
 }
 
@@ -151,7 +151,7 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
     }
     let req = match builder.body(Full::new(Bytes::from(payload))) {
         Ok(r) => r,
-        Err(e) => return Verdict::Local(format!("запрос не собрался: {e}")),
+        Err(e) => return Verdict::Local(format!("request could not be built: {e}")),
     };
 
     // Таймаут накрывает ВЕСЬ обмен, а не только получение заголовков: future от
@@ -162,7 +162,7 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
     let exchange = async {
         let resp = match client().request(req).await {
             Ok(r) => r,
-            Err(e) => return Verdict::Unreachable(format!("приложение недоступно: {e}")),
+            Err(e) => return Verdict::Unreachable(format!("app is unreachable: {e}")),
         };
         let status = resp.status();
         if !status.is_success() {
@@ -173,19 +173,19 @@ async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
             // долбиться в неверную настройку бесконечно (находка своего прохода
             // ревью по #101).
             return if status.is_server_error() {
-                Verdict::Unreachable(format!("приложение ответило {status}"))
+                Verdict::Unreachable(format!("app answered {status}"))
             } else {
-                Verdict::Malformed(format!("приложение ответило {status} — спросить не дало"))
+                Verdict::Malformed(format!("app answered {status}, so the question went unanswered"))
             };
         }
         match resp.into_body().collect().await {
             Ok(b) => parse_verdict(&b.to_bytes()),
-            Err(e) => Verdict::Unreachable(format!("тело вердикта не прочиталось: {e}")),
+            Err(e) => Verdict::Unreachable(format!("verdict body could not be read: {e}")),
         }
     };
     match tokio::time::timeout(TIMEOUT, exchange).await {
         Ok(v) => v,
-        Err(_) => Verdict::Unreachable(format!("приложение не ответило за {TIMEOUT:?}")),
+        Err(_) => Verdict::Unreachable(format!("app did not answer within {TIMEOUT:?}")),
     }
 }
 

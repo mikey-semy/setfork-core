@@ -19,7 +19,8 @@ use uuid::Uuid;
 // у Rust и Next разный cwd, поэтому дефолт `cwd/.setfork-git` не годится — только явный путь.
 fn root() -> PathBuf {
     PathBuf::from(
-        std::env::var("GIT_DATA_DIR").expect("GIT_DATA_DIR не задан (общий с фронтом том git-объектов)"),
+        std::env::var("GIT_DATA_DIR")
+            .expect("GIT_DATA_DIR is not set (git object volume shared with the frontend)"),
     )
 }
 /// Путь bare-репо списка. pub — нужен CLI sync-repos и git-first пути записи.
