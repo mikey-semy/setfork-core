@@ -41,6 +41,13 @@ pub enum SyncOutcome {
     Appended { from: i32, to: i32 },
     /// Git был на одну версию впереди (сбой прошлой проекции) — tip спроецирован в БД.
     ProjectedTip { version: i32 },
+    /// `main` впереди своего тега, но вершина НЕ проецируется (битый или пустой
+    /// `list.json`). Действия не требует — неверсионный коммит законен, запись поверх
+    /// него легитимна, — но и «синхронно» это не значит: канон на вершине не читается.
+    ///
+    /// Отдельным исходом, а не `InSync`, потому что итоговая строка отчёта — то, по чему
+    /// оператор судит о результате, и она говорила «всё синхронно» (линза 10, 10-F9).
+    TipNotVersioned { current: i32 },
     /// Расхождение, которое чинится только руками (посторонний тег vN и т.п.) —
     /// см. runbook git-projection-catchup.
     Conflict { have: i32, current: i32 },
@@ -167,7 +174,7 @@ async fn align_by_counters(
                         %id, current,
                         "main is ahead of tag v{current} but the tip does not project (list.json without a version), left as is"
                     );
-                    return Ok(SyncOutcome::InSync);
+                    return Ok(SyncOutcome::TipNotVersioned { current });
                 }
             }
         }
