@@ -103,6 +103,17 @@ pub struct CollabWriteSvc {
     pub pool: PgPool,
 }
 
+/// Своё пространство advisory-ключей под ВЫДАЧУ НОМЕРОВ.
+///
+/// Ключ строится из uuid списка так же, как у репо-лока, но с меткой: иначе создание
+/// задачи ждало бы git-операцию по тому же списку, а это разные очереди.
+const МЕТКА_НУМЕРАЦИИ: i64 = 0x5346_4E55_4D42_5200; // «SFNUMBR»
+
+fn ключ_нумерации(id: Uuid) -> i64 {
+    let b = id.as_bytes();
+    i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) ^ МЕТКА_НУМЕРАЦИИ
+}
+
 #[tonic::async_trait]
 impl CollabWrite for CollabWriteSvc {
     async fn open_issue(&self, req: Request<OpenIssueRequest>) -> Result<Response<Issue>, Status> {
@@ -111,6 +122,20 @@ impl CollabWrite for CollabWriteSvc {
         let (tid, uid) = (parse_id(&list_id)?, parse_id(&author_id)?);
         let labels_json =
             serde_json::Value::Array(labels.iter().map(|l| serde_json::Value::String(l.clone())).collect());
+        // НОМЕР ВЫДАЁТСЯ ПОД ЛОКОМ. `max(number) + 1` подзапросом — гонка: двое читают
+        // одно и то же и падают на уникальном индексе `issues_tpl_number`. Замер пробы
+        // `issue_number_probe`: из восьми одновременных задач создавались ЧЕТЫРЕ,
+        // остальные получали AlreadyExists (дефект 2 реестра ревью ядра).
+        //
+        // Лок, а не повтор при конфликте: нумерация сквозная в пределах списка, то есть
+        // ПО СМЫСЛУ последовательна, и очередь тут честнее, чем гонка с повторами.
+        // Ключ — в своём пространстве, чтобы не пересекаться с репо-локом.
+        let mut tx = self.pool.begin().await.map_err(db_status)?;
+        sqlx::query("select pg_advisory_xact_lock($1)")
+            .bind(ключ_нумерации(tid))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_status)?;
         let r = sqlx::query(
             "insert into issues (template_id, author_id, title, body, labels, number) \
              values ($1, $2, $3, $4, $5::jsonb, \
@@ -124,9 +149,10 @@ impl CollabWrite for CollabWriteSvc {
         .bind(&title)
         .bind(&body)
         .bind(&labels_json)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(db_status)?;
+        tx.commit().await.map_err(db_status)?;
         Ok(Response::new(Issue {
             id: r.get::<Uuid, _>("id").to_string(),
             list_id,
@@ -195,6 +221,14 @@ impl CollabWrite for CollabWriteSvc {
         let CreateSuggestionRequest { list_id, author_id, note, steps } = req.into_inner();
         let (tid, uid) = (parse_id(&list_id)?, parse_id(&author_id)?);
         let items = serde_json::Value::Array(steps.iter().map(proposed_json).collect());
+        // Номер — под тем же локом, что у задач: у предложений своя сквозная нумерация
+        // и свой уникальный индекс, гонка там ровно та же (проба показывала 4 из 8).
+        let mut tx = self.pool.begin().await.map_err(db_status)?;
+        sqlx::query("select pg_advisory_xact_lock($1)")
+            .bind(ключ_нумерации(tid))
+            .execute(&mut *tx)
+            .await
+            .map_err(db_status)?;
         let r = sqlx::query(
             // number — как у задач: адресуемость правки (#12) и человеческие ссылки.
             // Без него правка, созданная ЭТИМ путём, осталась бы без номера, и
@@ -209,9 +243,10 @@ impl CollabWrite for CollabWriteSvc {
         .bind(uid)
         .bind(&note)
         .bind(&items)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(db_status)?;
+        tx.commit().await.map_err(db_status)?;
         let items_back: serde_json::Value = r.get("items");
         let out_steps =
             items_back.as_array().map(|a| a.iter().map(json_to_step).collect()).unwrap_or_default();

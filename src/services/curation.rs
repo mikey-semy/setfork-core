@@ -77,6 +77,16 @@ impl CurationWrite for CurationWriteSvc {
         let UserList { list_id, user_id } = req.into_inner();
         let (tid, uid) = (parse_id(&list_id)?, parse_id(&user_id)?);
         let mut tx = self.pool.begin().await.map_err(db_status)?;
+        // СЧЁТЧИК ДВИГАЕТСЯ ПО ФАКТУ ЗАПИСИ, а не по прочитанному состоянию.
+        //
+        // Раньше было «прочитал → решил → записал»: шесть одновременных нажатий одного
+        // человека читали «звезды нет», вставляли (строка одна, `on conflict do nothing`)
+        // — и КАЖДОЕ увеличивало счётчик. Замер пробы `star_count_probe`: строк 1,
+        // счётчик 4 (дефект 1 реестра ревью ядра). Это корень K32 карты корней.
+        //
+        // Теперь считаем то, что действительно произошло: `rows_affected` у вставки и
+        // удаления. Замок не нужен — уникальный индекс сам решает, кто первый, а
+        // проигравшему достаётся ноль строк и ноль изменений счётчика.
         let existed: Option<(i32,)> =
             sqlx::query_as("select 1 from stars where user_id = $1 and template_id = $2 limit 1")
                 .bind(uid)
@@ -85,30 +95,38 @@ impl CurationWrite for CurationWriteSvc {
                 .await
                 .map_err(db_status)?;
         let now_starred = if existed.is_some() {
-            sqlx::query("delete from stars where user_id = $1 and template_id = $2")
+            let ушло = sqlx::query("delete from stars where user_id = $1 and template_id = $2")
                 .bind(uid)
                 .bind(tid)
                 .execute(&mut *tx)
                 .await
-                .map_err(db_status)?;
-            sqlx::query("update templates set stars_count = GREATEST(stars_count - 1, 0) where id = $1")
-                .bind(tid)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_status)?;
+                .map_err(db_status)?
+                .rows_affected();
+            if ушло > 0 {
+                sqlx::query("update templates set stars_count = GREATEST(stars_count - 1, 0) where id = $1")
+                    .bind(tid)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_status)?;
+            }
             false
         } else {
-            sqlx::query("insert into stars (user_id, template_id) values ($1, $2) on conflict do nothing")
-                .bind(uid)
-                .bind(tid)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_status)?;
-            sqlx::query("update templates set stars_count = stars_count + 1 where id = $1")
-                .bind(tid)
-                .execute(&mut *tx)
-                .await
-                .map_err(db_status)?;
+            let легло = sqlx::query(
+                "insert into stars (user_id, template_id) values ($1, $2) on conflict do nothing",
+            )
+            .bind(uid)
+            .bind(tid)
+            .execute(&mut *tx)
+            .await
+            .map_err(db_status)?
+            .rows_affected();
+            if легло > 0 {
+                sqlx::query("update templates set stars_count = stars_count + 1 where id = $1")
+                    .bind(tid)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(db_status)?;
+            }
             true
         };
         tx.commit().await.map_err(db_status)?;

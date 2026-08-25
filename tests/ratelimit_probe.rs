@@ -18,8 +18,20 @@ use tonic::{Code, Request};
 
 const ADDR: &str = "http://127.0.0.1:50051";
 
-async fn chan() -> Channel {
-    Channel::from_static(ADDR).connect().await.expect("ядро должно быть поднято на 50051")
+/// `None` — ядра на 50051 нет. Проба РУЧНАЯ (нужен сервер с особыми лимитами), и
+/// падать из-за его отсутствия она не должна: тогда любой общий прогон с фичей
+/// `probes` краснеет не по делу, а на такую красноту перестают смотреть.
+async fn chan() -> Option<Channel> {
+    match Channel::from_static(ADDR).connect().await {
+        Ok(c) => Some(c),
+        Err(_) => {
+            eprintln!(
+                "ПРОПУСК: ядра на {ADDR} нет. Проба ручная — подними ядро с \
+                 SETFORK_RPC_RPM=3 SETFORK_RPC_RPM_HEAVY=2 и токеном probe-token."
+            );
+            None
+        }
+    }
 }
 
 fn req(token: Option<&str>) -> Request<RepoRef> {
@@ -35,7 +47,8 @@ fn req(token: Option<&str>) -> Request<RepoRef> {
 #[tokio::test]
 #[ignore = "нужно поднятое ядро с SETFORK_RPC_RPM=3"]
 async fn лимит_обычного_метода_доходит_до_клиента() {
-    let mut c = GitCoreClient::new(chan().await);
+    let Some(канал) = chan().await else { return };
+    let mut c = GitCoreClient::new(канал);
     let mut codes = Vec::new();
     for _ in 0..6 {
         let code = match c.list_branches(req(Some("probe-token"))).await {
@@ -60,7 +73,8 @@ async fn лимит_обычного_метода_доходит_до_клиен
 #[tokio::test]
 #[ignore = "нужно поднятое ядро"]
 async fn чужой_токен_не_съедает_бюджет() {
-    let mut c = GitCoreClient::new(chan().await);
+    let Some(канал) = chan().await else { return };
+    let mut c = GitCoreClient::new(канал);
     let mut unauth = Vec::new();
     for _ in 0..20 {
         let code = match c.list_tags(req(Some("wrong-token"))).await {
@@ -91,7 +105,8 @@ async fn чужой_токен_не_съедает_бюджет() {
 async fn health_не_лимитируется() {
     use tonic_health::pb::HealthCheckRequest;
     use tonic_health::pb::health_client::HealthClient;
-    let mut h = HealthClient::new(chan().await);
+    let Some(канал) = chan().await else { return };
+    let mut h = HealthClient::new(канал);
     let mut codes = Vec::new();
     for _ in 0..30 {
         let code = match h.check(HealthCheckRequest { service: String::new() }).await {

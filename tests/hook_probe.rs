@@ -40,6 +40,10 @@ fn step(n: i32, title: &str) -> SerStep {
         section: String::new(),
         subtasks: vec![],
         refs: vec![],
+        image_key: None,
+        needs_human: false,
+        needs_human_ask: None,
+        danger: false,
     }
 }
 
@@ -52,6 +56,7 @@ fn ver(version: i32, note: &str, steps: Vec<SerStep>) -> VersionData {
         desc: "d".into(),
         tags: vec![],
         ordered: true,
+        kind: None,
         steps,
     }
 }
@@ -105,7 +110,10 @@ fn защита_main_от_перезаписи_истории_и_удалени�
     let err = String::from_utf8_lossy(&deleted.stderr).to_string();
     println!("УДАЛЕНИЕ MAIN: success={} stderr={}", deleted.status.success(), err.trim());
     assert!(!deleted.status.success(), "удаление main обязано быть отвергнуто");
-    assert!(err.contains("защищена от удаления"), "внятная причина: {err}");
+    // Язык отказа по умолчанию АНГЛИЙСКИЙ (И1/И2 трека core-i18n): русский приходит,
+    // только если его попросили. Раньше здесь стоял русский текст — проба отстала от
+    // локализации ещё до того, как перестала компилироваться.
+    assert!(err.contains("protected from deletion"), "внятная причина: {err}");
     assert_eq!(ok(&bare, &["rev-parse", "main"]), before, "main на месте");
 
     // 3. PUSH БЕЗ list.json — канон обязателен в корне.

@@ -15,7 +15,8 @@ mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
 use setfork_core::pb::{
-    CommitToBranchRequest, CreateBranchRequest, MergeBranchRequest, MergeResolvedRequest, RepoRef,
+    CommitToBranchRequest, CreateBranchRequest, ListContent, MergeBranchRequest, MergeResolvedRequest,
+    ParseCanonRequest, RepoRef,
 };
 use setfork_core::pb_domain::list_write_server::ListWrite;
 use setfork_core::pb_domain::{CreateListRequest, LocaleText, NewStep};
@@ -50,6 +51,7 @@ fn step(title: &str) -> NewStep {
         content_json: String::new(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
     }
 }
 
@@ -102,6 +104,7 @@ async fn seed(pool: &sqlx::PgPool, handle: &str, slug: &str, steps: Vec<NewStep>
             status: String::new(),
             origin: String::new(),
             forked_from_id: String::new(),
+            moderation: String::new(),
             note: "v1".into(),
             steps,
         }))
@@ -124,11 +127,27 @@ fn proj_step(title: &str) -> setfork_core::git::project::ProjStep {
         section: String::new(),
         subtasks: vec![],
         refs: vec![],
+        image_key: None,
+        needs_human: None,
+        needs_human_ask: None,
+        danger: None,
     }
 }
 
 /// Главное решение автора #54: дерево берётся MERGE-ом, а не деревом ветки.
 /// Иначе squash тихо откатывает работу, приехавшую в main после создания ветки.
+/// Канон ТЕКСТОМ → содержимое для записи. Пробы правят канон подстрокой (так же
+/// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
+/// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
+/// проверять своё, а не форму запроса.
+async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+    git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
+        .await
+        .expect("канон разбирается")
+        .into_inner()
+        .content
+}
+
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn squash_не_откатывает_работу_приехавшую_в_main() {
@@ -164,7 +183,7 @@ async fn squash_не_откатывает_работу_приехавшую_в_m
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-1".into(),
-        list_json: branch_json.into_bytes(),
+        content: содержимое(&git, rr.clone(), branch_json).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -252,7 +271,7 @@ async fn squash_сплющивает_и_перематываемую_ветку(
         git.commit_to_branch(Request::new(CommitToBranchRequest {
             repo: rr.clone(),
             branch: "pr-ff".into(),
-            list_json: j.into_bytes(),
+            content: содержимое(&git, rr.clone(), j).await,
             message: i.into(),
             author_name: who.into(),
             author_email: format!("{}@example.com", who.to_lowercase()),
@@ -288,14 +307,18 @@ async fn squash_сплющивает_и_перематываемую_ветку(
     assert!(msg.contains("Аня") && msg.contains("Боря"), "оба автора в трейлерах: {msg:?}");
 }
 
-/// ЧТО ПРОИСХОДИТ С ВЫБРАННЫМ РЕЖИМОМ ПРИ КОНФЛИКТЕ.
+/// ВЫБРАННЫЙ РЕЖИМ ДОЖИВАЕТ ДО РАЗРЕШЕНИЯ КОНФЛИКТА.
 ///
-/// list.json — единственный файл списка, поэтому правка одного и того же места
-/// в ветке и в main даёт конфликт merge. Штатный путь дальше — MergeResolved.
-/// Вопрос проверки: доживает ли выбор «squash» до этого пути.
+/// list.json — единственный файл списка, поэтому правка одного и того же места в
+/// ветке и в main даёт конфликт merge. Штатный путь дальше — `MergeResolved`.
+///
+/// ⚠️ Эта проба РОДИЛАСЬ КАК ДЕМОНСТРАЦИЯ ДЕФЕКТА: выбор «squash» терялся, и
+/// разрешение конфликта всегда давало merge-коммит с историей ветки в main. Дефект
+/// починен (в запросе появилось поле `mode`), поэтому утверждения перевёрнуты:
+/// теперь она сторожит регрессию, а не фиксирует беду. Имя изменено вслед за смыслом.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn при_конфликте_выбранный_режим_squash_не_доживает_до_слияния() {
+async fn при_конфликте_выбранный_режим_squash_доживает_до_слияния() {
     let (dir, _git_dir_guard) = git_data_dir().await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "carol", "squash-conflict", vec![step("Общий")]).await;
@@ -317,7 +340,7 @@ async fn при_конфликте_выбранный_режим_squash_не_д�
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-c".into(),
-        list_json: base.replacen("Общий", "Версия ветки", 1).into_bytes(),
+        content: содержимое(&git, rr.clone(), base.replacen("Общий", "Версия ветки", 1)).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -347,14 +370,26 @@ async fn при_конфликте_выбранный_режим_squash_не_д�
         .await
         .expect_err("правки одного места обязаны дать конфликт");
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
-    assert_eq!(err.message(), "conflict");
+    // Сверяем ПРИЧИНУ из трейлера, а не текст. Раньше здесь стояло `== "conflict"`, и
+    // проба покраснела ровно тогда, когда текст стал человеческим («merge does not
+    // apply cleanly») — то есть кодировала СПОСОБ, а не смысл. Контракт с И1 держится
+    // на машинной причине; текст можно менять свободно.
+    assert_eq!(
+        err.metadata().get(setfork_core::reason::REASON_KEY).and_then(|v| v.to_str().ok()),
+        Some("CONFLICT"),
+        "причина отказа — конфликт слияния"
+    );
 
     // Штатный путь: пользователь разрешил конфликт и подтвердил слияние.
     let resolved = git
         .merge_resolved(Request::new(MergeResolvedRequest {
             repo: rr.clone(),
             branch: "pr-c".into(),
-            list_json: base.replacen("Общий", "Разрешённая версия", 1).into_bytes(),
+            content: содержимое(&git, rr.clone(), base.replacen("Общий", "Разрешённая версия", 1)).await,
+            // Режим приезжает из ЗАПРОСА (#54): проба про то и есть — выбор «squash»
+            // обязан дожить до разрешения конфликта, а не потеряться по дороге.
+            mode: "squash".into(),
+            message: String::new(),
         }))
         .await
         .expect("merge_resolved")
@@ -363,15 +398,10 @@ async fn при_конфликте_выбранный_режим_squash_не_д�
     let repo = git2::Repository::open_bare(&bare).expect("open");
     let head = repo.find_commit(git2::Oid::from_str(&resolved.tip_sha).expect("oid")).expect("commit");
 
-    // ДОКАЗАТЕЛЬСТВО: режим потерян — коммит слияния, история ветки в main.
-    assert_eq!(
-        head.parent_count(),
-        2,
-        "MergeResolved всегда делает merge-коммит: выбранный squash не соблюдён"
-    );
+    // Режим соблюдён: ОДИН родитель, история ветки в main не уехала.
+    assert_eq!(head.parent_count(), 1, "выбранный squash обязан дожить до MergeResolved");
     let msg = head.message().unwrap_or_default().to_string();
-    assert!(!msg.contains("Co-authored-by"), "трейлеров нет — путь squash не проходился: {msg:?}");
-    assert!(!msg.contains("Сплющенное"), "заголовок пользователя потерян: {msg:?}");
+    assert!(msg.contains("Co-authored-by"), "вклад авторов ветки переносится трейлерами: {msg:?}");
 }
 
 /// Диагностика: насколько сильно веб-версия переписывает list.json.

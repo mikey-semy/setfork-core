@@ -11,7 +11,9 @@
 mod support;
 
 use setfork_core::pb::git_core_server::GitCore;
-use setfork_core::pb::{CommitToBranchRequest, CreateBranchRequest, MergeStateRequest, RepoRef};
+use setfork_core::pb::{
+    CommitToBranchRequest, CreateBranchRequest, ListContent, MergeStateRequest, ParseCanonRequest, RepoRef,
+};
 use setfork_core::pb_domain::list_write_server::ListWrite;
 use setfork_core::pb_domain::{CreateListRequest, LocaleText, NewStep};
 use setfork_core::services::git_core::GitCoreSvc;
@@ -45,6 +47,7 @@ fn step(title: &str) -> NewStep {
         content_json: String::new(),
         needs_human: false,
         needs_human_ask: None,
+        danger: false,
     }
 }
 
@@ -61,6 +64,10 @@ fn proj(title: &str) -> setfork_core::git::project::ProjStep {
         section: String::new(),
         subtasks: vec![],
         refs: vec![],
+        image_key: None,
+        needs_human: None,
+        needs_human_ask: None,
+        danger: None,
     }
 }
 
@@ -80,6 +87,18 @@ fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
 }
 
 /// База для трёхстороннего слияния обязана совпадать с тем, что считает настоящий git.
+/// Канон ТЕКСТОМ → содержимое для записи. Пробы правят канон подстрокой (так же
+/// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
+/// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
+/// проверять своё, а не форму запроса.
+async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+    git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
+        .await
+        .expect("канон разбирается")
+        .into_inner()
+        .content
+}
+
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres) и git в PATH"]
 async fn база_совпадает_с_настоящим_git_merge_base() {
@@ -99,6 +118,7 @@ async fn база_совпадает_с_настоящим_git_merge_base() {
             status: String::new(),
             origin: String::new(),
             forked_from_id: String::new(),
+            moderation: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый"), step("Второй")],
         }))
@@ -130,7 +150,7 @@ async fn база_совпадает_с_настоящим_git_merge_base() {
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-ms".into(),
-        list_json: base_before.replacen("Второй", "Второй (ветка)", 1).into_bytes(),
+        content: содержимое(&git, rr.clone(), base_before.replacen("Второй", "Второй (ветка)", 1)).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
