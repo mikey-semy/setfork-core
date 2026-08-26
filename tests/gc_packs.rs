@@ -42,7 +42,7 @@ fn шаг(title: &str) -> SnapshotStep {
     }
 }
 
-fn содержимое(title: &str) -> ListContent {
+fn blob_text(title: &str) -> ListContent {
     ListContent {
         title: title.into(),
         desc: String::new(),
@@ -59,7 +59,7 @@ fn содержимое(title: &str) -> ListContent {
 /// меняется. Первая версия пробы считала именно паки — и была зелёной без починки,
 /// что показала мутация. Здесь спрашивается ровно то, что нужно: попал ли коммит
 /// слияния в пак.
-fn лежит_россыпью(bare: &std::path::Path, sha: &str) -> bool {
+fn loose_objects(bare: &std::path::Path, sha: &str) -> bool {
     bare.join("objects").join(&sha[..2]).join(&sha[2..]).exists()
 }
 
@@ -111,7 +111,7 @@ async fn squash_слияние_пакует_объекты() {
     svc.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: repo(),
         branch: "pr".into(),
-        content: Some(содержимое("Правка ветки")),
+        content: Some(blob_text("Правка ветки")),
         message: "правка".into(),
         expected_tip: String::new(),
         author_name: String::new(),
@@ -120,7 +120,7 @@ async fn squash_слияние_пакует_объекты() {
     .await
     .expect("правка в ветку");
 
-    let слияние = svc
+    let merged = svc
         .merge_branch(Request::new(MergeBranchRequest {
             repo: repo(),
             name: "pr".into(),
@@ -132,8 +132,8 @@ async fn squash_слияние_пакует_объекты() {
         .into_inner();
 
     assert!(
-        !лежит_россыпью(&bare, &слияние.tip_sha),
+        !loose_objects(&bare, &merged.tip_sha),
         "коммит squash-слияния {} остался россыпью — значит gc на этом пути не звался",
-        слияние.tip_sha
+        merged.tip_sha
     );
 }

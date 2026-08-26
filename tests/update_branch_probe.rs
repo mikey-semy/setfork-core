@@ -79,7 +79,7 @@ fn tip(bare: &std::path::Path, refname: &str) -> String {
 /// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
 /// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
 /// проверять своё, а не форму запроса.
-async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
     git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
         .await
         .expect("канон разбирается")
@@ -147,12 +147,7 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-u".into(),
-        content: содержимое(
-            &git,
-            rr.clone(),
-            base.replacen("Четвёртый", "Четвёртый (моя правка)", 1),
-        )
-        .await,
+        content: blob_text(&git, rr.clone(), base.replacen("Четвёртый", "Четвёртый (моя правка)", 1)).await,
         message: "правка автора".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -406,12 +401,7 @@ async fn какие_изменения_main_ломают_слияние() {
         git.commit_to_branch(Request::new(CommitToBranchRequest {
             repo: rr.clone(),
             branch: "pr".into(),
-            content: содержимое(
-                &git,
-                rr.clone(),
-                base.replacen("Второй", "Второй (правка автора)", 1),
-            )
-            .await,
+            content: blob_text(&git, rr.clone(), base.replacen("Второй", "Второй (правка автора)", 1)).await,
             message: "правка".into(),
             expected_tip: String::new(),
             author_name: "Аня".into(),

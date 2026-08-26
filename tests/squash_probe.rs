@@ -124,7 +124,7 @@ fn proj_step(title: &str) -> setfork_core::git::project::ProjStep {
 /// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
 /// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
 /// проверять своё, а не форму запроса.
-async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
     git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
         .await
         .expect("канон разбирается")
@@ -167,7 +167,7 @@ async fn squash_не_откатывает_работу_приехавшую_в_m
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-1".into(),
-        content: содержимое(&git, rr.clone(), branch_json).await,
+        content: blob_text(&git, rr.clone(), branch_json).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -255,7 +255,7 @@ async fn squash_сплющивает_и_перематываемую_ветку(
         git.commit_to_branch(Request::new(CommitToBranchRequest {
             repo: rr.clone(),
             branch: "pr-ff".into(),
-            content: содержимое(&git, rr.clone(), j).await,
+            content: blob_text(&git, rr.clone(), j).await,
             message: i.into(),
             author_name: who.into(),
             author_email: format!("{}@example.com", who.to_lowercase()),
@@ -324,7 +324,7 @@ async fn при_конфликте_выбранный_режим_squash_дожи
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-c".into(),
-        content: содержимое(&git, rr.clone(), base.replacen("Общий", "Версия ветки", 1)).await,
+        content: blob_text(&git, rr.clone(), base.replacen("Общий", "Версия ветки", 1)).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -369,7 +369,7 @@ async fn при_конфликте_выбранный_режим_squash_дожи
         .merge_resolved(Request::new(MergeResolvedRequest {
             repo: rr.clone(),
             branch: "pr-c".into(),
-            content: содержимое(&git, rr.clone(), base.replacen("Общий", "Разрешённая версия", 1)).await,
+            content: blob_text(&git, rr.clone(), base.replacen("Общий", "Разрешённая версия", 1)).await,
             // Режим приезжает из ЗАПРОСА (#54): проба про то и есть — выбор «squash»
             // обязан дожить до разрешения конфликта, а не потеряться по дороге.
             mode: "squash".into(),

@@ -76,7 +76,7 @@ fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
 /// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
 /// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
 /// проверять своё, а не форму запроса.
-async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
     git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
         .await
         .expect("канон разбирается")
@@ -135,7 +135,7 @@ async fn база_совпадает_с_настоящим_git_merge_base() {
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-ms".into(),
-        content: содержимое(&git, rr.clone(), base_before.replacen("Второй", "Второй (ветка)", 1)).await,
+        content: blob_text(&git, rr.clone(), base_before.replacen("Второй", "Второй (ветка)", 1)).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),

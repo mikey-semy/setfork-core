@@ -95,14 +95,14 @@ impl CurationWrite for CurationWriteSvc {
                 .await
                 .map_err(db_status)?;
         let now_starred = if existed.is_some() {
-            let ушло = sqlx::query("delete from stars where user_id = $1 and template_id = $2")
+            let removed = sqlx::query("delete from stars where user_id = $1 and template_id = $2")
                 .bind(uid)
                 .bind(tid)
                 .execute(&mut *tx)
                 .await
                 .map_err(db_status)?
                 .rows_affected();
-            if ушло > 0 {
+            if removed > 0 {
                 sqlx::query("update templates set stars_count = GREATEST(stars_count - 1, 0) where id = $1")
                     .bind(tid)
                     .execute(&mut *tx)
@@ -111,7 +111,7 @@ impl CurationWrite for CurationWriteSvc {
             }
             false
         } else {
-            let легло = sqlx::query(
+            let inserted = sqlx::query(
                 "insert into stars (user_id, template_id) values ($1, $2) on conflict do nothing",
             )
             .bind(uid)
@@ -120,7 +120,7 @@ impl CurationWrite for CurationWriteSvc {
             .await
             .map_err(db_status)?
             .rows_affected();
-            if легло > 0 {
+            if inserted > 0 {
                 sqlx::query("update templates set stars_count = stars_count + 1 where id = $1")
                     .bind(tid)
                     .execute(&mut *tx)

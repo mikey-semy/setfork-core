@@ -93,7 +93,7 @@ fn diff_lines(expected: &str, actual: &str) -> String {
 /// Иначе показ обрывается на первой фикстуре, остальные человек не видит — и
 /// следующий шаг («принять») запишет в том числе то, чего ему не показывали.
 /// Тогда двухшаговость перестаёт быть двухшаговостью (P1 авто-ревью на #102).
-static РАСХОЖДЕНИЯ: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static MISMATCHES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 fn compare_or_update(rel: &str, actual: &str) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
@@ -122,7 +122,7 @@ fn compare_or_update(rel: &str, actual: &str) {
         eprintln!("golden: обновлён {rel}");
         return;
     }
-    РАСХОЖДЕНИЯ
+    MISMATCHES
         .lock()
         .expect("копилка расхождений")
         .push(format!("golden-фикстура {rel} РАЗОШЛАСЬ. Что именно:\n{}", diff_lines(&e, &a)));
@@ -130,14 +130,14 @@ fn compare_or_update(rel: &str, actual: &str) {
 
 /// Зовётся В КОНЦЕ проверки: только здесь видно ВСЕ расхождения разом.
 fn assert_golden_ok() {
-    let собранное = std::mem::take(&mut *РАСХОЖДЕНИЯ.lock().expect("копилка расхождений"));
-    if собранное.is_empty() {
+    let collected = std::mem::take(&mut *MISMATCHES.lock().expect("копилка расхождений"));
+    if collected.is_empty() {
         return;
     }
     panic!(
         "{}\nЭто либо починка формата, либо поломка — решает человек.\n\
          Принять ПОКАЗАННОЕ ВЫШЕ: UPDATE_GOLDEN=accept cargo test --test golden -- --include-ignored",
-        собранное.join("\n")
+        collected.join("\n")
     );
 }
 

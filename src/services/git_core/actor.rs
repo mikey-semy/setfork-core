@@ -21,7 +21,7 @@
 /// было закрыто ничем. Мутация 25.08 (склеить обе пустые ветки в одну) прошла НЕЗАМЕЧЕННОЙ
 /// — восемь тестов `contributor_namespace` остались зелёными, потому что гоняют хук, а
 /// этот выбор происходит до хука (линза 10, находка 10-F11).
-pub(super) fn выбрать_актора(actor_id: &str, actor_role: &str, actor_handle: &str) -> String {
+pub(super) fn choose_actor(actor_id: &str, actor_role: &str, actor_handle: &str) -> String {
     match (actor_id, actor_role) {
         ("", "") => actor_handle.to_string(),
         ("", _) => String::new(),
@@ -38,12 +38,12 @@ pub(super) fn выбрать_актора(actor_id: &str, actor_role: &str, acto
 /// человеку предъявленную правку после смены ника.
 #[cfg(test)]
 mod actor_choice_tests {
-    use super::выбрать_актора;
+    use super::choose_actor;
 
     #[test]
     fn старый_фронт_узнаётся_по_пустой_роли() {
         assert_eq!(
-            выбрать_актора("", "", "mike"),
+            choose_actor("", "", "mike"),
             "mike",
             "фронт старше Ф5 шлёт только ник — иначе КАЖДЫЙ магический пуш отвергался бы до выката"
         );
@@ -53,7 +53,7 @@ mod actor_choice_tests {
     fn новый_фронт_без_идентификатора_не_подставляет_ник() {
         for роль in ["owner", "contributor", "outsider", "невиданная"] {
             assert_eq!(
-                выбрать_актора("", роль, "mike"),
+                choose_actor("", роль, "mike"),
                 "",
                 "роль {роль:?} прислана, а идентификатор забыт — это неисправность фронта, \
                  и магический реф обязан отвергнуться. Подставить ник нельзя: ник СМЕНЯЕМ, \
@@ -66,7 +66,7 @@ mod actor_choice_tests {
     fn идентификатор_всегда_сильнее_ника() {
         let id = "11111111-2222-3333-4444-555555555555";
         for роль in ["", "owner", "contributor"] {
-            assert_eq!(выбрать_актора(id, роль, "mike"), id, "при любой роли берётся идентификатор");
+            assert_eq!(choose_actor(id, роль, "mike"), id, "при любой роли берётся идентификатор");
         }
     }
 }

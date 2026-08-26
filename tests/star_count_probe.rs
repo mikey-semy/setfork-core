@@ -28,7 +28,7 @@ async fn seed_list(pool: &sqlx::PgPool, owner: Uuid) -> Uuid {
     .expect("seed template")
 }
 
-async fn факт_и_счётчик(pool: &sqlx::PgPool, list_id: Uuid) -> (i64, i32) {
+async fn fact_and_counter(pool: &sqlx::PgPool, list_id: Uuid) -> (i64, i32) {
     let rows: i64 = sqlx::query_scalar("select count(*) from stars where template_id = $1")
         .bind(list_id)
         .fetch_one(pool)
@@ -73,7 +73,7 @@ async fn звёзды_разных_пользователей_считаются
             Err(e) => err.push(e),
         }
     }
-    let (rows, counter) = факт_и_счётчик(&pool, list_id).await;
+    let (rows, counter) = fact_and_counter(&pool, list_id).await;
     println!("8 разных: успешных {ok}, отказов {}, строк {rows}, счётчик {counter}", err.len());
     for e in &err {
         println!("  ОТКАЗ: {e:?}");
@@ -110,7 +110,7 @@ async fn повторные_нажатия_одного_пользователя
             Err(e) => err.push(e),
         }
     }
-    let (rows, counter) = факт_и_счётчик(&pool, list_id).await;
+    let (rows, counter) = fact_and_counter(&pool, list_id).await;
     println!("6 нажатий одного: ответы {states:?}, отказов {}, строк {rows}, счётчик {counter}", err.len());
     for e in &err {
         println!("  ОТКАЗ: {e:?}");
