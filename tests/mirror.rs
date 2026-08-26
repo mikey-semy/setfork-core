@@ -82,7 +82,7 @@ fn push_like_mirror(bare: &Path, url: &str) -> (bool, String) {
 }
 
 #[test]
-fn зеркало_получает_main_и_теги_но_не_ветки_и_прунится() {
+fn the_mirror_gets_main_and_tags_but_not_branches_and_prunes() {
     let root = tmp_root("mirror");
     let src = root.0.join("src.git");
     let dst = root.0.join("dst.git");
@@ -141,7 +141,7 @@ fn зеркало_получает_main_и_теги_но_не_ветки_и_пр
 
 /// mirror_push наружу не пустит file:// — токен встраивается только в https.
 #[tokio::test]
-async fn file_url_отвергается_валидацией() {
+async fn a_file_url_is_rejected_by_validation() {
     let root = tmp_root("mirror-val");
     let src = root.0.join("src.git");
     bundle::bootstrap_bare(&[ver(1)], &src).expect("src");

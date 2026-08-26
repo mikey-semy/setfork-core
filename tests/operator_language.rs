@@ -18,7 +18,7 @@
 use std::path::{Path, PathBuf};
 
 /// Файлы, где русский законен по построению.
-const ДВУЯЗЫЧНЫЕ: &[&str] = &[
+const BILINGUAL: &[&str] = &[
     // Каталог сообщений хука: русский раздел — это и есть предмет решения И2,
     // текст выбирается по языку пушащего человека.
     "src/git/messages.rs",
@@ -37,7 +37,7 @@ const ДВУЯЗЫЧНЫЕ: &[&str] = &[
 ///
 /// Список закрыт на добавление: новая русская строка в боевом коде обязана быть
 /// операторской и английской. Если она пользовательская — ей место в коде причины.
-const ПОЛЬЗОВАТЕЛЬСКАЯ_ПРОЗА_ДОЛГ: &[&str] = &[
+const USER_PROSE_DEBT: &[&str] = &[
     "SETFORK_MIRROR_SECRET не задан на сервере — зеркало не может расшифровать токен",
     "токен зеркала не расшифровался (секрет сменён?) — сохраните токен заново",
     "зеркало не настроено",
@@ -46,13 +46,13 @@ const ПОЛЬЗОВАТЕЛЬСКАЯ_ПРОЗА_ДОЛГ: &[&str] = &[
 ];
 
 /// Один литерал: где нашли и что именно.
-struct Литерал {
-    файл: String,
-    строка: usize,
+struct Literal {
+    file: String,
+    line: usize,
     текст: String,
 }
 
-fn кириллица(s: &str) -> bool {
+fn is_cyrillic(s: &str) -> bool {
     s.chars().any(|c| matches!(c, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё'))
 }
 
@@ -62,20 +62,20 @@ fn кириллица(s: &str) -> bool {
 /// обычные и сырые строки, символьные литералы, и — по глубине скобок — вырезание
 /// модулей под `#[cfg(test)]`. Считать `#[cfg(test)]` «хвостом файла» было НЕЛЬЗЯ:
 /// это верно по конвенции, но конвенция — не механизм, а гейт должен быть механизмом.
-fn литералы(текст: &str) -> Vec<(usize, String)> {
+fn literals(текст: &str) -> Vec<(usize, String)> {
     let b: Vec<char> = текст.chars().collect();
     let n = b.len();
-    let (mut i, mut строка) = (0usize, 1usize);
-    let mut найдено = Vec::new();
+    let (mut i, mut line) = (0usize, 1usize);
+    let mut found = Vec::new();
     // Глубина, с которой начинается вырезанный тестовый модуль (None — не в нём).
-    let mut глубина = 0usize;
-    let mut тест_с: Option<usize> = None;
-    let mut ждём_тело_теста = false;
+    let mut depth = 0usize;
+    let mut test_body_at: Option<usize> = None;
+    let mut awaiting_test_body = false;
 
     while i < n {
         let c = b[i];
         if c == '\n' {
-            строка += 1;
+            line += 1;
             i += 1;
             continue;
         }
@@ -92,7 +92,7 @@ fn литералы(текст: &str) -> Vec<(usize, String)> {
             i += 2;
             while i < n && уровень > 0 {
                 if b[i] == '\n' {
-                    строка += 1;
+                    line += 1;
                 } else if b[i] == '/' && i + 1 < n && b[i + 1] == '*' {
                     уровень += 1;
                     i += 1;
@@ -106,60 +106,60 @@ fn литералы(текст: &str) -> Vec<(usize, String)> {
         }
         // Символьный литерал: 'a', '\n', но НЕ лайфтайм 'a.
         if c == '\'' && i + 2 < n {
-            let конец = if b[i + 1] == '\\' {
+            let end = if b[i + 1] == '\\' {
                 (i + 2..n).find(|&j| b[j] == '\'')
             } else if b[i + 2] == '\'' {
                 Some(i + 2)
             } else {
                 None
             };
-            if let Some(j) = конец {
+            if let Some(j) = end {
                 i = j + 1;
                 continue;
             }
         }
         // Сырая строка: r"…", r#"…"#, br#"…"#.
-        let сырая = {
+        let raw = {
             let mut j = i;
             if b[j] == 'b' {
                 j += 1;
             }
             if j < n && b[j] == 'r' {
                 j += 1;
-                let реш = {
+                let hashes = {
                     let s = j;
                     while j < n && b[j] == '#' {
                         j += 1;
                     }
                     j - s
                 };
-                if j < n && b[j] == '"' { Some((j + 1, реш)) } else { None }
+                if j < n && b[j] == '"' { Some((j + 1, hashes)) } else { None }
             } else {
                 None
             }
         };
-        if let Some((старт, реш)) = сырая {
-            let закрытие: String = std::iter::once('"').chain(std::iter::repeat_n('#', реш)).collect();
-            let хвост: String = b[старт..].iter().collect();
-            let длина = хвост.find(&закрытие).unwrap_or(хвост.len());
-            let тело: String = хвост.chars().take(хвост[..длина].chars().count()).collect();
-            if тест_с.is_none() {
-                найдено.push((строка, тело.clone()));
+        if let Some((start, hashes)) = raw {
+            let closing: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+            let tail: String = b[start..].iter().collect();
+            let len = tail.find(&closing).unwrap_or(tail.len());
+            let body: String = tail.chars().take(tail[..len].chars().count()).collect();
+            if test_body_at.is_none() {
+                found.push((line, body.clone()));
             }
-            строка += тело.matches('\n').count();
-            i = старт + тело.chars().count() + закрытие.chars().count();
+            line += body.matches('\n').count();
+            i = start + body.chars().count() + closing.chars().count();
             continue;
         }
         // Обычная строка (в т.ч. b"…").
         if c == '"' || (c == 'b' && i + 1 < n && b[i + 1] == '"') {
-            let старт = if c == '"' { i + 1 } else { i + 2 };
-            let mut j = старт;
-            let mut тело = String::new();
+            let start = if c == '"' { i + 1 } else { i + 2 };
+            let mut j = start;
+            let mut body = String::new();
             while j < n {
                 if b[j] == '\\' {
-                    тело.push(b[j]);
+                    body.push(b[j]);
                     if j + 1 < n {
-                        тело.push(b[j + 1]);
+                        body.push(b[j + 1]);
                     }
                     j += 2;
                     continue;
@@ -167,86 +167,85 @@ fn литералы(текст: &str) -> Vec<(usize, String)> {
                 if b[j] == '"' {
                     break;
                 }
-                тело.push(b[j]);
+                body.push(b[j]);
                 j += 1;
             }
-            if тест_с.is_none() {
-                найдено.push((строка, тело.clone()));
+            if test_body_at.is_none() {
+                found.push((line, body.clone()));
             }
-            строка += тело.matches('\n').count();
+            line += body.matches('\n').count();
             i = j + 1;
             continue;
         }
         // Пометка тестового модуля.
-        if c == '#' && текст_с(&b, i).starts_with("#[cfg(test)]") {
-            ждём_тело_теста = true;
+        if c == '#' && text_at(&b, i).starts_with("#[cfg(test)]") {
+            awaiting_test_body = true;
             i += "#[cfg(test)]".chars().count();
             continue;
         }
         // Пометка без блока (`#[cfg(test)] use …;`) — ожидание тела ОТМЕНЯЕМ на `;`.
         // Иначе оно дожило бы до ближайшей чужой `{` и вырезало из проверки посторонний
         // кусок боевого кода — молча, то есть худшим для гейта способом.
-        if c == ';' && ждём_тело_теста {
-            ждём_тело_теста = false;
+        if c == ';' && awaiting_test_body {
+            awaiting_test_body = false;
             i += 1;
             continue;
         }
         if c == '{' {
-            глубина += 1;
-            if ждём_тело_теста {
-                тест_с = Some(глубина);
-                ждём_тело_теста = false;
+            depth += 1;
+            if awaiting_test_body {
+                test_body_at = Some(depth);
+                awaiting_test_body = false;
             }
             i += 1;
             continue;
         }
         if c == '}' {
-            if тест_с == Some(глубина) {
-                тест_с = None;
+            if test_body_at == Some(depth) {
+                test_body_at = None;
             }
-            глубина = глубина.saturating_sub(1);
+            depth = depth.saturating_sub(1);
             i += 1;
             continue;
         }
         i += 1;
     }
-    найдено
+    found
 }
 
-fn текст_с(b: &[char], i: usize) -> String {
+fn text_at(b: &[char], i: usize) -> String {
     b[i..(i + 12).min(b.len())].iter().collect()
 }
 
-fn обойти(корень: &Path, файлы: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(корень).expect("read_dir src/").flatten() {
+fn walk(root: &Path, files: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(root).expect("read_dir src/").flatten() {
         let p = e.path();
         if p.is_dir() {
-            обойти(&p, файлы);
+            walk(&p, files);
         } else if p.extension().is_some_and(|x| x == "rs") {
-            файлы.push(p);
+            files.push(p);
         }
     }
 }
 
 #[test]
-fn операторский_вывод_ядра_по_английски() {
-    let корень = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let mut файлы = Vec::new();
-    обойти(&корень.join("src"), &mut файлы);
-    файлы.sort();
-    assert!(файлы.len() > 20, "обход src/ нашёл всего {} файлов — гейт сломан", файлы.len());
+fn operator_output_is_english() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    walk(&root.join("src"), &mut files);
+    files.sort();
+    assert!(files.len() > 20, "обход src/ нашёл всего {} файлов — гейт сломан", files.len());
 
-    let mut беда: Vec<Литерал> = Vec::new();
-    for путь in &файлы {
-        let отн = путь.strip_prefix(&корень).unwrap().to_string_lossy().replace('\\', "/");
-        if ДВУЯЗЫЧНЫЕ.contains(&отн.as_str()) {
+    let mut bad: Vec<Literal> = Vec::new();
+    for путь in &files {
+        let rel = путь.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+        if BILINGUAL.contains(&rel.as_str()) {
             continue;
         }
         let текст = std::fs::read_to_string(путь).expect("чтение исходника");
-        for (строка, лит) in литералы(&текст) {
-            if кириллица(&лит) && !ПОЛЬЗОВАТЕЛЬСКАЯ_ПРОЗА_ДОЛГ.contains(&лит.as_str())
-            {
-                беда.push(Литерал { файл: отн.clone(), строка, текст: лит });
+        for (line, лит) in literals(&текст) {
+            if is_cyrillic(&лит) && !USER_PROSE_DEBT.contains(&лит.as_str()) {
+                bad.push(Literal { file: rel.clone(), line, текст: лит });
             }
         }
     }
@@ -258,31 +257,31 @@ fn операторский_вывод_ядра_по_английски() {
     // русский комментарий с тем же текстом, и запись «жила» бы вечно, даже когда сама
     // строка уже переведена (поймано мутацией: перевод строки гейт не заметил).
     // Поэтому сверяем со списком ЛИТЕРАЛОВ — тем же, по которому судим.
-    let все_литералы: Vec<String> = файлы
+    let all_literals: Vec<String> = files
         .iter()
-        .flat_map(|p| литералы(&std::fs::read_to_string(p).unwrap_or_default()))
+        .flat_map(|p| literals(&std::fs::read_to_string(p).unwrap_or_default()))
         .map(|(_, л)| л)
         .collect();
-    for д in ПОЛЬЗОВАТЕЛЬСКАЯ_ПРОЗА_ДОЛГ {
+    for д in USER_PROSE_DEBT {
         assert!(
-            все_литералы.iter().any(|л| л == д),
+            all_literals.iter().any(|л| л == д),
             "в списке долга 10-F8 числится строка, которой в коде больше нет: {д:?}. \
              Убери её из списка — иначе гейт пропустит новую такую же."
         );
     }
 
-    if !беда.is_empty() {
-        let список = беда
+    if !bad.is_empty() {
+        let list_names = bad
             .iter()
-            .map(|л| format!("  {}:{}  {}", л.файл, л.строка, л.текст.chars().take(80).collect::<String>()))
+            .map(|л| format!("  {}:{}  {}", л.file, л.line, л.текст.chars().take(80).collect::<String>()))
             .collect::<Vec<_>>()
             .join("\n");
         panic!(
             "операторский вывод ядра обязан быть английским (решение владельца 31.07, трек \
-             core-i18n, И0), а по-русски написано {} строк:\n{список}\n\n\
+             core-i18n, И0), а по-русски написано {} строк:\n{list_names}\n\n\
              Комментарии по-русски — норма, судятся только строковые литералы боевого кода. \
              Если строка законно двуязычна, её место — в каталоге src/git/messages.rs.",
-            беда.len()
+            bad.len()
         );
     }
 }

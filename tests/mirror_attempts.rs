@@ -23,7 +23,7 @@ async fn attempts(pool: &sqlx::PgPool, id: Uuid) -> (i32, Option<String>) {
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn неудачи_копятся_подряд_а_успех_обнуляет() {
+async fn failures_accumulate_while_success_resets() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "mirrorman").await;
     let id: Uuid = sqlx::query_scalar(
@@ -57,7 +57,7 @@ async fn неудачи_копятся_подряд_а_успех_обнуляе
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn счётчик_чужого_списка_не_трогается() {
+async fn another_lists_counter_is_untouched() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "twolists").await;
     let mk = async |slug: &str| -> Uuid {

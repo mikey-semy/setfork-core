@@ -16,7 +16,7 @@ use setfork_core::git::smart_http;
 use setfork_core::services;
 use setfork_core::services::git_core::GitCoreSvc;
 
-type Итог = Result<(), Box<dyn std::error::Error>>;
+type CliResult = Result<(), Box<dyn std::error::Error>>;
 
 // Материализует репо во временный каталог, выполняет `op` над ним и гарантированно
 // удаляет каталог. `op` синхронна (шелл git) — весь блок идёт в spawn_blocking.
@@ -36,7 +36,7 @@ where
 /// «команда или сервер» ДО того, как войдёт в исполнение, иначе `?` внутри некуда
 /// возвращать. Расхождение списка с ветками ловится тестом в конце файла: правило,
 /// живущее в двух местах, обязано иметь сверку (корень K38).
-const КОМАНДЫ: &[&str] = &[
+const COMMANDS: &[&str] = &[
     "bundle",
     "advertise-upload",
     "advertise-receive",
@@ -48,20 +48,20 @@ const КОМАНДЫ: &[&str] = &[
 ];
 
 /// `None` — первый аргумент не команда, `main` идёт поднимать сервер.
-pub async fn run(pool: &PgPool) -> Option<Итог> {
+pub async fn run(pool: &PgPool) -> Option<CliResult> {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1)?.to_string();
-    if !КОМАНДЫ.contains(&cmd.as_str()) {
+    if !COMMANDS.contains(&cmd.as_str()) {
         return None;
     }
-    Some(выполнить(pool, &cmd, &args).await)
+    Some(dispatch(pool, &cmd, &args).await)
 }
 
 /// Разбор аргументов у всех команд одинаков, поэтому он здесь, а тела — ниже, по
 /// одной функции на команду. Так `выполнить` остаётся ТАБЛИЦЕЙ, и добавить команду
 /// значит дописать строку сюда, ветку и запись в `КОМАНДЫ` — три места, из которых
 /// два сверяются тестом.
-async fn выполнить(pool: &PgPool, cmd: &str, args: &[String]) -> Итог {
+async fn dispatch(pool: &PgPool, cmd: &str, args: &[String]) -> CliResult {
     let cli = |i: usize| args.get(i).cloned().unwrap_or_default();
     // pool клонируется (Arc внутри) — оригинал остаётся серверу ниже.
     let svc = GitCoreSvc { pool: pool.clone() };
@@ -80,7 +80,7 @@ async fn выполнить(pool: &PgPool, cmd: &str, args: &[String]) -> Ито
 }
 
 /// `bundle <owner> <slug> <out>` — байтовая сверка бандла со скриптом фронта.
-async fn bundle(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String) -> Итог {
+async fn bundle(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String) -> CliResult {
     let data = svc.build(&cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
     std::fs::write(cli(4), &data)?;
     println!("wrote {} bytes → {}", data.len(), cli(4));
@@ -89,7 +89,7 @@ async fn bundle(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String) -> Итог {
 
 /// `advertise-upload` / `advertise-receive <owner> <slug> <out>` —
 /// то же, что `GET /info/refs?service=git-upload-pack` (или `-receive-pack`), без транспорта.
-async fn advertise(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String, up: bool) -> Итог {
+async fn advertise(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String, up: bool) -> CliResult {
     let versions = svc.load(&cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
     let data = tokio::task::spawn_blocking(move || {
         with_materialized(versions, |dir| {
@@ -108,7 +108,7 @@ async fn advertise(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String, up: bool) -
 
 /// `domain-read <owner> <slug> <out.json>` — канонический JSON READ-портов
 /// (см. `services::golden`) для побайтовой сверки с TS.
-async fn domain_read(pool: &PgPool, cli: &impl Fn(usize) -> String) -> Итог {
+async fn domain_read(pool: &PgPool, cli: &impl Fn(usize) -> String) -> CliResult {
     let v = services::golden::golden_json(pool, &cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
     std::fs::write(cli(4), serde_json::to_string_pretty(&v)?)?;
     println!("wrote domain-read json → {}", cli(4));
@@ -116,7 +116,7 @@ async fn domain_read(pool: &PgPool, cli: &impl Fn(usize) -> String) -> Итог 
 }
 
 /// `upload-pack <owner> <slug> <body> <out>` — то же, что `POST /git-upload-pack`.
-async fn upload_pack(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String) -> Итог {
+async fn upload_pack(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String) -> CliResult {
     let versions = svc.load(&cli(2), &cli(3)).await.map_err(|e| e.to_string())?;
     let body = std::fs::read(cli(4))?;
     let data = tokio::task::spawn_blocking(move || {
@@ -132,7 +132,7 @@ async fn upload_pack(svc: &GitCoreSvc, cli: &impl Fn(usize) -> String) -> Ито
 /// становится НОВОЙ версией. Применять, когда git ушёл вперёд БД.
 /// ⚠️ Дублей не проверяет: запуск на согласованном списке создаст версию-двойника
 /// (это подтверждено учениями 25.08, см. рунбук git-projection-catchup).
-async fn reproject(pool: &PgPool, cli: &impl Fn(usize) -> String) -> Итог {
+async fn reproject(pool: &PgPool, cli: &impl Fn(usize) -> String) -> CliResult {
     crate::require_git_data_dir()?;
     let (owner, slug) = (cli(2), cli(3));
     let Some((bare, id)) = git::repo::ensure_repo(pool, &owner, &slug).await? else {
@@ -152,7 +152,7 @@ async fn reproject(pool: &PgPool, cli: &impl Fn(usize) -> String) -> Итог {
 /// `gc-repos [--apply]` — бесхозные репозитории на томе.
 /// По умолчанию только показывает. Fail-closed: пустая выборка списков означает
 /// «не та база», а не «списков нет», и сносить по ней весь том нельзя.
-async fn gc_repos(pool: &PgPool, args: &[String]) -> Итог {
+async fn gc_repos(pool: &PgPool, args: &[String]) -> CliResult {
     crate::require_git_data_dir()?;
     let apply = args.iter().any(|a| a == "--apply");
     let root = std::path::PathBuf::from(std::env::var("GIT_DATA_DIR")?);
@@ -201,7 +201,7 @@ async fn gc_repos(pool: &PgPool, args: &[String]) -> Итог {
 
 /// `sync-repos` — выровнять ВСЕ репозитории с БД, идемпотентно.
 /// Семь исходов, все воспроизведены пробами и учениями (линза 02 §4).
-async fn sync_repos(pool: &PgPool) -> Итог {
+async fn sync_repos(pool: &PgPool) -> CliResult {
     crate::require_git_data_dir()?;
     let rows: Vec<(uuid::Uuid, String, String)> = sqlx::query_as(
         "select t.id, u.handle, t.slug from templates t join users u on u.id = t.owner_id \
@@ -278,7 +278,7 @@ mod cli_list_tests {
     /// видеть и заявил о РАСХОЖДЕНИИ, которого не было. Проверка, потерявшая предмет,
     /// обязана говорить именно это.
     #[test]
-    fn список_команд_совпадает_с_ветками() {
+    fn command_table_matches_match_arms() {
         let src = include_str!("cli.rs");
         let mut в_match: Vec<String> = Vec::new();
         for l in src.lines() {
@@ -296,19 +296,19 @@ mod cli_list_tests {
             }
         }
         assert!(
-            в_match.len() >= super::КОМАНДЫ.len(),
+            в_match.len() >= super::COMMANDS.len(),
             "разбор нашёл {} веток при {} командах в списке — скорее всего изменилась ФОРМА \
              записи ветки, и проверка перестала видеть предмет. Это не расхождение списков, \
              это сломанная проверка: почини разбор.",
             в_match.len(),
-            super::КОМАНДЫ.len()
+            super::COMMANDS.len()
         );
-        let mut список: Vec<String> = super::КОМАНДЫ.iter().map(|s| s.to_string()).collect();
-        список.sort();
+        let mut list_names: Vec<String> = super::COMMANDS.iter().map(|s| s.to_string()).collect();
+        list_names.sort();
         в_match.sort();
         в_match.dedup();
         assert_eq!(
-            список, в_match,
+            list_names, в_match,
             "КОМАНДЫ и ветки match разошлись: команда, забытая в списке, молча запустит СЕРВЕР"
         );
     }

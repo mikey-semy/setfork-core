@@ -147,7 +147,7 @@ fn commit_canon_on_main(bare: &Path, canon: &serde_json::Value) -> String {
 /// push никогда не становился версией.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn непроецированный_push_замечается_и_проецируется() {
+async fn an_unprojected_push_is_noticed_and_projected() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "untagged", "untagged", "Untagged").await;
 
@@ -198,7 +198,7 @@ async fn непроецированный_push_замечается_и_прое�
 /// было всегда) — sync оставляет его как есть, запись ложится поверх, история цела.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn битый_tip_не_блокирует_запись() {
+async fn a_broken_tip_does_not_block_writes() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "brokentip", "broken", "Broken").await;
 
@@ -240,7 +240,7 @@ async fn битый_tip_не_блокирует_запись() {
 /// любой push молча обнулял бы их у всех шагов.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn пуш_не_стирает_картинку_и_пометку_по_идентичности() {
+async fn a_push_does_not_erase_image_and_mark_matched_by_identity() {
     const BLOCK: &str = "11111111-2222-3333-4444-555555555555";
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "carrier", "carry", "Carry").await;
@@ -304,7 +304,7 @@ async fn пуш_не_стирает_картинку_и_пометку_по_ид
 /// (F9 линзы проверки 02).
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn пуш_снимает_картинку_пустым_значением() {
+async fn a_push_clears_the_image_with_an_empty_value() {
     const BLOCK: &str = "22222222-3333-4444-5555-666666666666";
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "clearer", "clear", "Clear").await;
@@ -358,7 +358,7 @@ async fn пуш_снимает_картинку_пустым_значением(
 /// пустым, первая версия становится ПЕРВЫМ коммитом (создание main).
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn список_без_истории_принимает_первую_версию() {
+async fn a_list_without_history_accepts_its_first_version() {
     support::ensure_git_data_dir();
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "fresh").await;

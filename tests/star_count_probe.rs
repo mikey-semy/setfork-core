@@ -28,7 +28,7 @@ async fn seed_list(pool: &sqlx::PgPool, owner: Uuid) -> Uuid {
     .expect("seed template")
 }
 
-async fn факт_и_счётчик(pool: &sqlx::PgPool, list_id: Uuid) -> (i64, i32) {
+async fn fact_and_counter(pool: &sqlx::PgPool, list_id: Uuid) -> (i64, i32) {
     let rows: i64 = sqlx::query_scalar("select count(*) from stars where template_id = $1")
         .bind(list_id)
         .fetch_one(pool)
@@ -45,7 +45,7 @@ async fn факт_и_счётчик(pool: &sqlx::PgPool, list_id: Uuid) -> (i64,
 /// Разные пользователи ставят звезду одновременно.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn звёзды_разных_пользователей_считаются_верно() {
+async fn stars_of_different_users_are_counted_correctly() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "owner").await;
     let list_id = seed_list(&pool, owner).await;
@@ -73,7 +73,7 @@ async fn звёзды_разных_пользователей_считаются
             Err(e) => err.push(e),
         }
     }
-    let (rows, counter) = факт_и_счётчик(&pool, list_id).await;
+    let (rows, counter) = fact_and_counter(&pool, list_id).await;
     println!("8 разных: успешных {ok}, отказов {}, строк {rows}, счётчик {counter}", err.len());
     for e in &err {
         println!("  ОТКАЗ: {e:?}");
@@ -86,7 +86,7 @@ async fn звёзды_разных_пользователей_считаются
 /// Итог может быть любым — 0 или 1 звезда, — но счётчик ОБЯЗАН совпасть с фактом.
 #[tokio::test]
 #[ignore = "ПАДАЕТ (дефект): счётчик звёзд растёт при повторном нажатии — счётчик=4 при 1 строке"]
-async fn повторные_нажатия_одного_пользователя_не_ломают_счётчик() {
+async fn repeated_clicks_by_one_user_do_not_break_the_counter() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "owner2").await;
     let list_id = seed_list(&pool, owner).await;
@@ -110,7 +110,7 @@ async fn повторные_нажатия_одного_пользователя
             Err(e) => err.push(e),
         }
     }
-    let (rows, counter) = факт_и_счётчик(&pool, list_id).await;
+    let (rows, counter) = fact_and_counter(&pool, list_id).await;
     println!("6 нажатий одного: ответы {states:?}, отказов {}, строк {rows}, счётчик {counter}", err.len());
     for e in &err {
         println!("  ОТКАЗ: {e:?}");

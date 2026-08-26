@@ -70,7 +70,7 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         key: "tree_foreign_hint",
         // Без апострофа намеренно: текст уезжает в одинарные кавычки шелла, и
         // `list's` порвал бы их — хук перестал бы разбираться целиком. Проверяет
-        // тест `тексты_безопасны_для_шелла_и_printf`.
+        // тест `texts_are_safe_for_shell_and_printf`.
         en: "Remove them from the commit: list content lives in list.json.",
         ru: "Уберите их из коммита: содержимое списка живёт в list.json.",
     },
@@ -137,7 +137,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn каталог_полон_и_без_дублей() {
+    fn catalog_is_complete_and_free_of_duplicates() {
         let mut seen = std::collections::HashSet::new();
         for m in HOOK_MESSAGES {
             assert!(!m.en.trim().is_empty(), "{}: пустой en", m.key);
@@ -150,7 +150,7 @@ mod tests {
     /// кавычку, а лишний `%` — формат: и то и другое сломало бы ХУК, то есть
     /// приём пушей целиком. Дешевле запретить, чем экранировать.
     #[test]
-    fn тексты_безопасны_для_шелла_и_printf() {
+    fn texts_are_safe_for_shell_and_printf() {
         for m in HOOK_MESSAGES {
             for (lang, text) in [("en", m.en), ("ru", m.ru)] {
                 assert!(!text.contains('\''), "{} [{lang}]: апостроф порвёт кавычку шелла", m.key);
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn функция_содержит_оба_языка() {
+    fn generated_function_carries_both_languages() {
         let f = shell_msg_fn();
         assert!(f.contains("SETFORK_LANG:-en"), "дефолт — английский");
         for m in HOOK_MESSAGES {

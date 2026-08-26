@@ -107,11 +107,11 @@ pub struct CollabWriteSvc {
 ///
 /// Ключ строится из uuid списка так же, как у репо-лока, но с меткой: иначе создание
 /// задачи ждало бы git-операцию по тому же списку, а это разные очереди.
-const МЕТКА_НУМЕРАЦИИ: i64 = 0x5346_4E55_4D42_5200; // «SFNUMBR»
+const NUMBERING_TAG: i64 = 0x5346_4E55_4D42_5200; // «SFNUMBR»
 
-fn ключ_нумерации(id: Uuid) -> i64 {
+fn numbering_key(id: Uuid) -> i64 {
     let b = id.as_bytes();
-    i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) ^ МЕТКА_НУМЕРАЦИИ
+    i64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]) ^ NUMBERING_TAG
 }
 
 #[tonic::async_trait]
@@ -132,7 +132,7 @@ impl CollabWrite for CollabWriteSvc {
         // Ключ — в своём пространстве, чтобы не пересекаться с репо-локом.
         let mut tx = self.pool.begin().await.map_err(db_status)?;
         sqlx::query("select pg_advisory_xact_lock($1)")
-            .bind(ключ_нумерации(tid))
+            .bind(numbering_key(tid))
             .execute(&mut *tx)
             .await
             .map_err(db_status)?;
@@ -225,7 +225,7 @@ impl CollabWrite for CollabWriteSvc {
         // и свой уникальный индекс, гонка там ровно та же (проба показывала 4 из 8).
         let mut tx = self.pool.begin().await.map_err(db_status)?;
         sqlx::query("select pg_advisory_xact_lock($1)")
-            .bind(ключ_нумерации(tid))
+            .bind(numbering_key(tid))
             .execute(&mut *tx)
             .await
             .map_err(db_status)?;

@@ -614,7 +614,7 @@ mod tests {
     /// $schema пишется ВСЕГДА и первым ключом (конвенция редакторов): это и есть
     /// автодополнение сразу после git clone.
     #[test]
-    fn канон_начинается_со_ссылки_на_схему() {
+    fn canon_starts_with_the_schema_link() {
         let lj = list_json(&ver(vec![step(1, "x")]));
         let first_line = lj.lines().nth(1).expect("вторая строка");
         assert!(
@@ -627,7 +627,7 @@ mod tests {
     /// kind: пишется между ordered и version ТОЛЬКО при наличии — старые списки
     /// (kind не определён) дают байт-в-байт прежний файл (как blockId).
     #[test]
-    fn kind_пишется_только_при_наличии_и_на_своём_месте() {
+    fn kind_is_written_only_when_present_and_in_place() {
         let mut v = ver(vec![step(1, "x")]);
         let without = list_json(&v);
         assert!(!without.contains("\"kind\""), "без kind поля нет: {without}");
@@ -645,7 +645,7 @@ mod tests {
 
     /// Реестр kind — зеркало LIST_KINDS фронта; валидатор ровно по нему.
     #[test]
-    fn реестр_kind_совпадает_с_валидатором() {
+    fn kind_registry_matches_the_validator() {
         for k in LIST_KINDS {
             assert!(is_valid_kind(k), "{k}");
         }

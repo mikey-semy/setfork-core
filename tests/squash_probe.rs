@@ -124,7 +124,7 @@ fn proj_step(title: &str) -> setfork_core::git::project::ProjStep {
 /// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
 /// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
 /// проверять своё, а не форму запроса.
-async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
     git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
         .await
         .expect("канон разбирается")
@@ -134,7 +134,7 @@ async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: Stri
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn squash_не_откатывает_работу_приехавшую_в_main() {
+async fn squash_does_not_revert_work_that_landed_in_main() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(
@@ -167,7 +167,7 @@ async fn squash_не_откатывает_работу_приехавшую_в_m
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-1".into(),
-        content: содержимое(&git, rr.clone(), branch_json).await,
+        content: blob_text(&git, rr.clone(), branch_json).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -233,7 +233,7 @@ async fn squash_не_откатывает_работу_приехавшую_в_m
 /// в main историей — иначе выбор режима работает через раз.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn squash_сплющивает_и_перематываемую_ветку() {
+async fn squash_flattens_a_fast_forwardable_branch_too() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "bob", "squash-ff", vec![step("База")]).await;
@@ -255,7 +255,7 @@ async fn squash_сплющивает_и_перематываемую_ветку(
         git.commit_to_branch(Request::new(CommitToBranchRequest {
             repo: rr.clone(),
             branch: "pr-ff".into(),
-            content: содержимое(&git, rr.clone(), j).await,
+            content: blob_text(&git, rr.clone(), j).await,
             message: i.into(),
             author_name: who.into(),
             author_email: format!("{}@example.com", who.to_lowercase()),
@@ -302,7 +302,7 @@ async fn squash_сплющивает_и_перематываемую_ветку(
 /// теперь она сторожит регрессию, а не фиксирует беду. Имя изменено вслед за смыслом.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn при_конфликте_выбранный_режим_squash_доживает_до_слияния() {
+async fn on_conflict_the_chosen_squash_mode_survives_until_the_merge() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "carol", "squash-conflict", vec![step("Общий")]).await;
@@ -324,7 +324,7 @@ async fn при_конфликте_выбранный_режим_squash_дожи
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-c".into(),
-        content: содержимое(&git, rr.clone(), base.replacen("Общий", "Версия ветки", 1)).await,
+        content: blob_text(&git, rr.clone(), base.replacen("Общий", "Версия ветки", 1)).await,
         message: "правка ветки".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -369,7 +369,7 @@ async fn при_конфликте_выбранный_режим_squash_дожи
         .merge_resolved(Request::new(MergeResolvedRequest {
             repo: rr.clone(),
             branch: "pr-c".into(),
-            content: содержимое(&git, rr.clone(), base.replacen("Общий", "Разрешённая версия", 1)).await,
+            content: blob_text(&git, rr.clone(), base.replacen("Общий", "Разрешённая версия", 1)).await,
             // Режим приезжает из ЗАПРОСА (#54): проба про то и есть — выбор «squash»
             // обязан дожить до разрешения конфликта, а не потеряться по дороге.
             mode: "squash".into(),
@@ -391,7 +391,7 @@ async fn при_конфликте_выбранный_режим_squash_дожи
 /// Диагностика: насколько сильно веб-версия переписывает list.json.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn дамп_расхождения_list_json() {
+async fn list_json_divergence_dump() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "dave", "dump", vec![step("Первый"), step("Второй")]).await;

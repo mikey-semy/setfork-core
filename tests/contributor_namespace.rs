@@ -67,7 +67,7 @@ fn repo_pair(root: &Path) -> (PathBuf, PathBuf) {
 }
 
 #[test]
-fn посторонний_не_трогает_main() {
+fn an_outsider_does_not_touch_main() {
     let root = tmp("f5-main");
     let (_bare, work) = repo_pair(&root.0);
     std::fs::write(work.join("list.json"), br#"{"title":"L2","steps":[]}"#).expect("edit");
@@ -83,7 +83,7 @@ fn посторонний_не_трогает_main() {
 }
 
 #[test]
-fn посторонний_не_заводит_веток_вообще() {
+fn an_outsider_creates_no_branches_at_all() {
     let root = tmp("f5-alien");
     let (_bare, work) = repo_pair(&root.0);
 
@@ -100,7 +100,7 @@ fn посторонний_не_заводит_веток_вообще() {
 }
 
 #[test]
-fn посторонний_предъявляет_правку() {
+fn an_outsider_submits_an_edit() {
     let root = tmp("f5-own");
     let (_bare, work) = repo_pair(&root.0);
 
@@ -111,7 +111,7 @@ fn посторонний_предъявляет_правку() {
 }
 
 #[test]
-fn владелец_и_соавтор_пишут_куда_угодно() {
+fn owner_and_collaborator_write_anywhere() {
     let root = tmp("f5-owner");
     let (_bare, work) = repo_pair(&root.0);
     std::fs::write(work.join("list.json"), br#"{"title":"L3","steps":[]}"#).expect("edit");
@@ -137,7 +137,7 @@ fn владелец_и_соавтор_пишут_куда_угодно() {
 /// фронта, канал закрыт токеном, а фронт без ролей и посторонних не впускает.
 /// Ядро при этом пишет предупреждение в лог, чтобы состояние не было тихим.
 #[test]
-fn без_роли_работает_как_до_ф5() {
+fn without_a_role_it_behaves_as_before_phase_5() {
     let root = tmp("f5-norole");
     let (_bare, work) = repo_pair(&root.0);
     std::fs::write(work.join("list.json"), br#"{"title":"L4","steps":[]}"#).expect("edit");
@@ -160,7 +160,7 @@ fn без_роли_работает_как_до_ф5() {
 /// Посторонний без ника не может ничего: пространство определяется ником, и без
 /// него правило неисполнимо. Молчать в этом случае нельзя — отказ объясняет.
 #[test]
-fn посторонний_без_ника_получает_объяснение() {
+fn an_outsider_without_a_handle_gets_an_explanation() {
     let root = tmp("f5-noactor");
     let (_bare, work) = repo_pair(&root.0);
 
@@ -183,7 +183,7 @@ fn посторонний_без_ника_получает_объяснение(
 /// «ограничиваем ровно contributor», любое такое значение давало право писать в
 /// main (авто-ревью core#80). Судим по белому списку.
 #[test]
-fn незнакомая_роль_ограничивается() {
+fn an_unknown_role_is_restricted() {
     let root = tmp("f5-unknown-role");
     let (_bare, work) = repo_pair(&root.0);
     std::fs::write(work.join("list.json"), br#"{"title":"L-unknown","steps":[]}"#).expect("edit");
@@ -209,7 +209,7 @@ fn незнакомая_роль_ограничивается() {
 /// Здесь проверяется само свойство установки: подменённый хук восстанавливается
 /// и снова отвергает пуш постороннего в main.
 #[test]
-fn подменённый_хук_восстанавливается() {
+fn a_replaced_hook_is_restored() {
     let root = tmp("f5-hook-replace");
     let (bare, work) = repo_pair(&root.0);
     std::fs::write(work.join("list.json"), br#"{"title":"L-hook","steps":[]}"#).expect("edit");

@@ -176,7 +176,7 @@ async fn db_steps(
 /// значит канон, собранный до вставки строк, равен канону из вставленных строк.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn веб_версия_коммитится_git_first_и_проецируется() {
+async fn a_web_version_commits_git_first_and_projects() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "webwriter", "web", "Web List").await;
 
@@ -227,7 +227,7 @@ async fn веб_версия_коммитится_git_first_и_проециру�
 /// физически не могут разойтись.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn веб_правка_и_push_дают_одинаковый_результат() {
+async fn a_web_edit_and_a_push_yield_the_same_result() {
     let pool = support::pool_with_schema().await;
     let a_id = seed_list(&pool, "sidea", "same", "Same List").await;
     let b_id = seed_list(&pool, "sideb", "same", "Same List").await;
@@ -288,7 +288,7 @@ async fn веб_правка_и_push_дают_одинаковый_резуль�
 /// догоняет недостающие версии, потом коммитит новую — дыр в истории нет.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn отставшее_репо_догоняется_перед_коммитом() {
+async fn a_lagging_repo_catches_up_before_the_commit() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "laggard", "behind", "Behind").await;
     // v2 существует только в БД (как оставляла ленивая модель).
@@ -336,7 +336,7 @@ async fn отставшее_репо_догоняется_перед_комми�
 /// затем пишется новая версия — повтор сохранения долечивает сам.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn убежавший_вперёд_git_лечится_проекцией() {
+async fn a_git_that_ran_ahead_is_healed_by_projection() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "runner", "ahead", "Ahead").await;
 
@@ -384,7 +384,7 @@ async fn убежавший_вперёд_git_лечится_проекцией()
 /// внятной ошибкой, git и БД не тронуты — не тихая порча.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn постороннее_имя_версии_останавливает_запись() {
+async fn a_foreign_version_name_stops_the_write() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "rogue", "rogue", "Rogue").await;
 
@@ -432,7 +432,7 @@ async fn постороннее_имя_версии_останавливает_�
 /// обещание недостижимо (между чужой проверкой и записью есть окно).
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn правка_на_устаревшей_версии_отклоняется() {
+async fn an_edit_on_a_stale_version_is_rejected() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "casper", "cas", "CAS List").await;
 
@@ -500,7 +500,7 @@ async fn правка_на_устаревшей_версии_отклоняет�
 /// и молча затёр веб-версии, которые раньше делали его non-fast-forward-отказом.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn ensure_выравнивает_отставшее_репо_перед_доступом() {
+async fn ensure_aligns_a_lagging_repo_before_access() {
     support::ensure_git_data_dir();
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "reader", "stale-read", "Stale Read").await;

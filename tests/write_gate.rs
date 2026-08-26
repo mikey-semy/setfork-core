@@ -111,7 +111,7 @@ fn http(body: &str) -> String {
 }
 
 #[tokio::test]
-async fn гейт_пропускает_только_явное_разрешение() {
+async fn the_gate_lets_through_only_an_explicit_allow() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":true}"#).into_boxed_str()));
     assert!(ensure_writable_at(&stub.addr, "mike", "list").await.is_ok(), "явное allow пропускает");
 }
@@ -119,7 +119,7 @@ async fn гейт_пропускает_только_явное_разрешен�
 /// Продуктовый отказ доезжает кодом причины, а не общей ошибкой: фронту надо
 /// показать человеку разное для «заморожен» и «в архиве».
 #[tokio::test]
-async fn причина_отказа_доезжает() {
+async fn the_refusal_reason_arrives() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":false,"reason":"frozen"}"#).into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("должен быть отказ");
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
@@ -128,21 +128,21 @@ async fn причина_отказа_доезжает() {
 }
 
 #[tokio::test]
-async fn архив_отличим_от_заморозки() {
+async fn archived_is_distinguishable_from_frozen() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":false,"reason":"archived"}"#).into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("отказ");
     assert_eq!(reason_of(&err), Some("ARCHIVED"));
 }
 
 #[tokio::test]
-async fn несуществующий_список_это_not_found() {
+async fn a_missing_list_is_not_found() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":false,"reason":"not-found"}"#).into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("отказ");
     assert_eq!(err.code(), tonic::Code::NotFound);
 }
 
 #[tokio::test]
-async fn ошибка_приложения_останавливает_запись() {
+async fn an_app_error_stops_the_write() {
     let stub = Stub::start("HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\n\r\n");
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("500 не пропускает");
     // Срыв СВЯЗИ — преходящая беда, и клиенту честно сказать «повтори»: код
@@ -161,7 +161,7 @@ async fn ошибка_приложения_останавливает_запис
 /// на git-пути это ещё и 503 с Retry-After наружу (находка своего прохода ревью
 /// по #101).
 #[tokio::test]
-async fn отказ_спрашивать_не_выдаётся_за_срыв_связи() {
+async fn a_refusal_to_ask_is_not_passed_off_as_a_transport_failure() {
     for resp in [
         "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n",
         "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
@@ -174,7 +174,7 @@ async fn отказ_спрашивать_не_выдаётся_за_срыв_с�
 }
 
 #[tokio::test]
-async fn мусор_в_ответе_останавливает_запись() {
+async fn garbage_in_the_reply_stops_the_write() {
     let stub = Stub::start(Box::leak(http("<html>что-то пошло не так</html>").into_boxed_str()));
     let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("мусор не пропускает");
     // Приложение ОТВЕТИЛО, но не то: повтор этого не лечит, и код обязан отличаться
@@ -186,7 +186,7 @@ async fn мусор_в_ответе_останавливает_запись() {
 
 /// Самый важный край: приложения нет вообще. Отказ, а не «пропустим на всякий».
 #[tokio::test]
-async fn недоступное_приложение_останавливает_запись() {
+async fn an_unreachable_app_stops_the_write() {
     // Порт, который никто не слушает: занимаем и сразу отпускаем.
     let addr = {
         let l = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -205,7 +205,7 @@ async fn недоступное_приложение_останавливает_
 /// реальные 5 секунд конфигурации: проверяем настоящее поведение, а не
 /// подкрученное под тест.
 #[tokio::test]
-async fn залипшее_тело_ответа_не_держит_запись_вечно() {
+async fn a_stuck_reply_body_does_not_hold_the_write_forever() {
     let stub = Stub::start_stalling(
         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 64\r\n\r\n",
     );

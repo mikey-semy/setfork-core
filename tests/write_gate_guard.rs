@@ -60,7 +60,7 @@ const READ_ONLY: &[(&str, &str)] = &[
 /// сработало как надо — сторож обязан замечать, что его предмет уехал. Чтобы он
 /// замечал ПЕРЕЕЗД, а не отсутствие файла, он теперь читает всё, что в каталоге:
 /// разложение методов по подмодулям его больше не сломает.
-fn исходники_git_core() -> String {
+fn git_core_sources() -> String {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/services/git_core");
     let mut out = String::new();
     let entries = std::fs::read_dir(&dir).expect("каталог src/services/git_core");
@@ -83,8 +83,8 @@ fn method_body<'a>(src: &'a str, name: &str) -> Option<&'a str> {
 }
 
 #[test]
-fn каждый_мутирующий_rpc_спрашивает_вердикт() {
-    let src = исходники_git_core();
+fn every_mutating_rpc_asks_for_a_verdict() {
+    let src = git_core_sources();
 
     let mut missing = Vec::new();
     for name in MUTATING {
@@ -104,8 +104,8 @@ fn каждый_мутирующий_rpc_спрашивает_вердикт() {
 }
 
 #[test]
-fn читающие_методы_не_обвешаны_гейтом_записи() {
-    let src = исходники_git_core();
+fn read_methods_are_not_wrapped_in_the_write_gate() {
+    let src = git_core_sources();
 
     for (name, why) in READ_ONLY {
         let body = method_body(&src, name).unwrap_or_else(|| panic!("метод {name} не найден"));
@@ -120,8 +120,8 @@ fn читающие_методы_не_обвешаны_гейтом_записи
 /// стороны кода: если у метода есть вызов гейта, он должен быть в списке —
 /// иначе список тихо разойдётся с реальностью.
 #[test]
-fn список_мутирующих_не_отстал_от_кода() {
-    let src = исходники_git_core();
+fn the_mutating_list_has_not_fallen_behind_the_code() {
+    let src = git_core_sources();
 
     let mut current: Option<String> = None;
     let mut unlisted = Vec::new();
@@ -148,8 +148,8 @@ fn список_мутирующих_не_отстал_от_кода() {
 /// (проба линзы 05 §3: метод, сносящий репозиторий, не уронил ничего). Теперь
 /// новый RPC роняет страж, пока автор не решит, к какому он классу.
 #[test]
-fn каждый_rpc_отнесён_к_пишущим_или_читающим() {
-    let src = исходники_git_core();
+fn every_rpc_is_classified_as_writing_or_reading() {
+    let src = git_core_sources();
     // Только блок реализации трейта: наружу торчит он, а внутренние помощники —
     // не RPC и классификации не требуют.
     let start = src.find("impl GitCore for GitCoreSvc").expect("блок реализации трейта");

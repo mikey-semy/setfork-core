@@ -544,7 +544,7 @@ async fn issues_numbering_status_and_comments() {
 /// в списке.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn состав_соавторов_и_порядок() {
+async fn co_author_set_and_order() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "owner-c").await;
     let many = support::seed_user(&pool, "many-c").await;
@@ -596,9 +596,9 @@ async fn состав_соавторов_и_порядок() {
         .into_inner()
         .contributors;
 
-    let имена: Vec<&str> = c.iter().map(|x| x.handle.as_str()).collect();
+    let names: Vec<&str> = c.iter().map(|x| x.handle.as_str()).collect();
     assert_eq!(
-        имена,
+        names,
         vec!["owner-c", "many-c", "one-c", "none-c"],
         "владелец первым, дальше по убыванию принятых"
     );
@@ -606,16 +606,16 @@ async fn состав_соавторов_и_порядок() {
     assert_eq!(c[1].accepted, 2);
     assert_eq!(c[2].accepted, 1);
     assert_eq!(c[3].accepted, 0, "автор без принятых всё равно в списке");
-    assert_eq!(имена.iter().filter(|x| **x == "owner-c").count(), 1, "владелец не задваивается");
+    assert_eq!(names.iter().filter(|x| **x == "owner-c").count(), 1, "владелец не задваивается");
 
     // Несуществующий список — пустой ответ, а не отказ.
-    let пусто = read
+    let empty = read
         .get_contributors(Request::new(ListId { id: uuid::Uuid::new_v4().to_string() }))
         .await
         .expect("несуществующий список — не ошибка")
         .into_inner()
         .contributors;
-    assert!(пусто.is_empty());
+    assert!(empty.is_empty());
 }
 
 #[tokio::test]

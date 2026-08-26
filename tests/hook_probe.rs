@@ -83,7 +83,7 @@ fn setup(root: &Path) -> (PathBuf, PathBuf) {
 }
 
 #[test]
-fn защита_main_от_перезаписи_истории_и_удаления() {
+fn main_is_protected_from_history_rewrite_and_deletion() {
     let root = tmp_root();
     let (bare, work) = setup(&root.0);
 
@@ -132,7 +132,7 @@ fn защита_main_от_перезаписи_истории_и_удалени�
 /// Обещание из комментария к хуку: черновые ветки force-push'абельны —
 /// защищён только main. Если бы отвергалось всё, работа с предложениями встала бы.
 #[test]
-fn черновые_ветки_остаются_force_push_абельными() {
+fn draft_branches_remain_force_pushable() {
     let root = tmp_root();
     let (bare, work) = setup(&root.0);
 

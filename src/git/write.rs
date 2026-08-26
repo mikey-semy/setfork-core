@@ -156,7 +156,7 @@ mod tests {
     /// Плюс: gc пакует только ДОСТИЖИМОЕ, поэтому наполнители роли пака не играют —
     /// пакуется дерево ветки.
     #[test]
-    fn веточная_запись_пакует_объекты() {
+    fn branch_write_packs_objects() {
         let (tmp, repo) = bare();
         {
             // `gc.autoDetach` по умолчанию ИСТИНА: `gc --auto` уходит в фон и
@@ -202,7 +202,7 @@ mod tests {
     }
 
     #[test]
-    fn пишет_коммит_и_двигает_ветку() {
+    fn writes_a_commit_and_moves_the_branch() {
         let (_t, repo) = bare();
         let before = seed(&repo, "pr-1", b"{\"steps\":[]}", false);
 
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn то_же_содержимое_не_создаёт_пустой_коммит() {
+    fn identical_content_creates_no_empty_commit() {
         let (_t, repo) = bare();
         let before = seed(&repo, "pr-1", b"{\"steps\":[]}", false);
 
@@ -232,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn чужой_пуш_не_перезаписывается() {
+    fn a_foreign_push_is_not_overwritten() {
         let (_t, repo) = bare();
         let tip = seed(&repo, "pr-1", b"{\"steps\":[]}", false);
         let stale = "0".repeat(40);
@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn совпавший_tip_пропускает_запись() {
+    fn matching_tip_skips_the_write() {
         let (_t, repo) = bare();
         let tip = seed(&repo, "pr-1", b"{\"steps\":[]}", false).to_string();
 
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn каталог_steps_убирается_вслед_за_каноном() {
+    fn steps_dir_follows_the_canon_when_removed() {
         let (_t, repo) = bare();
         seed(&repo, "pr-1", b"{\"steps\":[]}", true);
 
@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn авторство_человека_попадает_в_коммит() {
+    fn human_authorship_reaches_the_commit() {
         let (_t, repo) = bare();
         seed(&repo, "pr-1", b"{\"steps\":[]}", false);
 
@@ -287,7 +287,7 @@ mod tests {
     /// Ф2b: витрина не протухает — после записи канона в ветку README и
     /// .gitattributes соответствуют новому list.json, steps/ вычищен.
     #[test]
-    fn readme_перегенерируется_вместе_с_каноном() {
+    fn readme_is_regenerated_with_the_canon() {
         let (_t, repo) = bare();
         seed(&repo, "pr-1", b"{\"steps\":[]}", true);
 
@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn несуществующая_ветка_это_not_found() {
+    fn missing_branch_is_not_found() {
         let (_t, repo) = bare();
         seed(&repo, "pr-1", b"{}", false);
 

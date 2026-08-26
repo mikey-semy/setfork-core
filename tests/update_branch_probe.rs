@@ -79,7 +79,7 @@ fn tip(bare: &std::path::Path, refname: &str) -> String {
 /// делает фронт в редакторе кода), а провод с #60 принимает СТРУКТУРУ, а не байты.
 /// Разбираем тем же RPC, которым пользуется редактор, — тогда проба продолжает
 /// проверять своё, а не форму запроса.
-async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
+async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Option<ListContent> {
     git.parse_canon(Request::new(ParseCanonRequest { repo: rr, canon }))
         .await
         .expect("канон разбирается")
@@ -89,7 +89,7 @@ async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: Stri
 
 #[tokio::test]
 #[ignore = "ПАДАЕТ: legacy steps/*.md против канона веток (только list.json) → git2 даёт conflict там, где git CLI сливает; на проде формы нет ни в одном из 37 репо"]
-async fn влить_main_в_ветку_сохраняет_обе_стороны() {
+async fn merging_main_into_a_branch_keeps_both_sides() {
     let dir = support::own_git_data_dir("ub-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
@@ -147,12 +147,7 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
     git.commit_to_branch(Request::new(CommitToBranchRequest {
         repo: rr.clone(),
         branch: "pr-u".into(),
-        content: содержимое(
-            &git,
-            rr.clone(),
-            base.replacen("Четвёртый", "Четвёртый (моя правка)", 1),
-        )
-        .await,
+        content: blob_text(&git, rr.clone(), base.replacen("Четвёртый", "Четвёртый (моя правка)", 1)).await,
         message: "правка автора".into(),
         expected_tip: String::new(),
         author_name: "Аня".into(),
@@ -287,7 +282,7 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
 /// Повторный вызов, когда вливать нечего, не должен плодить пустые коммиты.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn повторное_обновление_без_изменений_отклоняется() {
+async fn a_repeat_update_without_changes_is_rejected() {
     let dir = support::own_git_data_dir("ub-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "bob").await;
@@ -345,7 +340,7 @@ async fn повторное_обновление_без_изменений_от�
 /// main их несёт — поэтому важно, ЧТО именно main делает с файлами шагов.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn какие_изменения_main_ломают_слияние() {
+async fn which_main_changes_break_the_merge() {
     for (случай, шаги_main) in [
         ("main ДОБАВИЛ шаг", vec!["Первый", "Второй", "Третий", "Четвёртый", "Пятый (main)"]),
         ("main УДАЛИЛ шаг", vec!["Первый", "Второй", "Третий"]),
@@ -406,12 +401,7 @@ async fn какие_изменения_main_ломают_слияние() {
         git.commit_to_branch(Request::new(CommitToBranchRequest {
             repo: rr.clone(),
             branch: "pr".into(),
-            content: содержимое(
-                &git,
-                rr.clone(),
-                base.replacen("Второй", "Второй (правка автора)", 1),
-            )
-            .await,
+            content: blob_text(&git, rr.clone(), base.replacen("Второй", "Второй (правка автора)", 1)).await,
             message: "правка".into(),
             expected_tip: String::new(),
             author_name: "Аня".into(),

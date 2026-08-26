@@ -67,7 +67,7 @@ fn repo_pair(root: &Path) -> (PathBuf, PathBuf) {
 }
 
 #[test]
-fn хук_отвергает_посторонний_файл_и_называет_его() {
+fn the_hook_rejects_a_foreign_file_and_names_it() {
     let root = tmp("tree-hook");
     let (_bare, work) = repo_pair(&root.0);
 
@@ -86,7 +86,7 @@ fn хук_отвергает_посторонний_файл_и_называет
 // а не по дереву вершины: чистый tip оставлял бы блоб достижимым из истории, и
 // зеркало вывезло бы его на чужую форджу.
 #[test]
-fn хук_видит_мусор_в_промежуточном_коммите() {
+fn the_hook_sees_garbage_in_an_intermediate_commit() {
     let root = tmp("tree-mid");
     let (_bare, work) = repo_pair(&root.0);
 
@@ -106,7 +106,7 @@ fn хук_видит_мусор_в_промежуточном_коммите() {
 // Легаси: у репо, в которые не писали после Ф2b, steps/*.md всё ещё в дереве.
 // Жёсткий отказ ломал бы пуш из такого клона на ровном месте.
 #[test]
-fn хук_пропускает_легаси_steps() {
+fn the_hook_allows_legacy_steps() {
     let root = tmp("tree-legacy");
     let (_bare, work) = repo_pair(&root.0);
 
@@ -128,7 +128,7 @@ fn хук_пропускает_легаси_steps() {
 // же байтами, что у разрешённого, не появлялся в выводе вовсе и проезжал.
 // Проверено вживую: у одинаковых README.md и evil выводился только README.md.
 #[test]
-fn хук_ловит_лишний_файл_с_содержимым_разрешённого() {
+fn the_hook_catches_an_extra_file_holding_allowed_content() {
     let root = tmp("tree-dedup");
     let (_bare, work) = repo_pair(&root.0);
 
@@ -146,7 +146,7 @@ fn хук_ловит_лишний_файл_с_содержимым_разреш�
 // Регрессия P2 авто-ревью: `steps` разрешался как ИМЯ, поэтому обычный файл с
 // таким именем в корне проходил обе проверки и оставался в дереве незамеченным.
 #[test]
-fn обычный_файл_с_именем_steps_отвергается() {
+fn a_plain_file_named_steps_is_rejected() {
     assert!(!tree_path_allowed("steps"), "каталог судится по содержимому, файл — сам по себе");
 
     let root = tmp("tree-stepsfile");
@@ -166,7 +166,7 @@ fn обычный_файл_с_именем_steps_отвергается() {
 // объявляло Conflict, и запись в список останавливалась до оператора
 // (05-F2). #59 закрыл веб-дверь 30.07, эта проба закрывает git-дверь.
 #[test]
-fn тег_с_именем_версии_не_принимается_пушем() {
+fn a_tag_named_like_a_version_is_not_accepted_by_push() {
     let root = tmp("tree-vtag");
     let (_bare, work) = repo_pair(&root.0);
     std::fs::write(work.join("list.json"), "{}").ok(); // содержимое не важно: судим ИМЯ рефа
@@ -190,7 +190,7 @@ fn тег_с_именем_версии_не_принимается_пушем() 
 // в хуке. Оба здесь и закреплены: правило одно, реализации две, и разъезжаться
 // им нельзя ни в какую сторону.
 #[test]
-fn правило_путей_совпадает_с_хуком_на_граничных_именах() {
+fn the_path_rule_matches_the_hook_on_edge_names() {
     // F7: пустое имя. Шелльное `[^/]+` его отвергает, Rust — пропускал.
     assert!(!tree_path_allowed("steps/.md"), "пустое имя файла — не путь канона");
     assert!(!tree_path_allowed("steps/"), "каталог сам по себе не разрешён");
@@ -209,7 +209,7 @@ fn правило_путей_совпадает_с_хуком_на_гранич�
 // кавычки, и якорное правило по ним не совпадало. Законный файл отвергался из-за
 // формы вывода, а не из-за содержания. Проверяем настоящим пушем.
 #[test]
-fn имя_с_кириллицей_проходит_хук() {
+fn a_cyrillic_name_passes_the_hook() {
     let root = tmp("tree-utf8");
     let (_bare, work) = repo_pair(&root.0);
     std::fs::create_dir_all(work.join("steps")).expect("mkdir steps");
@@ -225,7 +225,7 @@ fn имя_с_кириллицей_проходит_хук() {
 // Регрессия P2 авто-ревью: гитлинк libgit2 отдаёт как ObjectType::Commit, и
 // «судим только блобы» пропускало подмодуль мимо правила целиком.
 #[test]
-fn update_main_отвергает_гитлинк() {
+fn update_main_rejects_a_gitlink() {
     let root = tmp("tree-gitlink");
     let bare = root.0.join("gl.git");
     let repo = git2::Repository::init_bare(&bare).expect("init bare");
@@ -248,7 +248,7 @@ fn update_main_отвергает_гитлинк() {
 }
 
 #[test]
-fn update_main_отвергает_посторонний_путь() {
+fn update_main_rejects_a_foreign_path() {
     let root = tmp("tree-git2");
     let bare = root.0.join("g2.git");
     let repo = git2::Repository::init_bare(&bare).expect("init bare");
@@ -299,7 +299,7 @@ fn update_main_отвергает_посторонний_путь() {
 }
 
 #[test]
-fn allowlist_путей_совпадает_с_форматом_версии() {
+fn the_path_allowlist_matches_the_version_format() {
     for ok in ["README.md", "list.json", ".gitattributes", "steps/01-a.md"] {
         assert!(tree_path_allowed(ok), "{ok}");
     }
@@ -324,7 +324,7 @@ fn allowlist_путей_совпадает_с_форматом_версии() {
 // механизм не работает, — хотя не работал сам тест. Здесь LCG даёт настоящую
 // энтропию.
 #[test]
-fn receive_max_input_size_действительно_отказывает() {
+fn receive_max_input_size_really_refuses() {
     let root = tmp("pack-limit");
     let (bare, work) = repo_pair(&root.0);
     git_ok(&bare, &["config", "receive.maxInputSize", "512"]);
@@ -353,7 +353,7 @@ fn receive_max_input_size_действительно_отказывает() {
 // install_hook обязан выставлять потолок пака сам: правило должно доезжать и до
 // репозиториев, созданных раньше, — install_hook зовётся при каждом обращении.
 #[test]
-fn install_hook_выставляет_потолок_пака() {
+fn install_hook_sets_the_pack_ceiling() {
     let root = tmp("pack-cfg");
     let bare = root.0.join("cfg.git");
     git_ok(&root.0, &["init", "-q", "--bare", bare.to_str().unwrap()]);
@@ -370,7 +370,7 @@ fn install_hook_выставляет_потолок_пака() {
 /// скрипте, ещё не значит, что выбор работает — ошибиться можно и в шаблоне
 /// `case`, и в порядке ветвей.
 #[test]
-fn язык_отказа_переключается_окружением() {
+fn the_refusal_language_switches_by_env() {
     let root = tmp("tree-lang");
     let (_bare, work) = repo_pair(&root.0);
     std::fs::write(work.join("assets.bin"), b"x").expect("blob");
@@ -415,7 +415,7 @@ fn язык_отказа_переключается_окружением() {
 /// его настоящим пушем: без ника — отказ с объяснением, чужая база — отказ,
 /// нормальный случай — подсказка человеку в выводе.
 #[test]
-fn магический_реф_проверяется_хуком() {
+fn the_magic_ref_is_checked_by_the_hook() {
     let root = tmp("magic-hook");
     let (_bare, work) = repo_pair(&root.0);
 

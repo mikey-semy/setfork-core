@@ -249,7 +249,7 @@ mod ser_step_tests {
     /// en-проекция строки: фильтры ровно как у чтения БД (load_bundle_data) —
     /// иначе bootstrap из вставленных строк соберёт другой канон.
     #[test]
-    fn en_проекция_и_фильтры_совпадают_с_чтением_бд() {
+    fn en_projection_and_filters_match_db_read() {
         let s = ser_step_from_row(3, &row());
         assert_eq!(s.n, 3);
         assert_eq!(s.block_type, None, "step не несёт type");
@@ -265,7 +265,7 @@ mod ser_step_tests {
 
     /// Не-step блок: type/content уезжают в канон как есть.
     #[test]
-    fn блок_несёт_type_и_content() {
+    fn block_carries_type_and_content() {
         let mut r = row();
         r.block_type = "text".into();
         r.content = serde_json::json!({ "md": "Вступление" });
@@ -277,7 +277,7 @@ mod ser_step_tests {
     /// Ф2a-довесок: картинка и пометка — ЧЕСТНОЕ содержимое канона (решение
     /// владельца). Пишутся только при наличии; вопрос — только при поднятой пометке.
     #[test]
-    fn надстройки_текут_в_канон_намеренно() {
+    fn overlays_reach_canon_on_purpose() {
         let mut r = row();
         r.image_key = Some("steps/x.png".into());
         let s = ser_step_from_row(1, &r);

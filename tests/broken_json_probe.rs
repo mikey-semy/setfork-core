@@ -72,7 +72,7 @@ fn v1(title: &str) -> VersionData {
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres) и git в PATH"]
-async fn битый_list_json_не_создаёт_версию_и_не_затирает_текущую() {
+async fn broken_list_json_creates_no_version_and_keeps_the_current_one() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "pusher").await;
     let list_id: Uuid = sqlx::query_scalar(

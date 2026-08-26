@@ -537,7 +537,7 @@ mod tests {
     /// же, что у материализации версии. Иначе README снова начнёт жить двумя
     /// жизнями — ровно от этого Ф2b и избавляется.
     #[test]
-    fn readme_из_канона_совпадает_с_материализацией() {
+    fn readme_from_canon_matches_materialization() {
         let v = ver(vec![
             ser("First", "do it", "echo hi"),
             SerStep {
@@ -559,7 +559,7 @@ mod tests {
 
     /// Битый канон витрину не трогает (None), а не подменяет её пустышкой.
     #[test]
-    fn битый_канон_не_даёт_readme() {
+    fn broken_canon_yields_no_readme() {
         assert_eq!(readme_from_canon(b"not json"), None);
     }
 }

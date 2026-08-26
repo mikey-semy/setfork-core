@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn магический_реф_переезжает_в_ветку_автора_и_исчезает() {
+    fn magic_ref_moves_to_author_branch_and_disappears() {
         let (_t, repo, oid) = repo_with_commit();
         repo.reference("refs/for/main", oid, true, "push").expect("magic ref");
 
@@ -176,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn повторный_пуш_двигает_ту_же_ветку() {
+    fn repeated_push_moves_the_same_branch() {
         let (_t, repo, first) = repo_with_commit();
         repo.reference("refs/for/main", first, true, "push").expect("ref");
         take_magic_pushes(&repo, "mike", &[]).expect("первый");
@@ -200,7 +200,7 @@ mod tests {
     /// Регрессия P1 авто-ревью core#76: брошенный чужой реф не должен
     /// присваиваться следующему пушащему.
     #[test]
-    fn чужой_брошенный_реф_не_присваивается() {
+    fn abandoned_foreign_ref_is_not_claimed() {
         let (_t, repo, oid) = repo_with_commit();
         repo.reference("refs/for/main", oid, true, "чужой пуш, сервис упал").expect("ref");
         // Снимок сделан ДО «нашего» пуша — значит реф не наш.
@@ -214,13 +214,13 @@ mod tests {
     }
 
     #[test]
-    fn у_разных_авторов_разные_ветки() {
+    fn different_authors_get_different_branches() {
         assert_eq!(author_branch("mike", "main"), "u/mike/main");
         assert_ne!(author_branch("mike", "main"), author_branch("anna", "main"));
     }
 
     #[test]
-    fn без_ника_ничего_не_трогаем() {
+    fn without_a_handle_nothing_is_touched() {
         let (_t, repo, oid) = repo_with_commit();
         repo.reference("refs/for/main", oid, true, "push").expect("ref");
         assert!(take_magic_pushes(&repo, "", &[]).expect("пусто").is_empty());

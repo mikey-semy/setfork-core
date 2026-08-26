@@ -282,7 +282,7 @@ mod tests {
     /// каждая из них однажды может прийти от приложения, и ни одна не имеет права
     /// открыть запись.
     #[test]
-    fn непонятый_вердикт_не_открывает_запись() {
+    fn unparsed_verdict_does_not_open_writes() {
         for body in [
             &b""[..],                   // пустое тело
             "не json вовсе".as_bytes(), // не разобралось
@@ -301,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn вердикт_разбирается() {
+    fn verdict_parses() {
         assert_eq!(parse_verdict(br#"{"allow":true}"#), Verdict::Allow);
         assert_eq!(parse_verdict(br#"{"allow":false,"reason":"frozen"}"#), Verdict::Deny("frozen".into()));
         assert_eq!(
@@ -315,7 +315,7 @@ mod tests {
     /// порта. Ядро стартовало молча, а каждая запись отклонялась бы по fail-closed
     /// — в логах при этом пусто, пока никто не пишет, и причина ищется долго.
     #[test]
-    fn мусорный_адрес_приложения_не_проходит_старт() {
+    fn garbage_app_url_fails_startup() {
         assert_eq!(parse_app_url(None), Err(BadAppUrl::Missing));
         assert_eq!(parse_app_url(Some("   ")), Err(BadAppUrl::Missing));
         for bad in [
@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn годный_адрес_нормализуется() {
+    fn valid_app_url_is_normalized() {
         assert_eq!(parse_app_url(Some("http://app:3000")).as_deref(), Ok("http://app:3000"));
         // Хвостовой слеш срезаем: путь эндпоинта дописывается к базе, иначе вышло бы `//api`.
         assert_eq!(parse_app_url(Some("http://app:3000/")).as_deref(), Ok("http://app:3000"));
@@ -341,7 +341,7 @@ mod tests {
     /// plaintext — каждая запись падала бы в бою. Отвергаем на старте, с
     /// объяснением, а не молча.
     #[test]
-    fn https_отвергается_пока_клиент_plaintext() {
+    fn https_rejected_while_client_is_plaintext() {
         assert_eq!(
             parse_app_url(Some("https://app:3000")),
             Err(BadAppUrl::TlsUnsupported("https://app:3000".into()))

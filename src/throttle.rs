@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn пачка_вызовов_за_окно_даёт_один_прогон() {
+    async fn a_burst_within_the_window_yields_one_run() {
         let (n, run) = counting();
         let key = Uuid::new_v4();
         for _ in 0..5 {
@@ -194,7 +194,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn вызов_во_время_прогона_не_теряется() {
+    async fn a_call_during_a_run_is_not_lost() {
         let n = Arc::new(AtomicUsize::new(0));
         let started = Arc::new(tokio::sync::Notify::new());
         let key = Uuid::new_v4();
@@ -219,7 +219,7 @@ mod tests {
     // правок ЧАЩЕ окна не имеет права заморозить зеркало. Классический debounce с
     // перезапуском таймера дал бы здесь ноль прогонов, пока правки не кончатся.
     #[tokio::test]
-    async fn непрерывный_поток_правок_не_морозит_зеркало() {
+    async fn a_steady_stream_of_edits_does_not_freeze_the_mirror() {
         let (n, run) = counting();
         let key = Uuid::new_v4();
         for _ in 0..20 {
@@ -231,7 +231,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn разные_ключи_не_схлопываются_друг_с_другом() {
+    async fn different_keys_do_not_coalesce_together() {
         let (n, run) = counting();
         for _ in 0..3 {
             coalesce(Uuid::new_v4(), Duration::from_millis(10), run.clone());
@@ -245,7 +245,7 @@ mod tests {
     // порядок записи обязан совпадать с порядком выполнения.
 
     #[tokio::test]
-    async fn два_прогона_одного_ключа_не_накладываются() {
+    async fn two_runs_of_one_key_do_not_overlap() {
         let key = Uuid::new_v4();
         let inside = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn порядок_завершения_совпадает_с_порядком_входа() {
+    async fn completion_order_matches_entry_order() {
         // Ради этого всё и делается: старый исход не имеет права записаться
         // ПОСЛЕ нового и объявить синхронизированное зеркало сломанным.
         let key = Uuid::new_v4();
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn разные_ключи_идут_одновременно() {
+    async fn different_keys_run_concurrently() {
         let started = Arc::new(tokio::sync::Barrier::new(2));
         let mut tasks = Vec::new();
         for _ in 0..2 {
@@ -320,14 +320,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn замок_не_течёт() {
+    async fn the_lock_map_does_not_leak() {
         let key = Uuid::new_v4();
         serialized(key, async {}).await;
         assert!(!gates().lock().expect("lock").contains_key(&key), "карта замков не растёт вечно");
     }
 
     #[tokio::test]
-    async fn брошенный_вызов_тоже_убирает_за_собой() {
+    async fn an_abandoned_call_also_cleans_up() {
         // У ручного пуша есть дедлайн gRPC: вызов БРОСАЮТ, не доводя до конца, и
         // код после await не выполняется никогда. Пока уборка была строчкой в
         // конце функции, запись оставалась в карте до конца жизни процесса.
@@ -350,7 +350,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ключ_освобождается_после_прогона() {
+    async fn the_key_is_released_after_the_run() {
         let (n, run) = counting();
         let key = Uuid::new_v4();
         coalesce(key, Duration::from_millis(10), run.clone());

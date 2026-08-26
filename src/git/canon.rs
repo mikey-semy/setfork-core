@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn целый_канон_разбирается() {
+    fn whole_canon_parses() {
         let parsed = parse_canon(&canon(&step("Шаг"))).unwrap_or_else(|e| panic!("{} придирок", e.len()));
         assert_eq!(parsed.title, "Т");
         assert_eq!(parsed.version, 1);
@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn синтаксис_показывает_место_разрыва() {
+    fn syntax_error_points_at_the_break() {
         let Err(issues) = parse_canon("{\"title\": \n}") else {
             panic!("битый JSON обязан отвергнуться")
         };
@@ -220,7 +220,7 @@ mod tests {
     }
 
     #[test]
-    fn шаг_без_заголовка_это_ошибка_а_не_тихая_потеря() {
+    fn step_without_title_is_an_error_not_silent_loss() {
         let Err(issues) = parse_canon(&canon(&step(""))) else {
             panic!("шаг без заголовка обязан отвергнуться")
         };
@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn презентационный_блок_живёт_без_заголовка() {
+    fn presentational_block_needs_no_title() {
         // level ядро пишет ВСЕГДА, и у блока тоже: в БД это перечисление, пустым не бывает.
         let block = r#"{"n":1,"type":"text","content":{"md":"текст"},"title":"","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[]}"#;
         let parsed = parse_canon(&canon(block)).unwrap_or_else(|e| panic!("{} придирок", e.len()));
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn придирки_приходят_разом() {
+    fn all_complaints_arrive_at_once() {
         // Посторонний ключ корня (схема) и шаг без заголовка (семантика) — оба сразу,
         // иначе правка идёт по кругу: сохранил → узнал следующую.
         let text = format!(
@@ -253,7 +253,7 @@ mod tests {
     }
 
     #[test]
-    fn ссылка_без_подписи_это_ошибка_а_не_тихая_потеря() {
+    fn ref_without_label_is_an_error_not_silent_loss() {
         // Схема пропускает: пустая строка — законная строка. А мягкий парс
         // выбрасывает ссылку целиком, вместе с адресом.
         let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"   ","url":"https://example.com"}]}"#;
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn чужое_значение_ловится_схемой_с_указателем() {
+    fn foreign_value_is_caught_by_schema_with_pointer() {
         let bad = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"КАКОЙ-ТО","why":"","section":"","subtasks":[],"refs":[]}"#;
         let Err(issues) = parse_canon(&canon(bad)) else {
             panic!("level вне реестра обязан отвергнуться")

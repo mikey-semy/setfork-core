@@ -87,7 +87,7 @@ fn ver(kind: Option<&str>) -> VersionData {
 /// Всё, что пишет ядро, валидно по опубликованной схеме — с kind и без,
 /// с шагами и презентационными блоками, с url и без.
 #[test]
-fn канон_валиден_по_опубликованной_схеме() {
+fn the_canon_validates_against_the_published_schema() {
     let schema = schema();
     for v in [ver(None), ver(Some("recipe"))] {
         let canon: serde_json::Value = serde_json::from_str(&list_json(&v)).expect("канон — JSON");
@@ -100,7 +100,7 @@ fn канон_валиден_по_опубликованной_схеме() {
 /// Схема строгая: мусорный kind, потерянный title и посторонний ключ — отказ.
 /// Без этого схема была бы украшением, а не контрактом.
 #[test]
-fn схема_отвергает_мусор() {
+fn the_schema_rejects_garbage() {
     let schema = schema();
     let good: serde_json::Value = serde_json::from_str(&list_json(&ver(Some("recipe")))).expect("json");
 
@@ -123,7 +123,7 @@ fn схема_отвергает_мусор() {
 
 /// $id схемы == дефолтный schema_url: файл и ссылка из канона — одна сущность.
 #[test]
-fn id_схемы_совпадает_с_умолчанием_schema_url() {
+fn the_schema_id_matches_the_schema_url_default() {
     assert_eq!(schema()["$id"], serde_json::json!(schema_url()));
 }
 
@@ -206,7 +206,7 @@ fn push_canon(bare: &Path, list_json: &[u8]) {
 /// и раньше терялся именно на push (проекция его не читала).
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn kind_переживает_полный_цикл() {
+async fn kind_survives_a_full_cycle() {
     let pool = support::pool_with_schema().await;
     let a_id = seed_list(&pool, "kind-a", "kind", Some("recipe")).await;
     let b_id = seed_list(&pool, "kind-b", "kind", None).await;
@@ -258,7 +258,7 @@ async fn kind_переживает_полный_цикл() {
 /// а отсутствие поля не стирает выставленный тип.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn мусорный_kind_отбрасывается_а_отсутствие_не_стирает() {
+async fn a_garbage_kind_is_dropped_while_absence_erases_nothing() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "kind-c", "kindc", Some("checklist")).await;
 
@@ -310,7 +310,7 @@ async fn мусорный_kind_отбрасывается_а_отсутстви�
 /// снимает пометку пушем, recovery из канона возвращает картинку.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn картинка_и_пометка_переживают_полный_цикл() {
+async fn image_and_mark_survive_a_full_cycle() {
     const BLOCK: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     let pool = support::pool_with_schema().await;
     let a_id = seed_list(&pool, "img-a", "img", None).await;
@@ -394,7 +394,7 @@ async fn картинка_и_пометка_переживают_полный_ц
 /// сразу несёт свежие title/tags/ordered. Пустой title игнорируется.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn мета_едет_вместе_с_версией_и_попадает_в_канон() {
+async fn meta_travels_with_the_version_and_lands_in_the_canon() {
     let pool = support::pool_with_schema().await;
     let list_id = seed_list(&pool, "meta-a", "meta", None).await;
 

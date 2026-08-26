@@ -46,7 +46,7 @@ fn req(token: Option<&str>) -> Request<RepoRef> {
 /// Лимит обычного метода (rpm=3) доходит до клиента как RESOURCE_EXHAUSTED.
 #[tokio::test]
 #[ignore = "нужно поднятое ядро с SETFORK_RPC_RPM=3"]
-async fn лимит_обычного_метода_доходит_до_клиента() {
+async fn the_plain_method_limit_reaches_the_client() {
     let Some(канал) = chan().await else { return };
     let mut c = GitCoreClient::new(канал);
     let mut codes = Vec::new();
@@ -72,7 +72,7 @@ async fn лимит_обычного_метода_доходит_до_клиен
 /// до порта, гасит бюджет метода для настоящего фронта (DoS-амплификация).
 #[tokio::test]
 #[ignore = "нужно поднятое ядро"]
-async fn чужой_токен_не_съедает_бюджет() {
+async fn a_foreign_token_does_not_consume_the_budget() {
     let Some(канал) = chan().await else { return };
     let mut c = GitCoreClient::new(канал);
     let mut unauth = Vec::new();
@@ -102,7 +102,7 @@ async fn чужой_токен_не_съедает_бюджет() {
 /// объявят мёртвым ровно в момент нагрузки.
 #[tokio::test]
 #[ignore = "нужно поднятое ядро"]
-async fn health_не_лимитируется() {
+async fn health_is_not_rate_limited() {
     use tonic_health::pb::HealthCheckRequest;
     use tonic_health::pb::health_client::HealthClient;
     let Some(канал) = chan().await else { return };

@@ -249,7 +249,7 @@ mod canon_tests {
 
     /// Прислать готовый файл больше нельзя: без структуры запрос бессмыслен.
     #[test]
-    fn без_содержимого_запрос_отклоняется() {
+    fn a_request_without_content_is_rejected() {
         let err = canon_list_json(None, None, &Default::default()).expect_err("канон не из чего собрать");
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
         assert_eq!(err.message(), "content required");

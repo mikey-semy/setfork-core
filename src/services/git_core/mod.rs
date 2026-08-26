@@ -30,7 +30,7 @@ mod merge;
 mod mirror;
 mod names;
 
-use actor::выбрать_актора;
+use actor::choose_actor;
 use convert::{canon_list_json, list_content_from_parts, to_snapshot_pb};
 pub use merge::with_coauthors;
 use merge::{commit_resolved, merge_sig};
@@ -303,7 +303,7 @@ impl GitCore for GitCoreSvc {
         // поля (авто-ревью fe#662). Ник здесь работает как имя ветки, и это
         // сегодняшнее прод-поведение: новое ничего не ломает, а старое доживает.
         //
-        let actor = выбрать_актора(&actor_id, &actor_role, &actor_handle);
+        let actor = choose_actor(&actor_id, &actor_role, &actor_handle);
         // Ф5: роль едет в хук как есть.
         //
         // Пустая означает «фронт старше Ф5»: он ролей не шлёт — и посторонних не
@@ -516,7 +516,7 @@ impl GitCore for GitCoreSvc {
             // только у последнего: squash уходит раньше и копил бы объекты дальше
             // (замечание авто-ревью на #106). Один вызов на все ветки не даст этому
             // повториться при четвёртом режиме слияния.
-            let исход = (|| -> Result<(String, bool), Status> {
+            let outcome = (|| -> Result<(String, bool), Status> {
                 let branch_tip = repo
                     .refname_to_id(&format!("refs/heads/{name}"))
                     .map_err(|_| reason::status(Code::NotFound, Reason::NotFound, "branch not found"))?;
@@ -589,10 +589,10 @@ impl GitCore for GitCoreSvc {
                 update_main(repo, merged, Some(main_tip), &format!("merge {name}")).map_err(main_status)?;
                 Ok((merged.to_string(), false))
             })();
-            if исход.is_ok() {
+            if outcome.is_ok() {
                 crate::git::bundle::gc_auto(repo.path());
             }
-            исход
+            outcome
         })
         .await?;
         // main сдвинулся → проекция новой версии (0 = list.json не изменился).

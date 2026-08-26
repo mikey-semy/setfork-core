@@ -102,7 +102,7 @@ mod pool_status_tests {
     /// (линза 05, 25.08): ретраибельное состояние обязано иметь ретраибельный код,
     /// иначе клиент бросает попытки там, где повтор помог бы.
     #[test]
-    fn исчерпанный_пул_это_занятость_а_не_поломка() {
+    fn an_exhausted_pool_means_busy_not_broken() {
         let s = db_status(sqlx::Error::PoolTimedOut);
         assert_eq!(
             s.code(),
@@ -115,13 +115,13 @@ mod pool_status_tests {
     /// Закрытый пул — остановка инстанса. Повтор К ЭТОМУ инстансу не поможет, но
     /// поможет к другому: Unavailable, а не Internal.
     #[test]
-    fn закрытый_пул_это_остановка() {
+    fn a_closed_pool_means_shutting_down() {
         assert_eq!(db_status(sqlx::Error::PoolClosed).code(), Code::Unavailable);
     }
 
     /// Остальные ошибки не задеты: таксономия по SQLSTATE и generic internal на месте.
     #[test]
-    fn прочие_ошибки_не_задеты() {
+    fn other_errors_are_untouched() {
         assert_eq!(db_status(sqlx::Error::RowNotFound).code(), Code::Internal, "не отнесено к занятости");
     }
 }

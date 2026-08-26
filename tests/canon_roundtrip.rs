@@ -79,7 +79,7 @@ fn content() -> ListContent {
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn показанный_канон_принимается_обратно_без_придирок() {
+async fn the_shown_canon_is_accepted_back_without_complaints() {
     let pool = support::pool_with_schema().await;
     seed_list(&pool, "canon-круг", "стенд").await;
     let svc = GitCoreSvc { pool };
@@ -113,7 +113,7 @@ async fn показанный_канон_принимается_обратно_�
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn брак_в_тексте_приходит_придирками_а_не_молчанием() {
+async fn a_flaw_in_the_text_arrives_as_complaints_not_silence() {
     let pool = support::pool_with_schema().await;
     seed_list(&pool, "canon-брак", "стенд").await;
     let svc = GitCoreSvc { pool };
@@ -145,7 +145,7 @@ async fn брак_в_тексте_приходит_придирками_а_не_
 /// них означало бы стёртую картинку и снятую пометку — молча, при сохранении.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn картинка_и_пометка_из_текста_доезжают_до_вызывающего() {
+async fn image_and_mark_from_the_text_reach_the_caller() {
     let pool = support::pool_with_schema().await;
     seed_list(&pool, "canon-довески", "стенд").await;
     let svc = GitCoreSvc { pool };
@@ -170,7 +170,7 @@ async fn картинка_и_пометка_из_текста_доезжают_�
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn ссылка_без_подписи_не_теряется_молча() {
+async fn a_ref_without_a_label_is_not_lost_silently() {
     let pool = support::pool_with_schema().await;
     seed_list(&pool, "canon-ссылка", "стенд").await;
     let svc = GitCoreSvc { pool };
@@ -192,7 +192,7 @@ async fn ссылка_без_подписи_не_теряется_молча() {
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn разорванный_json_показывает_строку_разрыва() {
+async fn broken_json_shows_the_line_of_the_break() {
     let pool = support::pool_with_schema().await;
     seed_list(&pool, "canon-синтаксис", "стенд").await;
     let svc = GitCoreSvc { pool };
@@ -212,7 +212,7 @@ async fn разорванный_json_показывает_строку_разр�
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn чужой_список_отвергается_до_разбора() {
+async fn a_foreign_list_is_rejected_before_parsing() {
     let pool = support::pool_with_schema().await;
     let svc = GitCoreSvc { pool };
     let err = svc
