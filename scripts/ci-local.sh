@@ -3,7 +3,7 @@
 # 2026-07-14: CI на локали, GitHub-минуты не тратим; workflows в .github —
 # дублирующий барьер, когда Actions доступен).
 #
-#   bash scripts/ci-local.sh          # полный прогон (поднимет эфемерный Postgres в docker)
+#   bash scripts/ci-local.sh          # полный прогон (поднимет Postgres через scripts/itest-env.sh)
 #   bash scripts/ci-local.sh --fast   # без интеграционных тестов с БД
 #
 # Требуется: rust toolchain, git; для полного прогона — docker.
@@ -30,16 +30,15 @@ if [[ "${1:-}" == "--fast" ]]; then
   exit 0
 fi
 
-echo "== интеграционные + golden (эфемерный Postgres) =="
-PORT="${CI_PG_PORT:-55439}"
-CID=$(docker run -d --rm \
-  -e POSTGRES_USER=t -e POSTGRES_PASSWORD=t -e POSTGRES_DB=t \
-  -p "${PORT}:5432" pgvector/pgvector:pg16)
-trap 'docker stop "$CID" >/dev/null 2>&1 || true' EXIT
-for _ in $(seq 1 60); do
-  docker exec "$CID" pg_isready -U t -d t >/dev/null 2>&1 && break
-  sleep 1
-done
+echo "== интеграционные + golden (Postgres из scripts/itest-env.sh) =="
+# Подъём базы живёт В ОДНОМ месте (Задача 0 плана ревью). Раньше копий было две —
+# здесь и в ci.yml, — и они уже разошлись: разные имена, разные порты, разное
+# ожидание готовности. Теперь обе зовут один скрипт.
+#
+# Контейнер ИМЕНОВАННЫЙ и переживает прогон: следующий запуск не ждёт подъёма
+# заново. Убирать явно — `bash scripts/itest-env.sh --down`.
+eval "$(CORE_PG_PORT="${CI_PG_PORT:-55439}" bash scripts/itest-env.sh)"
+
 # Порог покрытия (Фаза 2 плана): при установленном cargo-llvm-cov интеграционные
 # гоняются С инструментацией и fail-under.
 #
@@ -57,12 +56,11 @@ done
 # Без cargo-llvm-cov — обычный прогон + подсказка (гейт не роняем на dev-машинах).
 if command -v cargo-llvm-cov >/dev/null 2>&1; then
   echo "== интеграционные + golden + coverage-порог (cargo-llvm-cov) =="
-  TEST_DATABASE_URL="postgresql://t:t@localhost:${PORT}/t" \
-    cargo llvm-cov --summary-only --fail-under-lines 75 -- --include-ignored
+  cargo llvm-cov --summary-only --fail-under-lines 75 -- --include-ignored
 else
   echo "== интеграционные + golden (cargo-llvm-cov не установлен — без порога покрытия) =="
   echo "   установка: cargo install cargo-llvm-cov && rustup component add llvm-tools-preview"
-  TEST_DATABASE_URL="postgresql://t:t@localhost:${PORT}/t" cargo test -- --include-ignored
+  cargo test -- --include-ignored
 fi
 
 echo "ci-local: OK"
