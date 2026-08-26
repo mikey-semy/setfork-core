@@ -117,10 +117,23 @@ jobs:
             -e POSTGRES_USER=t -e POSTGRES_PASSWORD=t -e POSTGRES_DB=t \
             pgvector/pgvector:pg16
           docker network connect "ci-pg-${GITHUB_RUN_ID}" "$(hostname)"
-          for i in $(seq 1 60); do
-            docker exec "pg-${GITHUB_RUN_ID}" pg_isready -U t -d t >/dev/null 2>&1 && break
+          # ⚠️ Ожидание С ВЕРДИКТОМ. Прежний цикл просто заканчивался после 60 попыток и
+          # шаги шли дальше — а дальше тесты падали с PoolTimedOut, и причина читалась как
+          # «сломались тесты», а не «база не поднялась». Молчаливое ожидание хуже его
+          # отсутствия: оно ПОХОЖЕ на проверку (R8 линзы 08, тот же дефект был в ci-local).
+          ready=0
+          for _ in $(seq 1 60); do
+            if docker exec "pg-${GITHUB_RUN_ID}" pg_isready -U t -d t >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
             sleep 1
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Postgres не поднялся за 60 секунд — дальше идти нельзя"
+            docker logs --tail 30 "pg-${GITHUB_RUN_ID}" || true
+            exit 1
+          fi
       - run: cargo test -- --include-ignored
         env:
           TEST_DATABASE_URL: postgresql://t:t@pg-${{ github.run_id }}:5432/t
