@@ -544,7 +544,7 @@ async fn issues_numbering_status_and_comments() {
 /// в списке.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn состав_соавторов_и_порядок() {
+async fn co_author_set_and_order() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "owner-c").await;
     let many = support::seed_user(&pool, "many-c").await;

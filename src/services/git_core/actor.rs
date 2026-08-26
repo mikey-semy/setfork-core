@@ -41,7 +41,7 @@ mod actor_choice_tests {
     use super::choose_actor;
 
     #[test]
-    fn старый_фронт_узнаётся_по_пустой_роли() {
+    fn old_frontend_is_recognized_by_an_empty_role() {
         assert_eq!(
             choose_actor("", "", "mike"),
             "mike",
@@ -50,7 +50,7 @@ mod actor_choice_tests {
     }
 
     #[test]
-    fn новый_фронт_без_идентификатора_не_подставляет_ник() {
+    fn new_frontend_without_id_does_not_fall_back_to_handle() {
         for роль in ["owner", "contributor", "outsider", "невиданная"] {
             assert_eq!(
                 choose_actor("", роль, "mike"),
@@ -63,7 +63,7 @@ mod actor_choice_tests {
     }
 
     #[test]
-    fn идентификатор_всегда_сильнее_ника() {
+    fn the_id_always_wins_over_the_handle() {
         let id = "11111111-2222-3333-4444-555555555555";
         for роль in ["", "owner", "contributor"] {
             assert_eq!(choose_actor(id, роль, "mike"), id, "при любой роли берётся идентификатор");

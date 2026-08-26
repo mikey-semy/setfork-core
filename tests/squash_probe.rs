@@ -134,7 +134,7 @@ async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Opti
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn squash_не_откатывает_работу_приехавшую_в_main() {
+async fn squash_does_not_revert_work_that_landed_in_main() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(
@@ -233,7 +233,7 @@ async fn squash_не_откатывает_работу_приехавшую_в_m
 /// в main историей — иначе выбор режима работает через раз.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn squash_сплющивает_и_перематываемую_ветку() {
+async fn squash_flattens_a_fast_forwardable_branch_too() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "bob", "squash-ff", vec![step("База")]).await;
@@ -302,7 +302,7 @@ async fn squash_сплющивает_и_перематываемую_ветку(
 /// теперь она сторожит регрессию, а не фиксирует беду. Имя изменено вслед за смыслом.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn при_конфликте_выбранный_режим_squash_доживает_до_слияния() {
+async fn on_conflict_the_chosen_squash_mode_survives_until_the_merge() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "carol", "squash-conflict", vec![step("Общий")]).await;
@@ -391,7 +391,7 @@ async fn при_конфликте_выбранный_режим_squash_дожи
 /// Диагностика: насколько сильно веб-версия переписывает list.json.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn дамп_расхождения_list_json() {
+async fn list_json_divergence_dump() {
     let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "dave", "dump", vec![step("Первый"), step("Второй")]).await;

@@ -46,7 +46,7 @@ fn step(title: &str) -> NewStep {
 
 #[tokio::test]
 #[ignore = "ПАДАЕТ (дефект): 4 из 8, остальным AlreadyExists — нет повтора со следующим номером"]
-async fn параллельное_создание_задач_на_продовой_схеме() {
+async fn concurrent_issue_creation_on_the_prod_schema() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -126,7 +126,7 @@ async fn параллельное_создание_задач_на_продов�
 /// не гипотетическим.
 #[tokio::test]
 #[ignore = "ПАДАЕТ (дефект): половина отказов вместо ретрая номера"]
-async fn параллельное_создание_предложений_на_продовой_схеме() {
+async fn concurrent_suggestion_creation_on_the_prod_schema() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "bob").await;
     let write = ListWriteSvc { pool: pool.clone() };

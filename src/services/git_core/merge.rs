@@ -186,7 +186,7 @@ mod squash_tests {
      * авторство.
      */
     #[test]
-    fn трейлеры_собираются_из_вклада_ветки_без_дублей() {
+    fn trailers_come_from_branch_contribution_without_duplicates() {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
         let a = commit(&repo, "refs/heads/pr", "первый", ("Аня", "a@example.com"), &[base]);
@@ -203,7 +203,7 @@ mod squash_tests {
     }
 
     #[test]
-    fn служебная_подпись_сервиса_соавторством_не_считается() {
+    fn the_service_signature_is_not_counted_as_co_authorship() {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
         let a = commit(
@@ -220,7 +220,7 @@ mod squash_tests {
     }
 
     #[test]
-    fn ветка_без_своих_коммитов_не_добавляет_ничего() {
+    fn a_branch_without_own_commits_adds_nothing() {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("Мика", "m@example.com"), &[]);
         assert_eq!(with_coauthors(&repo, base, base, "Заголовок"), "Заголовок");
@@ -238,7 +238,7 @@ mod squash_tests {
     /// оставлена как защита от коммитов, приехавших пушем из импортированных
     /// репозиториев (формат коммита сам по себе `author  <>` допускает).
     #[test]
-    fn подпись_с_пробелами_по_краям_обрезается() {
+    fn a_signature_with_edge_spaces_is_trimmed() {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
         let a = commit(&repo, "refs/heads/pr", "a", ("  Гость  ", " g@example.com "), &[base]);
@@ -250,7 +250,7 @@ mod squash_tests {
 
     /// Почта регистронезависима: «GIT@SetFork.com» — та же служебная подпись.
     #[test]
-    fn служебная_почта_узнаётся_в_любом_регистре() {
+    fn the_service_email_is_recognized_in_any_case() {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
         let a = commit(&repo, "refs/heads/pr", "a", ("SetFork", "GIT@SetFork.COM"), &[base]);
@@ -260,7 +260,7 @@ mod squash_tests {
     /// Перед трейлерами обязана быть пустая строка — иначе git не считает их
     /// трейлерами и `git interpret-trailers` их не видит.
     #[test]
-    fn перед_трейлерами_пустая_строка() {
+    fn an_empty_line_precedes_the_trailers() {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
         let a = commit(&repo, "refs/heads/pr", "a", ("Гость", "g@example.com"), &[base]);
@@ -286,7 +286,7 @@ mod squash_tests {
     }
 
     #[test]
-    fn резолв_squash_даёт_одного_родителя_и_трейлеры() {
+    fn squash_resolve_yields_one_parent_and_trailers() {
         let (_t, repo) = bare();
         main_and_branch(&repo);
         let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, true, "Свели руками").expect("резолв");
@@ -302,7 +302,7 @@ mod squash_tests {
     }
 
     #[test]
-    fn резолв_squash_без_сообщения_берёт_имя_ветки() {
+    fn squash_resolve_without_a_message_takes_the_branch_name() {
         let (_t, repo) = bare();
         main_and_branch(&repo);
         let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, true, "   ").expect("резолв");
@@ -310,7 +310,7 @@ mod squash_tests {
     }
 
     #[test]
-    fn резолв_обычным_merge_даёт_двух_родителей() {
+    fn plain_merge_resolve_yields_two_parents() {
         let (_t, repo) = bare();
         main_and_branch(&repo);
         let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, false, "").expect("резолв");
@@ -320,7 +320,7 @@ mod squash_tests {
     }
 
     #[test]
-    fn резолв_двигает_main_и_знает_про_отсутствие_ветки() {
+    fn resolve_moves_main_and_knows_a_missing_branch() {
         let (_t, repo) = bare();
         main_and_branch(&repo);
         let sha = commit_resolved(&repo, "pr-1", br#"{"steps":[]}"#, true, "x").expect("резолв");
@@ -332,7 +332,7 @@ mod squash_tests {
 
     /// Ф2b: ручной резолв оставляет витрину свежей — README из нового канона.
     #[test]
-    fn резолв_перегенерирует_readme_из_канона() {
+    fn resolve_regenerates_readme_from_the_canon() {
         let (_t, repo) = bare();
         main_and_branch(&repo);
         let canon = crate::git::serialize::list_json(&crate::git::bundle::VersionData {
@@ -356,7 +356,7 @@ mod squash_tests {
     }
 
     #[test]
-    fn резолв_ветки_на_том_же_коммите_нечего_сливать() {
+    fn resolving_a_branch_on_the_same_commit_has_nothing_to_merge() {
         let (_t, repo) = bare();
         let base = commit(&repo, "refs/heads/main", "base", ("SetFork", "git@setfork.com"), &[]);
         repo.reference("refs/heads/pr-1", base, true, "ветка на main").expect("ref");

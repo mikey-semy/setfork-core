@@ -86,7 +86,7 @@ async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Opti
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres) и git в PATH"]
-async fn база_совпадает_с_настоящим_git_merge_base() {
+async fn the_base_matches_real_git_merge_base() {
     let dir = support::own_git_data_dir("ms-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;

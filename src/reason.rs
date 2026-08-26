@@ -122,7 +122,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn причина_едет_в_трейлере() {
+    fn reason_travels_in_the_trailer() {
         let s = status(Code::FailedPrecondition, Reason::Conflict, "merge conflict");
         assert_eq!(s.code(), Code::FailedPrecondition);
         assert_eq!(s.message(), "merge conflict");
@@ -133,7 +133,7 @@ mod tests {
     /// без крайних подчёркиваний. Список берём из `Reason::ALL`, который строит
     /// тот же макрос, что и само перечисление, — забыть новую причину нельзя.
     #[test]
-    fn все_причины_по_формату_aip_193() {
+    fn all_reasons_follow_aip_193_format() {
         let mut seen = std::collections::HashSet::new();
         for &r in Reason::ALL {
             let s = r.as_str();

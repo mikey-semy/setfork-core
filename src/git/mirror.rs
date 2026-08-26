@@ -230,7 +230,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn токен_шифруется_и_расшифровывается_совместимым_форматом() {
+    fn token_encrypts_and_decrypts_in_a_compatible_format() {
         let secret = "test-mirror-secret";
         let enc = encrypt_token("ghp_abc123", secret);
         assert_eq!(decrypt_token(&enc, secret).as_deref(), Some("ghp_abc123"));
@@ -240,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn урл_зеркала_только_https_без_кредов() {
+    fn mirror_url_is_https_only_without_credentials() {
         assert!(valid_mirror_url("https://github.com/user/repo.git"));
         assert!(valid_mirror_url("https://gitlab.com/group/proj.git"));
         for bad in [
@@ -256,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn креды_встраиваются_по_хосту() {
+    fn credentials_are_embedded_per_host() {
         assert_eq!(
             url_with_token("https://github.com/u/r.git", "T").as_deref(),
             Some("https://x-access-token:T@github.com/u/r.git")
@@ -276,7 +276,7 @@ mod tests {
     /// проверки означает refspec «снести на зеркале всё, что не названо», и
     /// удерживал бы репозиторий от смерти один-единственный `--dry-run`.
     #[test]
-    fn проверка_доступа_ничего_не_меняет_на_фордже() {
+    fn access_check_changes_nothing_on_the_forge() {
         let args =
             push_args("/repo.git", "https://u:t@github.com/o/r.git", &["--dry-run"], &[ACCESS_PROBE_REF]);
         assert!(args.contains(&"--dry-run".to_string()), "без dry-run это уже не проверка: {args:?}");
@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn пуш_зеркала_остаётся_силовым_и_с_prune() {
+    fn mirror_push_stays_forced_and_prunes() {
         let args = push_args(
             "/repo.git",
             "https://u:t@github.com/o/r.git",
@@ -310,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn токен_не_утекает_в_текст_ошибки() {
+    fn token_does_not_leak_into_the_error_text() {
         let msg = "fatal: unable to access 'https://x-access-token:ghp_SECRET@github.com/u/r.git/': 403";
         assert_eq!(redact("ошибка без кредов", ""), "ошибка без кредов", "пустой токен не крошит текст");
         let red = redact(msg, "ghp_SECRET");

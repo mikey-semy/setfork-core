@@ -278,7 +278,7 @@ mod cli_list_tests {
     /// видеть и заявил о РАСХОЖДЕНИИ, которого не было. Проверка, потерявшая предмет,
     /// обязана говорить именно это.
     #[test]
-    fn список_команд_совпадает_с_ветками() {
+    fn command_table_matches_match_arms() {
         let src = include_str!("cli.rs");
         let mut в_match: Vec<String> = Vec::new();
         for l in src.lines() {

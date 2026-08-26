@@ -125,7 +125,7 @@ const FULL_STEPS: &str = "\
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn круг_сохраняет_все_поля_списка() {
+async fn the_round_trip_keeps_every_list_field() {
     let pool = support::pool_with_schema().await;
     let id = seed(&pool, "roundfull", Some("checklist"), FULL_STEPS).await;
 
@@ -167,7 +167,7 @@ async fn круг_сохраняет_все_поля_списка() {
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn круг_держит_список_без_шагов_и_список_из_одного_блока() {
+async fn the_round_trip_holds_a_stepless_list_and_a_single_block_list() {
     let pool = support::pool_with_schema().await;
 
     // Список БЕЗ шагов: пустой массив обязан пережить круг, а не превратиться в
@@ -193,7 +193,7 @@ async fn круг_держит_список_без_шагов_и_список_и
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn блок_с_негодным_content_не_роняет_проекцию_и_не_врёт_молча() {
+async fn a_block_with_bad_content_neither_breaks_projection_nor_lies_silently() {
     // Третий случай §6: payload не-step блока пришёл НЕ объектом. В Postgres такое
     // не заводится (колонка jsonb со схемой блока), но push приносит чужой файл, и
     // проекция обязана дать определённый ответ, а не панику и не тихую подмену.
@@ -267,7 +267,7 @@ async fn блок_с_негодным_content_не_роняет_проекцию
 /// чем честный отказ.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn смена_типа_колонки_не_проходит_молча() {
+async fn a_column_type_change_does_not_pass_silently() {
     let pool = support::pool_with_schema().await;
     let id = seed(
         &pool,

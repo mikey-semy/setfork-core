@@ -65,7 +65,7 @@ fn loose_objects(bare: &std::path::Path, sha: &str) -> bool {
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn squash_слияние_пакует_объекты() {
+async fn squash_merge_packs_objects() {
     support::ensure_git_data_dir();
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "packer").await;

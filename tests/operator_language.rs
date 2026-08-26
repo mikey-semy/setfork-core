@@ -229,7 +229,7 @@ fn walk(root: &Path, files: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn операторский_вывод_ядра_по_английски() {
+fn operator_output_is_english() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     walk(&root.join("src"), &mut files);

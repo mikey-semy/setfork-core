@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn язык_сервиса_не_протекает_в_дочерний_git() {
+    fn service_language_does_not_leak_into_child_git() {
         // Язык запросили — он и уедет.
         assert_eq!(lang_env(Some("ru")), Some(Some("ru".to_string())));
         // Языка нет — переменная СНИМАЕТСЯ, а не наследуется от сервиса. Именно

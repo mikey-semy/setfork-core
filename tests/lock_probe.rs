@@ -68,7 +68,7 @@ async fn blob_text(git: &GitCoreSvc, rr: Option<RepoRef>, canon: String) -> Opti
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn параллельные_слияния_не_затирают_друг_друга() {
+async fn concurrent_merges_do_not_clobber_each_other() {
     let dir = support::own_git_data_dir("lock-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;

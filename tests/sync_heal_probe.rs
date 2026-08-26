@@ -53,7 +53,7 @@ fn commits_on_main(bare: &std::path::Path) -> Vec<git2::Oid> {
 }
 
 #[test]
-fn досыпка_восстанавливает_тег_а_не_плодит_двойника() {
+fn catch_up_restores_the_tag_instead_of_making_a_twin() {
     let root = std::env::temp_dir().join(format!("setfork-heal-{}", Uuid::new_v4()));
     let bare = root.join("repo.git");
     bundle::bootstrap_bare(&[vdata(1, "ПЕРВЫЙ"), vdata(2, "ВТОРОЙ")], &bare).expect("bootstrap");
@@ -80,7 +80,7 @@ fn досыпка_восстанавливает_тег_а_не_плодит_д�
 }
 
 #[test]
-fn досыпка_настоящей_версии_коммит_создаёт() {
+fn catching_up_a_real_version_does_create_a_commit() {
     // Обратная сторона той же проверки: если версии в истории НЕТ, досыпка обязана
     // её закоммитить. Иначе «не плодить двойника» выродилось бы в «не писать вовсе».
     let root = std::env::temp_dir().join(format!("setfork-heal-{}", Uuid::new_v4()));
@@ -102,7 +102,7 @@ fn досыпка_настоящей_версии_коммит_создаёт() 
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn репо_без_главной_ветки_чинится_возвратом_ссылки() {
+async fn a_repo_without_main_is_healed_by_restoring_the_ref() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "healer").await;
     let list_id: Uuid = sqlx::query_scalar(
@@ -176,7 +176,7 @@ async fn репо_без_главной_ветки_чинится_возврат
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn посторонний_тег_выше_версии_не_становится_версией() {
+async fn a_foreign_tag_above_the_version_does_not_become_a_version() {
     // Второй P1 авто-ревью на #100. Если main пропал, а старший тег `v<N+1>` —
     // ПОСТОРОННИЙ (до починки #59 такое имя мог занять релиз), восстановление «по
     // старшему тегу» подняло бы на него main, и следующая же проверка сочла бы это
@@ -254,7 +254,7 @@ async fn посторонний_тег_выше_версии_не_станови
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn нечитаемое_репо_не_лечится_пересборкой() {
+async fn an_unreadable_repo_is_not_healed_by_rebuilding() {
     // Каталог есть, а репозиторий не открывается: обрубленный HEAD после сбоя,
     // частичное восстановление тома, права. Раньше это состояние было НЕОТЛИЧИМО от
     // «ветки и тегов нет» — и лечение приняло бы битое репо за пустое, переписав
@@ -291,7 +291,7 @@ async fn нечитаемое_репо_не_лечится_пересборко�
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn дыра_в_тегах_не_лечится_пересборкой() {
+async fn a_gap_in_tags_is_not_healed_by_rebuilding() {
     // Теги есть, но нужного нет: `v1, v2` при `current_version = 3` и пропавшем main.
     // Пересборка переписала бы целую историю и форсом сдвинула бы теги — под видом
     // лечения. Такое обязано дойти до человека, а не «вылечиться».
@@ -350,7 +350,7 @@ async fn дыра_в_тегах_не_лечится_пересборкой() {
 /// линза 02 ловила у лечения пропавшей ветки.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn досыпка_дописывает_поверх_а_не_пересобирает() {
+async fn catch_up_appends_on_top_instead_of_rebuilding() {
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "appender").await;
     let list_id: Uuid = sqlx::query_scalar(

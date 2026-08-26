@@ -57,7 +57,7 @@ fn scan(dir: &Path, violations: &mut Vec<String>) {
 /// Программная запись не обходит защиту main: прямые ref-операции над
 /// refs/heads/main разрешены только внутри git/update.rs (update_main).
 #[test]
-fn main_двигается_только_через_update_main() {
+fn main_moves_only_through_update_main() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut violations = Vec::new();
     scan(&src, &mut violations);

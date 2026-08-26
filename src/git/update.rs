@@ -184,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn создание_main_и_fast_forward_проходят() {
+    fn creating_main_and_fast_forward_succeed() {
         let (_t, repo) = bare();
         let a = commit(&repo, true, &[], "a");
         update_main(&repo, a, None, "bootstrap").expect("создание");
@@ -198,7 +198,7 @@ mod tests {
     /// Главное правило: программная запись НЕ обходит защиту канона.
     /// Коммит без list.json не встанет на main никаким путём.
     #[test]
-    fn коммит_без_канона_отвергается() {
+    fn commit_without_canon_is_rejected() {
         let (_t, repo) = bare();
         let a = commit(&repo, true, &[], "a");
         update_main(&repo, a, None, "bootstrap").expect("создание");
@@ -211,7 +211,7 @@ mod tests {
 
     /// Переписывание истории (non-fast-forward) запрещено — как в pre-receive.
     #[test]
-    fn non_fast_forward_отвергается() {
+    fn non_fast_forward_is_rejected() {
         let (_t, repo) = bare();
         let a = commit(&repo, true, &[], "a");
         update_main(&repo, a, None, "bootstrap").expect("создание");
@@ -227,7 +227,7 @@ mod tests {
 
     /// CAS: вызывающий думал, что main на a, а он уже на b → Stale, ничего не пишем.
     #[test]
-    fn устаревший_ожидаемый_tip_даёт_stale() {
+    fn stale_expected_tip_yields_stale() {
         let (_t, repo) = bare();
         let a = commit(&repo, true, &[], "a");
         update_main(&repo, a, None, "bootstrap").expect("создание");
@@ -242,7 +242,7 @@ mod tests {
 
     /// Повторное «создание» при существующем main — тоже Stale (ref уже есть).
     #[test]
-    fn повторное_создание_даёт_stale() {
+    fn recreating_yields_stale() {
         let (_t, repo) = bare();
         let a = commit(&repo, true, &[], "a");
         update_main(&repo, a, None, "bootstrap").expect("создание");
@@ -255,7 +255,7 @@ mod tests {
 
     /// Идемпотентность: установка того же tip повторно — не ошибка.
     #[test]
-    fn тот_же_tip_повторно_проходит() {
+    fn the_same_tip_passes_again() {
         let (_t, repo) = bare();
         let a = commit(&repo, true, &[], "a");
         update_main(&repo, a, None, "bootstrap").expect("создание");

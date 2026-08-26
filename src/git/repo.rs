@@ -231,7 +231,7 @@ mod orphan_tests {
     /// CLI: команда УДАЛЯЕТ данные, и ошибка в имени каталога стоила бы истории
     /// живого списка.
     #[test]
-    fn берём_только_репо_несуществующих_списков() {
+    fn only_repos_of_missing_lists_are_taken() {
         let root = std::env::temp_dir().join(format!("sf-orphan-{}", Uuid::new_v4()));
         let live_id = Uuid::new_v4();
         let dead_id = Uuid::new_v4();
