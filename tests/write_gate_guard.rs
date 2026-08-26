@@ -53,6 +53,28 @@ const READ_ONLY: &[(&str, &str)] = &[
 ];
 
 /// Тело метода `async fn <name>(` до начала следующего `async fn`.
+/// Исходники зоны `git_core` целиком.
+///
+/// Читаем КАТАЛОГ, а не один файл: 26.08 зона разрезана на подмодули (линза 08), и
+/// страж, прибитый к пути `git_core.rs`, покраснел на ровном месте. Это, впрочем,
+/// сработало как надо — сторож обязан замечать, что его предмет уехал. Чтобы он
+/// замечал ПЕРЕЕЗД, а не отсутствие файла, он теперь читает всё, что в каталоге:
+/// разложение методов по подмодулям его больше не сломает.
+fn исходники_git_core() -> String {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/services/git_core");
+    let mut out = String::new();
+    let entries = std::fs::read_dir(&dir).expect("каталог src/services/git_core");
+    let mut files: Vec<_> =
+        entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "rs")).collect();
+    files.sort();
+    assert!(!files.is_empty(), "в src/services/git_core нет ни одного .rs — страж потерял предмет");
+    for f in files {
+        out.push_str(&std::fs::read_to_string(&f).unwrap_or_else(|e| panic!("читаем {}: {e}", f.display())));
+        out.push('\n');
+    }
+    out
+}
+
 fn method_body<'a>(src: &'a str, name: &str) -> Option<&'a str> {
     let start = src.find(&format!("async fn {name}("))?;
     let rest = &src[start..];
@@ -62,8 +84,7 @@ fn method_body<'a>(src: &'a str, name: &str) -> Option<&'a str> {
 
 #[test]
 fn каждый_мутирующий_rpc_спрашивает_вердикт() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/services/git_core.rs");
-    let src = std::fs::read_to_string(&path).expect("читаем git_core.rs");
+    let src = исходники_git_core();
 
     let mut missing = Vec::new();
     for name in MUTATING {
@@ -84,8 +105,7 @@ fn каждый_мутирующий_rpc_спрашивает_вердикт() {
 
 #[test]
 fn читающие_методы_не_обвешаны_гейтом_записи() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/services/git_core.rs");
-    let src = std::fs::read_to_string(&path).expect("читаем git_core.rs");
+    let src = исходники_git_core();
 
     for (name, why) in READ_ONLY {
         let body = method_body(&src, name).unwrap_or_else(|| panic!("метод {name} не найден"));
@@ -101,8 +121,7 @@ fn читающие_методы_не_обвешаны_гейтом_записи
 /// иначе список тихо разойдётся с реальностью.
 #[test]
 fn список_мутирующих_не_отстал_от_кода() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/services/git_core.rs");
-    let src = std::fs::read_to_string(&path).expect("читаем git_core.rs");
+    let src = исходники_git_core();
 
     let mut current: Option<String> = None;
     let mut unlisted = Vec::new();
@@ -130,8 +149,7 @@ fn список_мутирующих_не_отстал_от_кода() {
 /// новый RPC роняет страж, пока автор не решит, к какому он классу.
 #[test]
 fn каждый_rpc_отнесён_к_пишущим_или_читающим() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/services/git_core.rs");
-    let src = std::fs::read_to_string(&path).expect("читаем git_core.rs");
+    let src = исходники_git_core();
     // Только блок реализации трейта: наружу торчит он, а внутренние помощники —
     // не RPC и классификации не требуют.
     let start = src.find("impl GitCore for GitCoreSvc").expect("блок реализации трейта");
