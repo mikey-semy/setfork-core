@@ -184,8 +184,8 @@ pub async fn pool_with_schema() -> PgPool {
     // завершена (линза 07 §7).
     ensure_git_data_dir();
     let url = std::env::var("TEST_DATABASE_URL").expect(
-        "TEST_DATABASE_URL не задан — интеграционные тесты требуют Postgres \
-         (bash scripts/ci-local.sh поднимет эфемерный)",
+        "TEST_DATABASE_URL не задан — интеграционные тесты требуют Postgres. \
+         Поднять отдельно от прогона: eval \"$(bash scripts/itest-env.sh)\"",
     );
     // Прогон против НАСТОЯЩЕЙ схемы фронта (линза 04 §4): снимок ниже — это то, что
     // ядро ОЖИДАЕТ от Postgres, и совпадение с источником правды (drizzle) он сам не
