@@ -15,7 +15,30 @@ pub fn internal<E: std::fmt::Display>(e: E) -> Status {
 /// internal): 23505 unique → ALREADY_EXISTS, 23503 fk → FAILED_PRECONDITION,
 /// 22P02/22007 bad cast (enum/uuid/дата) → INVALID_ARGUMENT. Остальное —
 /// internal (лог с деталями, клиенту generic).
+///
+/// ⚠️ ИСЧЕРПАНИЕ ПУЛА — не «мы сломались», а «мы заняты». Мини-пул под локи репо
+/// держит соединение на ВСЮ git-операцию, поэтому одновременных записей ровно
+/// `SETFORK_LOCK_POOL_MAX` (дефолт 4); пятая ждёт `acquire_timeout` (30 с) и получает
+/// отказ. До этой правки он ехал как `Internal`, то есть ядро сообщало о собственной
+/// поломке там, где на деле стояла очередь: повтор помогает, ждать имеет смысл, а
+/// код говорил обратное. Ровно тот же разбор, что у гейта записи 25.08 (линза 05):
+/// ретраибельное состояние обязано иметь ретраибельный код.
+///
+/// `ResourceExhausted` — то, что gRPC для этого и завёл. `PoolClosed` — другое:
+/// пул закрыт при остановке, повтор к этому инстансу бессмыслен, это `Unavailable`.
 pub fn db_status(e: sqlx::Error) -> Status {
+    match &e {
+        sqlx::Error::PoolTimedOut => {
+            tracing::warn!("db pool exhausted: too many concurrent operations");
+            metrics::counter!("db_pool_exhausted_total").increment(1);
+            return Status::resource_exhausted("core is busy, too many concurrent operations - retry");
+        }
+        sqlx::Error::PoolClosed => {
+            tracing::error!("db pool is closed");
+            return Status::unavailable("core is shutting down");
+        }
+        _ => {}
+    }
     if let sqlx::Error::Database(db) = &e
         && let Some(code) = db.code()
     {
@@ -68,4 +91,37 @@ pub fn refs_json(refs: &[StepRef]) -> serde_json::Value {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod pool_status_tests {
+    use super::db_status;
+    use tonic::Code;
+
+    /// Исчерпание пула — очередь, а не поломка. Разбор тот же, что у гейта записи
+    /// (линза 05, 25.08): ретраибельное состояние обязано иметь ретраибельный код,
+    /// иначе клиент бросает попытки там, где повтор помог бы.
+    #[test]
+    fn исчерпанный_пул_это_занятость_а_не_поломка() {
+        let s = db_status(sqlx::Error::PoolTimedOut);
+        assert_eq!(
+            s.code(),
+            Code::ResourceExhausted,
+            "ждать соединения — это «занято»; Internal сказал бы «мы сломались», и повтор \
+             выглядел бы бессмысленным"
+        );
+    }
+
+    /// Закрытый пул — остановка инстанса. Повтор К ЭТОМУ инстансу не поможет, но
+    /// поможет к другому: Unavailable, а не Internal.
+    #[test]
+    fn закрытый_пул_это_остановка() {
+        assert_eq!(db_status(sqlx::Error::PoolClosed).code(), Code::Unavailable);
+    }
+
+    /// Остальные ошибки не задеты: таксономия по SQLSTATE и generic internal на месте.
+    #[test]
+    fn прочие_ошибки_не_задеты() {
+        assert_eq!(db_status(sqlx::Error::RowNotFound).code(), Code::Internal, "не отнесено к занятости");
+    }
 }
