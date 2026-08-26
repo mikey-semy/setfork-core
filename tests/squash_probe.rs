@@ -24,13 +24,6 @@ use setfork_core::services::git_core::GitCoreSvc;
 use setfork_core::services::list::ListWriteSvc;
 use tonic::Request;
 
-struct Tmp(std::path::PathBuf);
-impl Drop for Tmp {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 fn lt(s: &str) -> Option<LocaleText> {
     Some(LocaleText { v: [("en".to_string(), s.to_string())].into_iter().collect() })
 }
@@ -55,21 +48,12 @@ fn step(title: &str) -> NewStep {
     }
 }
 
-/// GIT_DATA_DIR — глобальная переменная процесса, поэтому тесты гоняем в один поток.
-async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
-    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
-    let p = std::env::temp_dir().join(format!("setfork-squash-probe-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&p).expect("mkdir");
-    unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    (Tmp(p), guard)
-}
-
 fn repo_ref(owner: &str, slug: &str) -> Option<RepoRef> {
     Some(RepoRef { owner: owner.into(), slug: slug.into() })
 }
 
-fn bare_of(dir: &Tmp, list_id: uuid::Uuid) -> std::path::PathBuf {
-    dir.0.join(format!("{list_id}.git"))
+fn bare_of(dir: &support::OwnGitDataDir, list_id: uuid::Uuid) -> std::path::PathBuf {
+    dir.path.join(format!("{list_id}.git"))
 }
 
 /// list.json из дерева коммита.
@@ -151,7 +135,7 @@ async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: Stri
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn squash_не_откатывает_работу_приехавшую_в_main() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(
         &pool,
@@ -250,7 +234,7 @@ async fn squash_не_откатывает_работу_приехавшую_в_m
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn squash_сплющивает_и_перематываемую_ветку() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "bob", "squash-ff", vec![step("База")]).await;
     let git = GitCoreSvc { pool: pool.clone() };
@@ -319,7 +303,7 @@ async fn squash_сплющивает_и_перематываемую_ветку(
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn при_конфликте_выбранный_режим_squash_доживает_до_слияния() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "carol", "squash-conflict", vec![step("Общий")]).await;
     let git = GitCoreSvc { pool: pool.clone() };
@@ -408,7 +392,7 @@ async fn при_конфликте_выбранный_режим_squash_дожи
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn дамп_расхождения_list_json() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("squash-probe").await;
     let pool = support::pool_with_schema().await;
     let list_id = seed(&pool, "dave", "dump", vec![step("Первый"), step("Второй")]).await;
     let git = GitCoreSvc { pool: pool.clone() };
