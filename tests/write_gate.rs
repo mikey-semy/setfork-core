@@ -169,7 +169,9 @@ async fn a_refusal_to_ask_is_not_passed_off_as_a_transport_failure() {
         let stub = Stub::start(resp);
         let err = ensure_writable_at(&stub.addr, "mike", "list").await.expect_err("4xx не пропускает");
         assert_eq!(err.code(), tonic::Code::FailedPrecondition, "{resp}");
-        assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
+        // Приложение ОТВЕТИЛО — просто не то. Это расхождение контракта, а не сеть,
+        // и причина обязана быть своя: фронт по ней говорит «повторять бесполезно».
+        assert_eq!(reason_of(&err), Some("GATE_MALFORMED"), "{resp}");
     }
 }
 
@@ -181,7 +183,7 @@ async fn garbage_in_the_reply_stops_the_write() {
     // от срыва связи — иначе клиент, повторяющий Unavailable, будет долбиться в
     // расхождение контракта до посинения.
     assert_eq!(err.code(), tonic::Code::FailedPrecondition);
-    assert_eq!(reason_of(&err), Some("GATE_UNAVAILABLE"));
+    assert_eq!(reason_of(&err), Some("GATE_MALFORMED"));
 }
 
 /// Самый важный край: приложения нет вообще. Отказ, а не «пропустим на всякий».
