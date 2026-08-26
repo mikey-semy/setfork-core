@@ -171,6 +171,18 @@ create table suggestion_comments (
 /// Пул на свежую случайную схему с применённым DDL-снимком.
 /// Паникует с внятным сообщением, если TEST_DATABASE_URL не задан/недоступен.
 pub async fn pool_with_schema() -> PgPool {
+    // ПЕРВОЙ строкой, до любого чтения env. `ensure_git_data_dir` пишет переменную
+    // окружения, а `set_var` в Rust 2024 небезопасен не из-за повторной записи (её
+    // сторожит `Once`), а из-за ОДНОВРЕМЕННОГО ЧТЕНИЯ из другого потока: glibc может
+    // переселить блок `environ`, и параллельный `getenv` прочитает освобождённую
+    // память. Тесты внутри одного бинаря идут параллельно, и до этой правки картина
+    // была ровно такой: `review_p1` — пять тестов, один зовёт `ensure_git_data_dir`,
+    // остальные четыре в этот момент читают `TEST_DATABASE_URL` здесь же.
+    //
+    // Проведя запись через тот же `Once`, через который проходят ВСЕ тесты, мы
+    // получаем happens-before: чтения начинаются только после того, как запись
+    // завершена (линза 07 §7).
+    ensure_git_data_dir();
     let url = std::env::var("TEST_DATABASE_URL").expect(
         "TEST_DATABASE_URL не задан — интеграционные тесты требуют Postgres \
          (bash scripts/ci-local.sh поднимет эфемерный)",
@@ -209,6 +221,10 @@ pub async fn pool_with_schema() -> PgPool {
 /// GIT_DATA_DIR для тестов, зовущих git-first запись (ListWrite.add_version):
 /// один временный корень на тест-бинарь. Env процесс-глобален, поэтому ставится
 /// один раз; каталоги репо мелкие и живут в системном temp.
+///
+/// Зовётся из `pool_with_schema` ПЕРВОЙ строкой — этого достаточно, чтобы запись
+/// произошла раньше любых чтений env в этом бинаре. Явные вызовы в тестах оставлены:
+/// они безвредны (`Once`) и показывают в самом тесте, что он ходит в git.
 pub fn ensure_git_data_dir() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -217,6 +233,44 @@ pub fn ensure_git_data_dir() {
         // SAFETY: единственная запись env в этом бинаре, под Once, до git-вызовов.
         unsafe { std::env::set_var("GIT_DATA_DIR", &root) };
     });
+}
+
+/// Собственный `GIT_DATA_DIR` для пробы: свой каталог, замок на время теста и уборка.
+///
+/// Заменил две одинаковые копии `git_data_dir()` в `lock_probe` и `merge_state_probe`.
+/// Копий было две, и в них жила ловушка, которую видно только вместе: `ensure_git_data_dir`
+/// пишет переменную ОДИН раз под `Once`, а `pool_with_schema` теперь зовёт его первой
+/// строкой. Проба, поставившая свой каталог ДО первого обращения к пулу, получала бы его
+/// затёртым на следующей же строке — и искала бы репозиторий там, где его нет.
+///
+/// Поэтому здесь `Once` сначала ОСУШАЕТСЯ, и только потом ставится свой каталог: дальше
+/// вызовы `ensure_git_data_dir` из пула уже ничего не делают.
+///
+/// Замок держится до конца теста (живёт в возвращаемом значении), поэтому тесты одного
+/// бинаря, зовущие этот помощник, идут ПО ОДНОМУ, и `--test-threads=1` не нужен. Переменная
+/// принадлежит процессу, а не тесту: без замка параллельные тесты перетирали бы её друг у
+/// друга, и репозиторий создавался бы не там, где его потом ищут, — падение выглядело бы как
+/// «репозиторий пропал».
+pub async fn own_git_data_dir(prefix: &str) -> OwnGitDataDir {
+    ensure_git_data_dir();
+    let lock = GIT_DATA_DIR_LOCK.lock().await;
+    let path = std::env::temp_dir().join(format!("setfork-{prefix}-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&path).expect("mkdir GIT_DATA_DIR пробы");
+    // SAFETY: замок держится до конца теста, а `Once` выше уже отработал — значит эта
+    // запись последняя и никакой другой поток env в этот момент не пишет.
+    unsafe { std::env::set_var("GIT_DATA_DIR", &path) };
+    OwnGitDataDir { path, _lock: lock }
+}
+
+pub struct OwnGitDataDir {
+    pub path: std::path::PathBuf,
+    _lock: tokio::sync::MutexGuard<'static, ()>,
+}
+
+impl Drop for OwnGitDataDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 /// Пользователь-фикстура; возвращает id.

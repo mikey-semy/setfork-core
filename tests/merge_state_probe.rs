@@ -20,13 +20,6 @@ use setfork_core::services::git_core::GitCoreSvc;
 use setfork_core::services::list::ListWriteSvc;
 use tonic::Request;
 
-struct Tmp(std::path::PathBuf);
-impl Drop for Tmp {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 fn lt(s: &str) -> Option<LocaleText> {
     Some(LocaleText { v: [("en".to_string(), s.to_string())].into_iter().collect() })
 }
@@ -71,14 +64,6 @@ fn proj(title: &str) -> setfork_core::git::project::ProjStep {
     }
 }
 
-async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
-    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
-    let p = std::env::temp_dir().join(format!("setfork-ms-probe-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&p).expect("mkdir");
-    unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    (Tmp(p), guard)
-}
-
 fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
     let repo = git2::Repository::open_bare(bare).expect("open");
     let c = repo.find_commit(git2::Oid::from_str(sha).expect("oid")).expect("commit");
@@ -102,7 +87,7 @@ async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: Stri
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres) и git в PATH"]
 async fn база_совпадает_с_настоящим_git_merge_base() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("ms-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -137,7 +122,7 @@ async fn база_совпадает_с_настоящим_git_merge_base() {
     .await
     .expect("create_branch");
 
-    let bare = dir.0.join(format!("{list_id}.git"));
+    let bare = dir.path.join(format!("{list_id}.git"));
     let base_before = list_json_at(&bare, &{
         git2::Repository::open_bare(&bare)
             .expect("o")

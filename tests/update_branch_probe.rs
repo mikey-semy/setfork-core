@@ -20,13 +20,6 @@ use setfork_core::services::git_core::GitCoreSvc;
 use setfork_core::services::list::ListWriteSvc;
 use tonic::Request;
 
-struct Tmp(std::path::PathBuf);
-impl Drop for Tmp {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 fn lt(s: &str) -> Option<LocaleText> {
     Some(LocaleText { v: [("en".to_string(), s.to_string())].into_iter().collect() })
 }
@@ -71,14 +64,6 @@ fn proj(title: &str) -> setfork_core::git::project::ProjStep {
     }
 }
 
-async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
-    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
-    let p = std::env::temp_dir().join(format!("setfork-upd-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&p).expect("mkdir");
-    unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    (Tmp(p), guard)
-}
-
 fn json_at(bare: &std::path::Path, sha: &str) -> String {
     let repo = git2::Repository::open_bare(bare).expect("open");
     let c = repo.find_commit(git2::Oid::from_str(sha).expect("oid")).expect("commit");
@@ -105,7 +90,7 @@ async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: Stri
 #[tokio::test]
 #[ignore = "ПАДАЕТ: legacy steps/*.md против канона веток (только list.json) → git2 даёт conflict там, где git CLI сливает; на проде формы нет ни в одном из 37 репо"]
 async fn влить_main_в_ветку_сохраняет_обе_стороны() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("ub-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -155,7 +140,7 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
     .await
     .expect("create_branch");
 
-    let bare = dir.0.join(format!("{list_id}.git"));
+    let bare = dir.path.join(format!("{list_id}.git"));
     let base = json_at(&bare, &tip(&bare, "refs/heads/main"));
 
     // Автор предложения правит СВОЙ шаг.
@@ -303,7 +288,7 @@ async fn влить_main_в_ветку_сохраняет_обе_стороны(
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn повторное_обновление_без_изменений_отклоняется() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("ub-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "bob").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -367,7 +352,7 @@ async fn какие_изменения_main_ломают_слияние() {
         ("main ПЕРЕИМЕНОВАЛ шаг", vec!["Первый (main)", "Второй", "Третий", "Четвёртый"]),
         ("main правит только desc", vec!["Первый", "Второй", "Третий", "Четвёртый"]),
     ] {
-        let (dir, _git_dir_guard) = git_data_dir().await;
+        let dir = support::own_git_data_dir("ub-probe").await;
         let pool = support::pool_with_schema().await;
         let owner = support::seed_user(&pool, "u").await;
         let write = ListWriteSvc { pool: pool.clone() };
@@ -416,7 +401,7 @@ async fn какие_изменения_main_ломают_слияние() {
         .expect("create_branch");
 
         // Автор предложения правит через веб-редактор → steps/ из ветки уходят.
-        let bare = dir.0.join(format!("{list_id}.git"));
+        let bare = dir.path.join(format!("{list_id}.git"));
         let base = json_at(&bare, &tip(&bare, "refs/heads/main"));
         git.commit_to_branch(Request::new(CommitToBranchRequest {
             repo: rr.clone(),

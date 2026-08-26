@@ -20,13 +20,6 @@ use setfork_core::services::git_core::GitCoreSvc;
 use setfork_core::services::list::ListWriteSvc;
 use tonic::Request;
 
-struct Tmp(std::path::PathBuf);
-impl Drop for Tmp {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 fn lt(s: &str) -> Option<LocaleText> {
     Some(LocaleText { v: [("en".to_string(), s.to_string())].into_iter().collect() })
 }
@@ -49,14 +42,6 @@ fn step(title: &str) -> NewStep {
         needs_human_ask: None,
         danger: false,
     }
-}
-
-async fn git_data_dir() -> (Tmp, tokio::sync::MutexGuard<'static, ()>) {
-    let guard = support::GIT_DATA_DIR_LOCK.lock().await;
-    let p = std::env::temp_dir().join(format!("setfork-lock-probe-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&p).expect("mkdir");
-    unsafe { std::env::set_var("GIT_DATA_DIR", &p) };
-    (Tmp(p), guard)
 }
 
 fn list_json_at(bare: &std::path::Path, sha: &str) -> String {
@@ -84,7 +69,7 @@ async fn содержимое(git: &GitCoreSvc, rr: Option<RepoRef>, canon: Stri
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn параллельные_слияния_не_затирают_друг_друга() {
-    let (dir, _git_dir_guard) = git_data_dir().await;
+    let dir = support::own_git_data_dir("lock-probe").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "alice").await;
     let write = ListWriteSvc { pool: pool.clone() };
@@ -122,7 +107,7 @@ async fn параллельные_слияния_не_затирают_друг_
         .await
         .expect("create_branch");
     }
-    let bare = dir.0.join(format!("{list_id}.git"));
+    let bare = dir.path.join(format!("{list_id}.git"));
     let base = list_json_at(&bare, &{
         git2::Repository::open_bare(&bare)
             .expect("o")
