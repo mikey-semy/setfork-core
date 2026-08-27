@@ -924,15 +924,13 @@ impl GitCore for GitCoreSvc {
             }))
         };
         let Some((url, token_enc)) = db::load_mirror(&self.pool, id).await.map_err(db_status)? else {
-            return body(Some("зеркало не настроено".to_string()));
+            return body(Some("not-configured".to_string()));
         };
         let Some(secret) = crate::git::mirror::mirror_secret() else {
-            return body(Some("SETFORK_MIRROR_SECRET не задан на сервере".to_string()));
+            return body(Some("secret-missing".to_string()));
         };
         let Some(token) = crate::git::mirror::decrypt_token(&token_enc, secret) else {
-            return body(Some(
-                "токен зеркала не расшифровался (секрет сменён?) — сохраните заново".to_string(),
-            ));
+            return body(Some("token-undecryptable".to_string()));
         };
         body(crate::git::mirror::mirror_check(&bare, &url, &token).await.err())
     }

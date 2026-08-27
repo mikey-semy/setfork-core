@@ -9,6 +9,17 @@ use uuid::Uuid;
 
 use crate::db;
 
+/// ⚠️ ИСХОД — МАШИННЫЙ КОД, а не проза (И3, находка 10-F8). Наши собственные отказы едут
+/// кодами `secret-missing` / `token-undecryptable`; текст для человека подбирает фронт по
+/// его языку (`features/library/mirror-error.ts`), как и причины отказа по И1. Раньше
+/// здесь лежал русский текст интерфейса — то есть ядро хранило строку, которую читает
+/// владелец списка, и англоязычному она показалась бы по-русски.
+///
+/// ⚠️ А вот вывод ЧУЖОГО git проходит НАСКВОЗЬ и подменять его нельзя: «repository not
+/// found», «authentication failed» — самая полезная подсказка, какая тут бывает, и общая
+/// фраза отобрала бы у владельца единственный след. Фронт это знает и показывает
+/// незнакомую строку как есть; у него это закреплено отдельным пунктом теста.
+///
 /// Пуш зеркала СЕЙЧАС (Ф3): читает настройки, расшифровывает токен, пушит,
 /// записывает статус. «Не настроено» — не ошибка (Ok). Любой сбой — в статус
 /// списка (mirror_error) и метрику: молчаливой деградации быть не должно.
@@ -32,13 +43,9 @@ async fn push_mirror_locked(pool: &PgPool, id: Uuid, bare: &std::path::Path) -> 
     };
     let started = std::time::Instant::now();
     let outcome = match crate::git::mirror::mirror_secret() {
-        None => {
-            Err("SETFORK_MIRROR_SECRET не задан на сервере — зеркало не может расшифровать токен".to_string())
-        }
+        None => Err("secret-missing".to_string()),
         Some(secret) => match crate::git::mirror::decrypt_token(&token_enc, secret) {
-            None => {
-                Err("токен зеркала не расшифровался (секрет сменён?) — сохраните токен заново".to_string())
-            }
+            None => Err("token-undecryptable".to_string()),
             Some(token) => crate::git::mirror::mirror_push(bare, &url, &token).await,
         },
     };
