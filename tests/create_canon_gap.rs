@@ -101,7 +101,8 @@ async fn create_leaves_no_canon_until_first_touch() {
     assert!(dir.path.exists(), "каталог тома существует — значит дело не в отсутствии тома");
 
     // 2. Первое касание по git материализует репозиторий из истории БД.
-    let materialized = repo::ensure_repo_by_id(&pool, id).await.expect("материализация").expect("список есть");
+    let materialized =
+        repo::ensure_repo_by_id(&pool, id).await.expect("материализация").expect("список есть");
     assert_eq!(materialized, bare, "материализовано по каноническому пути");
     assert!(bare.exists(), "после первого касания репозиторий появился");
 
@@ -116,6 +117,9 @@ async fn create_leaves_no_canon_until_first_touch() {
     // 4. Пометки, терявшиеся на прежних переходах, дошли до канона.
     let canon = canon_in_git(&bare);
     assert!(canon.contains(&bid), "block_id не доехал до канона");
-    assert!(canon.contains("needs_human") || canon.contains("needsHuman"), "пометка «нужен человек» не доехала");
+    assert!(
+        canon.contains("needs_human") || canon.contains("needsHuman"),
+        "пометка «нужен человек» не доехала"
+    );
     assert!(canon.contains("danger"), "пометка «разрушительный» не доехала");
 }
