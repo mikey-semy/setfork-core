@@ -562,26 +562,25 @@ async fn co_author_set_and_order() {
 
     // Предложения: у `many` два принятых, у `one` одно, у `none` только открытое,
     // и одно — от САМОГО владельца (он не должен появиться дважды).
-    let mut принять = Vec::new();
-    for (автор, принятых, всего) in [(many, 2, 2), (one, 1, 1), (none, 0, 1), (owner, 1, 1)]
-    {
-        for i in 0..всего {
+    let mut accept = Vec::new();
+    for (author, accepted, total) in [(many, 2, 2), (one, 1, 1), (none, 0, 1), (owner, 1, 1)] {
+        for i in 0..total {
             let s = collab
                 .create_suggestion(Request::new(CreateSuggestionRequest {
                     list_id: created.id.clone(),
-                    author_id: автор.to_string(),
+                    author_id: author.to_string(),
                     note: format!("правка {i}"),
                     steps: vec![step("Proposed")],
                 }))
                 .await
                 .expect("suggestion")
                 .into_inner();
-            if i < принятых {
-                принять.push(s.id);
+            if i < accepted {
+                accept.push(s.id);
             }
         }
     }
-    for id in принять {
+    for id in accept {
         sqlx::query("update suggestions set status = 'accepted' where id = $1::uuid")
             .bind(&id)
             .execute(&pool)

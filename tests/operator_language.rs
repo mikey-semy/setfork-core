@@ -49,7 +49,7 @@ const USER_PROSE_DEBT: &[&str] = &[
 struct Literal {
     file: String,
     line: usize,
-    текст: String,
+    text: String,
 }
 
 fn is_cyrillic(s: &str) -> bool {
@@ -62,8 +62,8 @@ fn is_cyrillic(s: &str) -> bool {
 /// обычные и сырые строки, символьные литералы, и — по глубине скобок — вырезание
 /// модулей под `#[cfg(test)]`. Считать `#[cfg(test)]` «хвостом файла» было НЕЛЬЗЯ:
 /// это верно по конвенции, но конвенция — не механизм, а гейт должен быть механизмом.
-fn literals(текст: &str) -> Vec<(usize, String)> {
-    let b: Vec<char> = текст.chars().collect();
+fn literals(text: &str) -> Vec<(usize, String)> {
+    let b: Vec<char> = text.chars().collect();
     let n = b.len();
     let (mut i, mut line) = (0usize, 1usize);
     let mut found = Vec::new();
@@ -88,16 +88,16 @@ fn literals(текст: &str) -> Vec<(usize, String)> {
         }
         // Блочный комментарий — вложенный, как в Rust.
         if c == '/' && i + 1 < n && b[i + 1] == '*' {
-            let mut уровень = 1;
+            let mut level = 1;
             i += 2;
-            while i < n && уровень > 0 {
+            while i < n && level > 0 {
                 if b[i] == '\n' {
                     line += 1;
                 } else if b[i] == '/' && i + 1 < n && b[i + 1] == '*' {
-                    уровень += 1;
+                    level += 1;
                     i += 1;
                 } else if b[i] == '*' && i + 1 < n && b[i + 1] == '/' {
-                    уровень -= 1;
+                    level -= 1;
                     i += 1;
                 }
                 i += 1;
@@ -237,15 +237,15 @@ fn operator_output_is_english() {
     assert!(files.len() > 20, "обход src/ нашёл всего {} файлов — гейт сломан", files.len());
 
     let mut bad: Vec<Literal> = Vec::new();
-    for путь in &files {
-        let rel = путь.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+    for path in &files {
+        let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
         if BILINGUAL.contains(&rel.as_str()) {
             continue;
         }
-        let текст = std::fs::read_to_string(путь).expect("чтение исходника");
-        for (line, лит) in literals(&текст) {
-            if is_cyrillic(&лит) && !USER_PROSE_DEBT.contains(&лит.as_str()) {
-                bad.push(Literal { file: rel.clone(), line, текст: лит });
+        let text = std::fs::read_to_string(path).expect("чтение исходника");
+        for (line, lit_text) in literals(&text) {
+            if is_cyrillic(&lit_text) && !USER_PROSE_DEBT.contains(&lit_text.as_str()) {
+                bad.push(Literal { file: rel.clone(), line, text: lit_text });
             }
         }
     }
@@ -260,12 +260,12 @@ fn operator_output_is_english() {
     let all_literals: Vec<String> = files
         .iter()
         .flat_map(|p| literals(&std::fs::read_to_string(p).unwrap_or_default()))
-        .map(|(_, л)| л)
+        .map(|(_, lit)| lit)
         .collect();
-    for д in USER_PROSE_DEBT {
+    for entry in USER_PROSE_DEBT {
         assert!(
-            all_literals.iter().any(|л| л == д),
-            "в списке долга 10-F8 числится строка, которой в коде больше нет: {д:?}. \
+            all_literals.iter().any(|lit| lit == entry),
+            "в списке долга 10-F8 числится строка, которой в коде больше нет: {entry:?}. \
              Убери её из списка — иначе гейт пропустит новую такую же."
         );
     }
@@ -273,7 +273,9 @@ fn operator_output_is_english() {
     if !bad.is_empty() {
         let list_names = bad
             .iter()
-            .map(|л| format!("  {}:{}  {}", л.file, л.line, л.текст.chars().take(80).collect::<String>()))
+            .map(|lit| {
+                format!("  {}:{}  {}", lit.file, lit.line, lit.text.chars().take(80).collect::<String>())
+            })
             .collect::<Vec<_>>()
             .join("\n");
         panic!(
@@ -284,4 +286,199 @@ fn operator_output_is_english() {
             bad.len()
         );
     }
+}
+
+/// Кириллица в ИМЕНАХ — запрещена. Решение владельца 26.08: «кроме документации ей не
+/// место тут ни в названиях ни в коде, у нас не 1С язык программирование».
+///
+/// ⚠️ Почему это отдельный тест, а не расширение соседнего: тот судит СТРОКОВЫЕ ЛИТЕРАЛЫ,
+/// а этот — КОД между ними. Правила разные: в литерале русский текст бывает законным
+/// (каталог сообщений хука), в имени — никогда.
+///
+/// ⚠️ И почему он вообще появился. 26.08 я отчитался «кириллических имён ноль», проверив
+/// это регуляркой по ОБЪЯВЛЕНИЯМ (`fn`, `let`, `const`, …). Через день нашлось ещё 24
+/// имени, которых та проверка не видела по построению: связывания в образцах
+/// (`let Some(канал) = …`), переменные циклов, параметры замыканий. Отчёт был неверен не
+/// потому, что кто-то дописал кириллицу, а потому что мерили не то. Здесь мерим иначе:
+/// ЛЮБАЯ кириллическая последовательность в коде — нарушение, независимо от того, как она
+/// объявлена.
+#[test]
+fn cyrillic_never_appears_in_identifiers() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut files = Vec::new();
+    walk(&root.join("src"), &mut files);
+    walk(&root.join("tests"), &mut files);
+    files.sort();
+    assert!(files.len() > 30, "обход нашёл всего {} файлов — гейт сломан", files.len());
+
+    let mut bad: Vec<String> = Vec::new();
+    for path in &files {
+        let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+        let text = std::fs::read_to_string(path).expect("чтение исходника");
+        for (line, name) in identifiers_with_cyrillic(&text) {
+            bad.push(format!("  {rel}:{line}  {name}"));
+        }
+    }
+
+    assert!(
+        bad.is_empty(),
+        "кириллица в именах запрещена — только в комментариях и док-строках \
+         (решение владельца 26.08). Найдено {}:\n{}",
+        bad.len(),
+        bad.join("\n")
+    );
+}
+
+/// Куски КОДА (не комментарии и не строки) с номером строки, где кусок начался.
+///
+/// Отдельная функция, а не флаг у `literals`: та собирает содержимое строк, эта —
+/// всё остальное. Разбор один и тот же, предметы противоположные.
+fn code_regions(text: &str) -> Vec<(usize, String)> {
+    let b: Vec<char> = text.chars().collect();
+    let n = b.len();
+    let (mut i, mut line) = (0usize, 1usize);
+    let mut out: Vec<(usize, String)> = Vec::new();
+    let mut buf = String::new();
+    let mut buf_line = 1usize;
+    while i < n {
+        let c = b[i];
+        if c == '\n' {
+            line += 1;
+            buf.push(' ');
+            i += 1;
+            continue;
+        }
+        // Комментарий — целиком мимо.
+        if c == '/' && i + 1 < n && b[i + 1] == '/' {
+            if !buf.trim().is_empty() {
+                out.push((buf_line, std::mem::take(&mut buf)));
+            }
+            buf.clear();
+            while i < n && b[i] != '\n' {
+                i += 1;
+            }
+            buf_line = line;
+            continue;
+        }
+        if c == '/' && i + 1 < n && b[i + 1] == '*' {
+            if !buf.trim().is_empty() {
+                out.push((buf_line, std::mem::take(&mut buf)));
+            }
+            buf.clear();
+            let mut level = 1;
+            i += 2;
+            while i < n && level > 0 {
+                if b[i] == '\n' {
+                    line += 1;
+                } else if b[i] == '/' && i + 1 < n && b[i + 1] == '*' {
+                    level += 1;
+                    i += 1;
+                } else if b[i] == '*' && i + 1 < n && b[i + 1] == '/' {
+                    level -= 1;
+                    i += 1;
+                }
+                i += 1;
+            }
+            buf_line = line;
+            continue;
+        }
+        // Символьный литерал: 'a', '\n'. ⚠️ Без этой ветки `'"'` читается как начало строки.
+        if c == '\'' && i + 2 < n {
+            let end = if b[i + 1] == '\\' {
+                (i + 2..n).find(|&j| b[j] == '\'')
+            } else if b[i + 2] == '\'' {
+                Some(i + 2)
+            } else {
+                None
+            };
+            if let Some(j) = end {
+                buf.push(' ');
+                i = j + 1;
+                continue;
+            }
+        }
+        // Сырая строка.
+        let raw = {
+            let mut j = i;
+            if b[j] == 'b' {
+                j += 1;
+            }
+            if j < n && b[j] == 'r' {
+                j += 1;
+                let start_h = j;
+                while j < n && b[j] == '#' {
+                    j += 1;
+                }
+                if j < n && b[j] == '"' { Some((j + 1, j - start_h)) } else { None }
+            } else {
+                None
+            }
+        };
+        if let Some((start, hashes)) = raw {
+            let closing: String = std::iter::once('"').chain(std::iter::repeat_n('#', hashes)).collect();
+            let tail: String = b[start..].iter().collect();
+            let len = tail.find(&closing).unwrap_or(tail.len());
+            line += tail[..len].matches('\n').count();
+            buf.push(' ');
+            i = start + tail[..len].chars().count() + closing.chars().count();
+            continue;
+        }
+        if c == '"' || (c == 'b' && i + 1 < n && b[i + 1] == '"') {
+            let mut j = if c == '"' { i + 1 } else { i + 2 };
+            while j < n {
+                if b[j] == '\\' {
+                    j += 2;
+                    continue;
+                }
+                if b[j] == '"' {
+                    break;
+                }
+                if b[j] == '\n' {
+                    line += 1;
+                }
+                j += 1;
+            }
+            buf.push(' ');
+            i = j + 1;
+            continue;
+        }
+        if buf.is_empty() {
+            buf_line = line;
+        }
+        buf.push(c);
+        i += 1;
+    }
+    if !buf.trim().is_empty() {
+        out.push((buf_line, buf));
+    }
+    out
+}
+
+/// Имена с кириллицей — в КОДЕ, минуя комментарии и строковые литералы.
+///
+/// Переиспользует разбор соседнего теста: он уже умеет отличать код от текста, включая
+/// сырые строки и символьные литералы (`'"'` наивный разбор принимает за начало строки —
+/// на этом обжигались дважды).
+fn identifiers_with_cyrillic(text: &str) -> Vec<(usize, String)> {
+    let code = code_regions(text);
+    let mut out = Vec::new();
+    for (line, chunk) in code {
+        let mut current = String::new();
+        let mut has_cyrillic = false;
+        for ch in chunk.chars().chain(std::iter::once(' ')) {
+            if ch.is_alphanumeric() || ch == '_' {
+                if matches!(ch, 'а'..='я' | 'А'..='Я' | 'ё' | 'Ё') {
+                    has_cyrillic = true;
+                }
+                current.push(ch);
+            } else {
+                if has_cyrillic && !current.is_empty() {
+                    out.push((line, current.clone()));
+                }
+                current.clear();
+                has_cyrillic = false;
+            }
+        }
+    }
+    out
 }

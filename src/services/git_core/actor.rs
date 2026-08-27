@@ -51,11 +51,11 @@ mod actor_choice_tests {
 
     #[test]
     fn new_frontend_without_id_does_not_fall_back_to_handle() {
-        for роль in ["owner", "contributor", "outsider", "невиданная"] {
+        for role in ["owner", "contributor", "outsider", "невиданная"] {
             assert_eq!(
-                choose_actor("", роль, "mike"),
+                choose_actor("", role, "mike"),
                 "",
-                "роль {роль:?} прислана, а идентификатор забыт — это неисправность фронта, \
+                "роль {role:?} прислана, а идентификатор забыт — это неисправность фронта, \
                  и магический реф обязан отвергнуться. Подставить ник нельзя: ник СМЕНЯЕМ, \
                  и после смены чужой человек перезаписал бы предъявленное (core#80)"
             );
@@ -65,8 +65,8 @@ mod actor_choice_tests {
     #[test]
     fn the_id_always_wins_over_the_handle() {
         let id = "11111111-2222-3333-4444-555555555555";
-        for роль in ["", "owner", "contributor"] {
-            assert_eq!(choose_actor(id, роль, "mike"), id, "при любой роли берётся идентификатор");
+        for role in ["", "owner", "contributor"] {
+            assert_eq!(choose_actor(id, role, "mike"), id, "при любой роли берётся идентификатор");
         }
     }
 }

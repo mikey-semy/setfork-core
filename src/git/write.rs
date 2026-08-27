@@ -170,15 +170,15 @@ mod tests {
 
         // Наполняем выборочную папку эвристики. Порог сравнивается СТРОГО, поэтому
         // одного объекта мало — нужно больше, чем `(gc.auto + 255) / 256`.
-        let сколько_в_17 = || std::fs::read_dir(tmp.0.join("objects/17")).map(|d| d.count()).unwrap_or(0);
-        let mut попыток = 0;
-        while сколько_в_17() < 3 {
-            repo.blob(format!("наполнитель {попыток}").as_bytes()).expect("blob");
-            попыток += 1;
-            assert!(попыток < 8000, "не удалось наполнить objects/17 — эвристика git изменилась?");
+        let objects_in_17 = || std::fs::read_dir(tmp.0.join("objects/17")).map(|d| d.count()).unwrap_or(0);
+        let mut attempts = 0;
+        while objects_in_17() < 3 {
+            repo.blob(format!("наполнитель {attempts}").as_bytes()).expect("blob");
+            attempts += 1;
+            assert!(attempts < 8000, "не удалось наполнить objects/17 — эвристика git изменилась?");
         }
 
-        let паков = || {
+        let packs = || {
             std::fs::read_dir(tmp.0.join("objects/pack"))
                 .map(|d| {
                     d.filter_map(Result::ok)
@@ -187,11 +187,11 @@ mod tests {
                 })
                 .unwrap_or(0)
         };
-        assert_eq!(паков(), 0, "до правки паков нет");
+        assert_eq!(packs(), 0, "до правки паков нет");
 
         commit_list_json(&repo, "work", br#"{"title":"b","steps":[]}"#, "правка", "", None).expect("коммит");
 
-        assert!(паков() > 0, "объекты обязаны упаковаться: без вызова gc на этом пути пака не будет");
+        assert!(packs() > 0, "объекты обязаны упаковаться: без вызова gc на этом пути пака не будет");
     }
 
     fn list_json_at(repo: &git2::Repository, sha: &str) -> Vec<u8> {

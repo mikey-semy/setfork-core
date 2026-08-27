@@ -21,7 +21,7 @@ use setfork_core::services::git_core::GitCoreSvc;
 use tonic::Request;
 use uuid::Uuid;
 
-fn шаг(title: &str) -> SnapshotStep {
+fn step(title: &str) -> SnapshotStep {
     SnapshotStep {
         n: 1,
         title: title.into(),
@@ -49,7 +49,7 @@ fn blob_text(title: &str) -> ListContent {
         tags: vec![],
         ordered: true,
         version: 1,
-        steps: vec![шаг(title)],
+        steps: vec![step(title)],
     }
 }
 
