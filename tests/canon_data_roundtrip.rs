@@ -299,3 +299,95 @@ async fn a_column_type_change_does_not_pass_silently() {
 
     assert!(res.is_err(), "чтение обязано ОТКАЗАТЬ, а не отдать список с потерянными пометками");
 }
+
+/// ДУБЛИКАТ `block_id` В ОДНОЙ ВЕРСИИ: выбор обязан быть ОБЪЯСНИМЫМ, а не случайным.
+///
+/// Уникальности на паре `(version_id, block_id)` в схеме нет — только обычный индекс по
+/// `block_id`, — а канон дубликаты не отвергает: `blockId` в проверках `canon.rs` не
+/// упоминается вовсе. Достаточно скопировать блок в `list.json` вместе с идентификатором.
+///
+/// Проверено опытом 27.08: два шага с одним `block_id` вставляются без ошибки, а
+/// `current_marks` возвращает ОДНУ запись на два шага. Кто победит — решал порядок строк,
+/// которого Postgres не обещает. То есть перенесённые пометки (`needs_human`, `danger`,
+/// `image_key`) могли меняться от прогона к прогону при неизменных данных.
+///
+/// Найдено по наводке сессии фронта: у них тест зависел от `ctid` — физического места
+/// строки, — и падал тем чаще, чем больше мёртвых версий оставляли соседи. Тот же корень:
+/// порядок, которого никто не обещал, принят за данность.
+///
+/// Здесь пинится ДЕТЕРМИНИРОВАННОСТЬ, а не конкретный победитель: важно, что при одних и
+/// тех же данных ответ один и тот же и объясним порядком в списке.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn duplicate_block_id_resolves_predictably() {
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "dupmarks").await;
+    let id: Uuid = sqlx::query_scalar(
+        "insert into templates (owner_id, slug, title, current_version) \
+         values ($1, 'dupmarks', '{\"en\":\"Dup\"}', 1) returning id",
+    )
+    .bind(owner)
+    .fetch_one(&pool)
+    .await
+    .expect("seed template");
+    let vid: Uuid = sqlx::query_scalar(
+        "insert into template_versions (template_id, version, note) values ($1, 1, 'v1') returning id",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .expect("seed version");
+
+    let block = Uuid::new_v4();
+    // Первый шаг — без пометок, второй (позже по порядку) — с пометками.
+    for (n, danger, needs) in [(1_i32, false, false), (2, true, true)] {
+        sqlx::query(
+            "insert into steps (version_id, n, block_id, type, content, title, \"desc\", command, \
+             has_image, level, why, needs_human, needs_human_ask, danger, section, subtasks, refs) \
+             values ($1, $2, $3, 'step', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '', false, 'required', \
+             '{}'::jsonb, $4, '{}'::jsonb, $5, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)",
+        )
+        .bind(vid)
+        .bind(n)
+        .bind(block)
+        .bind(needs)
+        .bind(danger)
+        .execute(&pool)
+        .await
+        .expect("дубликат block_id вставляется — уникальности в схеме нет");
+    }
+
+    // ⚠️ ПЕРЕДВИГАЕМ ПЕРВУЮ СТРОКУ ФИЗИЧЕСКИ. Без этого проба ничего не доказывает: на
+    // маленькой таблице Postgres и без `order by` отдаёт строки в порядке вставки, и тест
+    // остаётся зелёным даже со снятым `order by` — проверено мутацией.
+    //
+    // `UPDATE` в Postgres не правит строку на месте, а пишет новую версию в конец, поэтому
+    // после него последовательное чтение вернёт тронутую строку ПОСЛЕДНЕЙ. Ровно этот
+    // механизм дал дефект сессии фронта: их помощник сортировал по `ctid`, физическому
+    // месту строки, и порядок «плыл» тем сильнее, чем больше мёртвых версий вокруг.
+    //
+    // Здесь мы пользуемся им НАРОЧНО: если `order by s.n` снять, победит перемещённый
+    // первый шаг (без пометок) вместо второго.
+    sqlx::query("update steps set \"desc\" = '{}'::jsonb where version_id = $1 and n = 1")
+        .bind(vid)
+        .execute(&pool)
+        .await
+        .expect("физически передвигаем первый шаг в конец таблицы");
+
+    // Один и тот же ответ при повторных чтениях, и он объясним: побеждает последний по `n`.
+    let first = db::current_marks(&pool, id).await.expect("marks");
+    let second = db::current_marks(&pool, id).await.expect("marks дважды");
+    let a = first.get(&block).expect("запись есть");
+    let b = second.get(&block).expect("запись есть");
+    assert_eq!(
+        (a.danger, a.needs_human),
+        (b.danger, b.needs_human),
+        "перенос надстроек обязан давать ОДИН И ТОТ ЖЕ ответ на неизменных данных"
+    );
+    assert_eq!(
+        (a.danger, a.needs_human),
+        (true, true),
+        "побеждает последний по порядку в списке — выбор произвольный, но ОБЪЯСНИМЫЙ; \
+         без `order by` здесь решал порядок строк, которого Postgres не обещает"
+    );
+}

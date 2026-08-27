@@ -117,7 +117,10 @@ pub(super) fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid,
 /// Надстройки текущей версии, переносимые по идентичности блока (CarryOver).
 /// Пустая карта — нормальный случай (список без пометок/картинок или без
 /// block_id у строк).
-pub(crate) async fn current_marks(
+/// ⚠️ `pub`, а не `pub(crate)`, СОЗНАТЕЛЬНО: детерминированность выбора при дубликате
+/// `block_id` пинится интеграционным тестом (`canon_data_roundtrip`), а он живёт вне крейта.
+/// Свойство важнее узости: без теста `order by` в запросе выглядит лишним и будет снят.
+pub async fn current_marks(
     pool: &PgPool,
     template_id: Uuid,
 ) -> Result<std::collections::HashMap<Uuid, CarryOver>, sqlx::Error> {
@@ -126,7 +129,8 @@ pub(crate) async fn current_marks(
          from steps s \
          join template_versions tv on tv.id = s.version_id \
          join templates t on t.id = tv.template_id and t.current_version = tv.version \
-         where tv.template_id = $1 and s.block_id is not null",
+         where tv.template_id = $1 and s.block_id is not null \
+         order by s.n",
     )
     .bind(template_id)
     .fetch_all(pool)
@@ -137,17 +141,42 @@ pub(crate) async fn current_marks(
         // спрятать только смену типа, а не отсутствие колонки, и превращало разъезд
         // схемы в тихую потерю надстроек (линза 04 §3).
         if let Some(id) = r.try_get::<Option<Uuid>, _>("block_id")? {
-            out.insert(
-                id,
-                CarryOver {
-                    needs_human: r.try_get::<Option<bool>, _>("needs_human")?.unwrap_or(false),
-                    needs_human_ask: r
-                        .try_get::<Option<serde_json::Value>, _>("needs_human_ask")?
-                        .unwrap_or(serde_json::json!({})),
-                    image_key: r.try_get::<Option<String>, _>("image_key")?,
-                    danger: r.try_get::<Option<bool>, _>("danger")?.unwrap_or(false),
-                },
-            );
+            // ⚠️ ДУБЛИКАТ block_id в одной версии ВОЗМОЖЕН: уникальности на паре
+            // (version_id, block_id) в схеме нет — только обычный индекс по block_id, —
+            // а канон дубликаты не отвергает (`blockId` в проверках canon.rs не
+            // упоминается вовсе). Достаточно скопировать блок в list.json вместе с его
+            // идентификатором.
+            //
+            // Проверено опытом 27.08: два шага с одним block_id вставляются без ошибки,
+            // а эта карта возвращает ОДНУ запись на два шага. Кто победит — решал порядок
+            // строк, которого Postgres не обещает; значит перенесённые пометки
+            // (`needs_human`, `danger`, `image_key`) могли меняться от прогона к прогону
+            // при неизменных данных.
+            //
+            // Лечим двумя частями. `order by s.n` в запросе делает выбор
+            // ДЕТЕРМИНИРОВАННЫМ: побеждает последний по порядку в списке, и это хотя бы
+            // объяснимо. А `insert`, вернувший прежнее значение, означает дубликат — и об
+            // этом надо СКАЗАТЬ: тихо выбирать одно из двух нельзя.
+            if out
+                .insert(
+                    id,
+                    CarryOver {
+                        needs_human: r.try_get::<Option<bool>, _>("needs_human")?.unwrap_or(false),
+                        needs_human_ask: r
+                            .try_get::<Option<serde_json::Value>, _>("needs_human_ask")?
+                            .unwrap_or(serde_json::json!({})),
+                        image_key: r.try_get::<Option<String>, _>("image_key")?,
+                        danger: r.try_get::<Option<bool>, _>("danger")?.unwrap_or(false),
+                    },
+                )
+                .is_some()
+            {
+                tracing::warn!(
+                    %template_id, block_id = %id,
+                    "duplicate block_id within one version: carried-over marks come from the last \
+                     step by order, the earlier one is ignored"
+                );
+            }
         }
     }
     Ok(out)
