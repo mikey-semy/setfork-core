@@ -1,5 +1,7 @@
 //! Общие хелперы доменных сервисов: маппинг ошибок, uuid, LocaleText/refs → jsonb.
-use tonic::Status;
+use tonic::{Code, Status};
+
+use crate::reason::Reason;
 use uuid::Uuid;
 
 use crate::pb_domain::{LocaleText, StepRef};
@@ -43,7 +45,12 @@ pub fn db_status(e: sqlx::Error) -> Status {
         && let Some(code) = db.code()
     {
         match code.as_ref() {
-            "23505" => return Status::already_exists("already exists"),
+            // Причина едет трейлером, а не только кодом gRPC. Замер 27.08.2026: путь
+            // рождения списка отдавал `AlreadyExists("already exists")` БЕЗ единого
+            // трейлера, тогда как путь правки на том же стенде отдавал `STALE`. Клиент
+            // читает причину, а не текст, — значит на пути создания читать было нечего,
+            // и добавить обёртку на той стороне было бы недостаточно.
+            "23505" => return crate::reason::status(Code::AlreadyExists, Reason::Exists, "already exists"),
             "23503" => return Status::failed_precondition("referenced row missing"),
             "22P02" | "22007" => return Status::invalid_argument("invalid value"),
             _ => {}
