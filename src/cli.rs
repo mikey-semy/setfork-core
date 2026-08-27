@@ -280,35 +280,35 @@ mod cli_list_tests {
     #[test]
     fn command_table_matches_match_arms() {
         let src = include_str!("cli.rs");
-        let mut в_match: Vec<String> = Vec::new();
+        let mut in_match: Vec<String> = Vec::new();
         for l in src.lines() {
             let s = l.trim();
-            let Some((лево, _)) = s.split_once("=>") else { continue };
-            let лево = лево.trim();
-            if !лево.starts_with('"') {
+            let Some((left, _)) = s.split_once("=>") else { continue };
+            let left = left.trim();
+            if !left.starts_with('"') {
                 continue;
             }
-            for имя in лево.split('|') {
-                let имя = имя.trim().trim_matches('"');
-                if !имя.is_empty() {
-                    в_match.push(имя.to_string());
+            for name in left.split('|') {
+                let name = name.trim().trim_matches('"');
+                if !name.is_empty() {
+                    in_match.push(name.to_string());
                 }
             }
         }
         assert!(
-            в_match.len() >= super::COMMANDS.len(),
+            in_match.len() >= super::COMMANDS.len(),
             "разбор нашёл {} веток при {} командах в списке — скорее всего изменилась ФОРМА \
              записи ветки, и проверка перестала видеть предмет. Это не расхождение списков, \
              это сломанная проверка: почини разбор.",
-            в_match.len(),
+            in_match.len(),
             super::COMMANDS.len()
         );
         let mut list_names: Vec<String> = super::COMMANDS.iter().map(|s| s.to_string()).collect();
         list_names.sort();
-        в_match.sort();
-        в_match.dedup();
+        in_match.sort();
+        in_match.dedup();
         assert_eq!(
-            list_names, в_match,
+            list_names, in_match,
             "КОМАНДЫ и ветки match разошлись: команда, забытая в списке, молча запустит СЕРВЕР"
         );
     }

@@ -140,7 +140,7 @@ async fn the_round_trip_keeps_every_list_field() {
     // пустом значении, поэтому путь загрузки, обнуляющий поле, проходил проверку
     // насквозь. Поймано мутацией 26.08 (линза 07 §8): `why` заменён на `String::new()`
     // в `db.rs` — круг остался ЗЕЛЁНЫМ, хотя ловить такое и есть его работа.
-    for (поле, ожидаем) in [
+    for (field, expected) in [
         ("blockId", "\"blockId\": \"11111111-1111-1111-1111-111111111111\""),
         ("imageKey", "\"imageKey\": \"img/скрин.png\""),
         ("needsHuman", "\"needsHuman\": true"),
@@ -153,8 +153,8 @@ async fn the_round_trip_keeps_every_list_field() {
         ("refs", "\"url\": \"https://setfork.com\""),
     ] {
         assert!(
-            before.contains(ожидаем),
-            "канон НЕ НЕСЁТ значение поля {поле}: ждали подстроку {ожидаем:?}.\n\
+            before.contains(expected),
+            "канон НЕ НЕСЁТ значение поля {field}: ждали подстроку {expected:?}.\n\
              Это не косметика: перенос по blockId умеет вернуть надстройки из Postgres, \
              и сравнение «до/после» сошлось бы даже при пустом файле. Канон обязан нести \
              значение САМ.\nканон:\n{before}"

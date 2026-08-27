@@ -341,7 +341,7 @@ async fn a_repeat_update_without_changes_is_rejected() {
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn which_main_changes_break_the_merge() {
-    for (случай, шаги_main) in [
+    for (case, main_steps) in [
         ("main ДОБАВИЛ шаг", vec!["Первый", "Второй", "Третий", "Четвёртый", "Пятый (main)"]),
         ("main УДАЛИЛ шаг", vec!["Первый", "Второй", "Третий"]),
         ("main ПЕРЕИМЕНОВАЛ шаг", vec!["Первый (main)", "Второй", "Третий", "Четвёртый"]),
@@ -411,8 +411,8 @@ async fn which_main_changes_break_the_merge() {
         .expect("commit_to_branch");
 
         let mut steps: Vec<setfork_core::git::project::ProjStep> =
-            шаги_main.iter().map(|t| proj(t)).collect();
-        if случай == "main правит только desc" {
+            main_steps.iter().map(|t| proj(t)).collect();
+        if case == "main правит только desc" {
             steps[0].desc = "новое описание".into();
         }
         setfork_core::db::add_version(&pool, list_id, "web", &steps).await.expect("main");
@@ -429,8 +429,8 @@ async fn which_main_changes_break_the_merge() {
             }))
             .await;
         match res {
-            Ok(_) => println!("{случай}: слияние ПРОШЛО"),
-            Err(e) => println!("{случай}: ОТКАЗ — {}", e.message()),
+            Ok(_) => println!("{case}: слияние ПРОШЛО"),
+            Err(e) => println!("{case}: ОТКАЗ — {}", e.message()),
         }
     }
 }

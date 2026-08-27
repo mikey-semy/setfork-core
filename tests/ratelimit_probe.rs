@@ -21,6 +21,14 @@ const ADDR: &str = "http://127.0.0.1:50051";
 /// `None` — ядра на 50051 нет. Проба РУЧНАЯ (нужен сервер с особыми лимитами), и
 /// падать из-за его отсутствия она не должна: тогда любой общий прогон с фичей
 /// `probes` краснеет не по делу, а на такую красноту перестают смотреть.
+///
+/// ⚠️ Цена этого решения: без сервера тест печатает пропуск в stderr и завершается
+/// УСПЕХОМ. `cargo test` прячет stderr, поэтому без `--nocapture` он выглядит зелёным,
+/// не проверив ничего. Так и случилось 27.08: общий прогон проб дал «26 passed», и из
+/// этого был сделан неверный вывод, что сервер пробам больше не нужен.
+///
+/// Менять поведение на падение НЕ надо — довод выше остаётся верным. Надо помнить, что
+/// зелёная эта проба означает ровно одно: «либо проверила, либо не смогла».
 async fn chan() -> Option<Channel> {
     match Channel::from_static(ADDR).connect().await {
         Ok(c) => Some(c),
@@ -47,8 +55,8 @@ fn req(token: Option<&str>) -> Request<RepoRef> {
 #[tokio::test]
 #[ignore = "нужно поднятое ядро с SETFORK_RPC_RPM=3"]
 async fn the_plain_method_limit_reaches_the_client() {
-    let Some(канал) = chan().await else { return };
-    let mut c = GitCoreClient::new(канал);
+    let Some(channel) = chan().await else { return };
+    let mut c = GitCoreClient::new(channel);
     let mut codes = Vec::new();
     for _ in 0..6 {
         let code = match c.list_branches(req(Some("probe-token"))).await {
@@ -73,8 +81,8 @@ async fn the_plain_method_limit_reaches_the_client() {
 #[tokio::test]
 #[ignore = "нужно поднятое ядро"]
 async fn a_foreign_token_does_not_consume_the_budget() {
-    let Some(канал) = chan().await else { return };
-    let mut c = GitCoreClient::new(канал);
+    let Some(channel) = chan().await else { return };
+    let mut c = GitCoreClient::new(channel);
     let mut unauth = Vec::new();
     for _ in 0..20 {
         let code = match c.list_tags(req(Some("wrong-token"))).await {
@@ -105,8 +113,8 @@ async fn a_foreign_token_does_not_consume_the_budget() {
 async fn health_is_not_rate_limited() {
     use tonic_health::pb::HealthCheckRequest;
     use tonic_health::pb::health_client::HealthClient;
-    let Some(канал) = chan().await else { return };
-    let mut h = HealthClient::new(канал);
+    let Some(channel) = chan().await else { return };
+    let mut h = HealthClient::new(channel);
     let mut codes = Vec::new();
     for _ in 0..30 {
         let code = match h.check(HealthCheckRequest { service: String::new() }).await {
