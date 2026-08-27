@@ -12,17 +12,33 @@
 
 use std::path::Path;
 
-/// Паттерны, которыми в кодовой базе двигали main до Ф1. Список намеренно
-/// широкий: ложное срабатывание чинится точечно, пропуск — дырой в защите.
-const FORBIDDEN: &[&str] = &[
-    "commit(Some(MAIN_REF)",
-    "commit(Some(&MAIN_REF",
-    "commit(Some(\"refs/heads/main\")",
-    ".reference(MAIN_REF",
-    ".reference(\"refs/heads/main\"",
-    ".reference_matching(MAIN_REF",
-    ".reference_matching(\"refs/heads/main\"",
+/// API git2, которыми ref МОЖНО СДВИНУТЬ. Это список ВОЗМОЖНОСТЕЙ, а не форм записи —
+/// и в этом вся разница.
+///
+/// ⚠️ Прежняя версия перечисляла точные формы вызова, встречавшиеся в коде до Ф1
+/// (`commit(Some(MAIN_REF)`, `.reference(MAIN_REF`, …). Проверено 27.08: она пропускала
+/// `repo.branch("main", &commit, true)` — законный способ git2 передвинуть ветку, которого
+/// в списке просто не было. Сторож оставался ЗЕЛЁНЫМ.
+///
+/// Урок пришёл со стороны фронта, где то же самое случилось с их счётчиком: правило,
+/// привязанное к ТЕГУ, пропустило целую роль. Форма записи у каждого автора своя, а набор
+/// API, способных сдвинуть ссылку, меняется вместе с git2 — то есть раз в годы.
+const MUTATING_REF_API: &[&str] = &[
+    "commit(Some(", // коммит с обновлением ref
+    ".reference(",  // создать/переписать прямую ссылку
+    ".reference_symbolic(",
+    ".reference_matching(",
+    ".branch(",     // создать ИЛИ передвинуть ветку (force = true)
+    ".set_target(", // подвинуть уже найденную ссылку
+    ".rename(",     // переименовать ветку/ссылку В main
+    ".reset(",      // сдвинуть текущую ветку
 ];
+
+/// Как в строке может быть назван main.
+///
+/// `set_head` намеренно НЕ считается мутацией: он двигает HEAD, а не цель ветки, и в bare-репо
+/// лишь объявляет ветку по умолчанию. Целостность main от него не зависит.
+const NAMES_MAIN: &[&str] = &["MAIN_REF", "\"refs/heads/main\"", "\"main\""];
 
 fn scan(dir: &Path, violations: &mut Vec<String>) {
     for entry in std::fs::read_dir(dir).expect("read_dir src/") {
@@ -45,10 +61,13 @@ fn scan(dir: &Path, violations: &mut Vec<String>) {
             if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("/*") {
                 continue;
             }
-            for pat in FORBIDDEN {
-                if line.contains(pat) {
-                    violations.push(format!("{}:{}: {}", path.display(), i + 1, line.trim()));
-                }
+            // Признак нарушения — ПАРА: мутирующий API И упоминание main в одной строке.
+            // По отдельности каждое законно: `refname_to_id(MAIN_REF)` читает, а
+            // `commit(Some(&format!("refs/heads/{branch}")))` пишет в чужую ветку.
+            let mutates = MUTATING_REF_API.iter().any(|p| line.contains(p));
+            let names_main = NAMES_MAIN.iter().any(|p| line.contains(p));
+            if mutates && names_main {
+                violations.push(format!("{}:{}: {}", path.display(), i + 1, line.trim()));
             }
         }
     }
