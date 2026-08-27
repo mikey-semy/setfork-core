@@ -17,7 +17,7 @@ mod versions;
 mod write;
 
 pub use carryover::CarryOver;
-pub(crate) use carryover::current_marks;
+pub use carryover::current_marks;
 pub use mirror::{load_mirror, record_mirror_result};
 pub use versions::{StepRow, load_bundle_data, ser_step_from_row};
 pub use write::{
