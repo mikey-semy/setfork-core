@@ -250,7 +250,7 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
             tracing::error!(owner, slug, why, "write verdict not understood, refusing (fail-closed)");
             Err(reason::status(
                 Code::FailedPrecondition,
-                Reason::GateUnavailable,
+                Reason::GateMalformed,
                 "write precondition verdict not understood",
             ))
         }
