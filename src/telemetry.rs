@@ -82,7 +82,22 @@ where
                         // grpc-message percent-encoded — для лога сойдёт как есть.
                         let msg =
                             resp.headers().get("grpc-message").and_then(|v| v.to_str().ok()).unwrap_or("");
-                        tracing::warn!(method, code, ms = format!("{ms:.1}"), msg, "rpc error");
+                        // Причина, а не только код: код грубее причины, и по нему отказы
+                        // неразличимы. Замер 27.08.2026 — под `FailedPrecondition` живут
+                        // ЧЕТЫРЕ причины (ARCHIVED, CONFLICT, FROZEN, PROTECTED), под
+                        // `InvalidArgument` — две. Оператор, читающий журнал, видел код и
+                        // не мог сказать, какой именно отказ сработал, хотя ядро причину
+                        // уже вычислило и отправило клиенту.
+                        //
+                        // В МЕТКУ метрики не идёт намеренно: набор причин конечный, но
+                        // метка добавила бы новое измерение существующим сериям, а вопрос
+                        // «чего именно стало больше» решается журналом.
+                        let reason = resp
+                            .headers()
+                            .get(crate::reason::REASON_KEY)
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("");
+                        tracing::warn!(method, code, reason, ms = format!("{ms:.1}"), msg, "rpc error");
                     }
                 }
                 Err(_) => {
