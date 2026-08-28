@@ -667,3 +667,35 @@ async fn suggestion_roundtrip_and_contributors() {
     assert_eq!(contribs[1].handle, "helper");
     assert_eq!(contribs[1].accepted, 1);
 }
+
+/// Отказ на РОЖДЕНИИ списка обязан нести причину трейлером, как отказ на правке.
+///
+/// Замер 27.08.2026 (вертикаль «собрать список»): занятый slug приходил как
+/// `AlreadyExists("already exists")` вообще без трейлеров, тогда как правка на чужой
+/// версии на том же стенде отдавала `Aborted` + `STALE` и человеческий текст «list moved
+/// on: it is at v1, the edit is based on v999». Клиент читает причину, а не текст, —
+/// значит на пути создания читать было нечего, и одна лишь обёртка на стороне фронта
+/// делу бы не помогла.
+///
+/// Проверяется трейлер, а не код gRPC: код `AlreadyExists` был и раньше, и тест на нём
+/// прошёл бы, ничего не проверив.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn create_conflict_carries_reason_in_the_trailer() {
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "alice").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+
+    write.create(Request::new(create_req(&owner.to_string(), "taken"))).await.expect("первый проходит");
+    let err = write
+        .create(Request::new(create_req(&owner.to_string(), "taken")))
+        .await
+        .expect_err("второй с тем же slug обязан упасть");
+
+    assert_eq!(err.code(), tonic::Code::AlreadyExists, "код остаётся прежним");
+    assert_eq!(
+        err.metadata().get(setfork_core::reason::REASON_KEY).and_then(|v| v.to_str().ok()),
+        Some("EXISTS"),
+        "причина не доехала трейлером — клиент снова получит отказ без объяснения"
+    );
+}
