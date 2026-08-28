@@ -281,3 +281,42 @@ pub async fn seed_user(pool: &PgPool, handle: &str) -> Uuid {
         .await
         .expect("seed user")
 }
+
+/// Приёмник журнала: собирает строки в память, чтобы тест мог их прочесть.
+///
+/// Вынесен сюда после второго потребителя — копии разошлись бы, как уже разошлись две
+/// копии `git_data_dir()` (см. `own_git_data_dir`). Подписчик глобальный и ставится один
+/// раз на процесс, поэтому в одном тестовом бинаре им пользуется ОДИН тест; второму нужен
+/// свой файл.
+#[derive(Clone)]
+pub struct LogSink(pub std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogSink {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("замок журнала").extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogSink {
+    type Writer = LogSink;
+    fn make_writer(&'a self) -> LogSink {
+        self.clone()
+    }
+}
+
+impl LogSink {
+    /// Ставит глобального подписчика и возвращает приёмник. Один раз на тестовый бинарь.
+    pub fn install(level: tracing::Level) -> LogSink {
+        let sink = LogSink(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
+        tracing_subscriber::fmt().with_writer(sink.clone()).with_max_level(level).with_ansi(false).init();
+        sink
+    }
+
+    pub fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("замок журнала").clone()).to_string()
+    }
+}
