@@ -272,13 +272,36 @@ pub struct ListWriteSvc {
 
 // NewStep → db::StepRow: семантика TS-адаптера как есть — LocaleText без trim
 // и фильтрации, imageRef → image_key, пустой level = required.
+/// Идентичность блока из запроса. Пустая строка — законное «идентичность неизвестна»
+/// (так записано в контракте). Непустое НЕГОДНОЕ значение — другое дело: вызывающий
+/// идентичность прислал, а мы её выбрасываем, и дифф после этого читает переименование
+/// как «удалён + добавлен». Молчать об этом нельзя — но и отказывать нельзя, потому что
+/// прежнее поведение принимало такой запрос, и ужесточение контракта сломало бы
+/// вызывающих (тем же уроком, что записан в `ensure_repo_by_id` про пустую историю).
+///
+/// Поэтому: поведение прежнее, но след в журнале есть. Если строка появится — значит
+/// кто-то шлёт мусор, и это видно, а не теряется молча.
+fn block_id_of(s: &NewStep) -> Option<uuid::Uuid> {
+    match uuid::Uuid::parse_str(&s.block_id) {
+        Ok(id) => Some(id),
+        Err(_) if s.block_id.is_empty() => None,
+        Err(_) => {
+            tracing::warn!(
+                len = s.block_id.len(),
+                "block_id is not a uuid - identity dropped, diff will fall back to title matching"
+            );
+            None
+        }
+    }
+}
+
 fn step_row(s: &NewStep) -> db::StepRow {
     // Блочная модель: правила нормализации type/content — в blocks (одно место).
     db::StepRow {
         block_type: storage_type(&s.r#type),
         content: content_value(&s.r#type, &s.content_json),
         // Идентичность блока сквозь версии; '' или мусор → None (фолбэк диффа).
-        block_id: uuid::Uuid::parse_str(&s.block_id).ok(),
+        block_id: block_id_of(s),
         title: loc_json(&s.title),
         desc: loc_json(&s.desc),
         command: s.command.clone(),

@@ -13,29 +13,6 @@ use setfork_core::pb_domain::list_write_client::ListWriteClient;
 use setfork_core::pb_domain::list_write_server::ListWriteServer;
 use setfork_core::pb_domain::{AddVersionRequest, CreateListRequest, LocaleText};
 use setfork_core::services::list::ListWriteSvc;
-use std::io::Write;
-use std::sync::{Arc, Mutex};
-
-/// Приёмник журнала: собирает строки в память, чтобы тест мог их прочесть.
-#[derive(Clone)]
-struct Sink(Arc<Mutex<Vec<u8>>>);
-
-impl Write for Sink {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().expect("замок журнала").extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Sink {
-    type Writer = Sink;
-    fn make_writer(&'a self) -> Sink {
-        self.clone()
-    }
-}
 
 fn req(owner: &str, slug: &str) -> CreateListRequest {
     CreateListRequest {
@@ -58,12 +35,7 @@ fn req(owner: &str, slug: &str) -> CreateListRequest {
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
 async fn rpc_error_line_names_the_reason() {
-    let log = Arc::new(Mutex::new(Vec::new()));
-    tracing_subscriber::fmt()
-        .with_writer(Sink(log.clone()))
-        .with_max_level(tracing::Level::WARN)
-        .with_ansi(false)
-        .init();
+    let log = support::LogSink::install(tracing::Level::WARN);
 
     let _gd = support::own_git_data_dir("log-reason").await;
     let pool = support::pool_with_schema().await;
@@ -129,12 +101,12 @@ async fn rpc_error_line_names_the_reason() {
 
     // Даём слою дописать строку: она пишется после того, как ответ ушёл клиенту.
     for _ in 0..50 {
-        if String::from_utf8_lossy(&log.lock().expect("замок").clone()).contains("rpc error") {
+        if log.text().contains("rpc error") {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    let text = String::from_utf8_lossy(&log.lock().expect("замок").clone()).to_string();
+    let text = log.text();
 
     assert!(text.contains("rpc error"), "строки отказа в журнале нет вовсе:\n{text}");
     assert!(
