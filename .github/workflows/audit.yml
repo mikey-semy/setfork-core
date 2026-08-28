@@ -81,13 +81,54 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # ⚠️ Раннер СВОЙ и рабочую копию переиспользует, поэтому в `.git` остаются рефы
+      # чужих веток, а `docker cp .` заносит копию ЦЕЛИКОМ. gitleaks обходит ВСЕ рефы —
+      # и предложение краснеет находкой в коммите, которого в нём нет.
+      #
+      # Замер 28.08.2026: в master 166 коммитов, скан обошёл 195. Двадцать девять чужих.
+      # Нашла сессия фронта у себя (fe), здесь подтверждено числами, а не по аналогии.
+      #
+      # Поэтому на предложении сканируется ДИАПАЗОН `база..HEAD`. На пуше в master и по
+      # расписанию базы нет — диапазон пуст, скан идёт целиком, как и был.
+      #
+      # Не удалось достать базу — НЕ СУЖАЕМ: лишняя работа безопаснее пропущенного
+      # секрета. Гейт обязан ошибаться в сторону «просканировать больше».
+      - name: Диапазон коммитов для скана
+        id: range
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "${BASE:-}" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "opts=--log-opts=$BASE..HEAD" >> "$GITHUB_OUTPUT"
+            echo "диапазон: $BASE..HEAD ($(git rev-list --count "$BASE..HEAD") коммитов)"
+          else
+            echo "opts=" >> "$GITHUB_OUTPUT"
+            echo "диапазона нет — скан целиком (пуш в master, расписание либо база недоступна)"
+          fi
+
       - name: gitleaks (secret scan)
+        env:
+          LOG_OPTS: ${{ steps.range.outputs.opts }}
         run: |
           docker rm -f "gl-${GITHUB_RUN_ID}" >/dev/null 2>&1 || true
+          # Отчёт JSON — чтобы красный НАЗЫВАЛ МЕСТО. Без него gitleaks печатает только
+          # «leaks found: 1», и адрес приходится добывать клонированием и повтором скана
+          # у себя. Значение остаётся скрытым: `--redact` глушит его и в отчёте.
           docker create --name "gl-${GITHUB_RUN_ID}" zricethezav/gitleaks:latest \
-            detect --source=/repo --redact --exit-code 1
+            detect --source=/repo --redact --exit-code 1 \
+            --report-format=json --report-path=/tmp/gl.json $LOG_OPTS
           docker cp . "gl-${GITHUB_RUN_ID}:/repo"
-          docker start -a "gl-${GITHUB_RUN_ID}"
+          # `if !` намеренно вместо `&& exit`: шаг идёт под `set -e`, и условие if —
+          # единственная форма, где неуспех гарантированно НЕ обрывает шаг досрочно.
+          if ! docker start -a "gl-${GITHUB_RUN_ID}"; then
+            echo "::error::gitleaks нашёл секреты — отчёт ниже (значения скрыты --redact)"
+            # Отчёт печатается целиком, без разбора: у JSON внутри YAML внутри shell
+            # слишком много слоёв кавычек, и парсер здесь стал бы вторым источником
+            # отказов. Полный отчёт даёт правило, файл, строку и коммит.
+            docker cp "gl-${GITHUB_RUN_ID}:/tmp/gl.json" /tmp/gl.json 2>/dev/null || true
+            if [ -s /tmp/gl.json ]; then cat /tmp/gl.json; else echo "  (отчёт забрать не удалось — смотри вывод выше)"; fi
+            exit 1
+          fi
       - name: cleanup
         if: always()
         run: docker rm -f "gl-${GITHUB_RUN_ID}" >/dev/null 2>&1 || true
