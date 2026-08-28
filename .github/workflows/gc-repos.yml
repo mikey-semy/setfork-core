@@ -1,0 +1,69 @@
+# Уборка репозиториев удалённых списков.
+#
+# Зачем расписание. Удаление списка идёт МИМО ядра — прямо в Postgres, ни вызова, ни
+# отметки в git (разбор: setfork-hq/reviews/vertical/2026-08-27-assemble-list-ledger.md,
+# находка V4). Репозиторий остаётся на томе с полным содержимым: замер 27.08.2026 —
+# 6 каталогов, ~1,3 МБ, старшему 37 дней. Уборка есть (`gc-repos`), но её никто не
+# запускал, потому что запускать было некому.
+#
+# ⚠️ ПО УМОЛЧАНИЮ НИЧЕГО НЕ УДАЛЯЕТСЯ. Задача считает и показывает; снос включается
+# переменной репозитория GC_REPOS_APPLY=1. Так сделано намеренно: автоматический снос
+# данных на проде — решение владельца, а не следствие правки в воркфлоу. Пока
+# переменная не выставлена, польза задачи в том, что рост ПЕРЕСТАЁТ быть невидимым.
+#
+# Когда владелец включит снос, окно «сколько живёт содержимое удалённого списка»
+# станет измеримым — сутки вместо «когда-нибудь». Это условие, при котором фронт
+# может обещать человеку срок: сейчас в окне удаления написано «стирается уборкой»
+# ровно потому, что срока нет.
+name: gc-repos
+
+on:
+  schedule:
+    # Раз в сутки ночью по Киеву: том трогается в самое тихое время, а суточный шаг
+    # даёт тот срок, который фронт сможет назвать человеку в окне удаления.
+    - cron: '17 1 * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Снести найденное (иначе только показать)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  gc:
+    # Ветка обязательна: расписание запускается только от master, а ручной запуск с
+    # произвольной ветки не должен трогать прод (та же защита, что у выкатки).
+    if: github.ref == 'refs/heads/master'
+    runs-on: [self-hosted, setfork-core]
+    env:
+      DEPLOY: root@159.195.151.41
+    steps:
+      - name: Ключ (ro-mount раннера)
+        run: |
+          test -f /ssh/setfork || { echo "::error::нет /ssh/setfork — подними раннер из setfork-ci-runner/docker-compose.yml"; exit 1; }
+          command -v ssh >/dev/null || (apt-get update -qq && apt-get install -y -qq openssh-client)
+          install -m 600 /ssh/setfork /tmp/gc_key
+
+      - name: Посчитать и, если разрешено, убрать
+        env:
+          # Ручной запуск может попросить снос явно; расписание — только через переменную.
+          APPLY: ${{ inputs.apply && '1' || vars.GC_REPOS_APPLY }}
+        run: |
+          SSH="ssh -i /tmp/gc_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new $DEPLOY"
+          if [ "${APPLY:-}" = "1" ]; then
+            echo "режим: СНОС (GC_REPOS_APPLY=1 или ручной запуск с apply)"
+            ARGS="--apply"
+          else
+            echo "режим: только показать (снос выключен; включается переменной GC_REPOS_APPLY=1)"
+            ARGS=""
+          fi
+          # Команда сама fail-closed: пустая выборка списков = «не та база», и она
+          # отказывается считать весь том осиротевшим.
+          $SSH "docker exec setfork-core /usr/local/bin/setfork-core gc-repos $ARGS" | tee /tmp/gc.out
+          echo "### Уборка репозиториев" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -20 /tmp/gc.out >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
