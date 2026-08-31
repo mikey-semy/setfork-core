@@ -102,6 +102,8 @@ impl ListRead for ListReadSvc {
         .fetch_all(&self.pool)
         .await
         .map_err(db_status)?;
+        // Пустая история — в git не ходим вовсе: делать нечего, а том может быть недоступен.
+        let shas = if rows.is_empty() { std::collections::HashMap::new() } else { version_shas(id).await };
         let versions = rows
             .iter()
             .map(|r| Version {
@@ -109,7 +111,7 @@ impl ListRead for ListReadSvc {
                 list_id: r.get::<Uuid, _>("template_id").to_string(),
                 version: r.get("version"),
                 note: r.get("note"),
-                commit_sha: String::new(), // TS: всегда null
+                commit_sha: shas.get(&r.get::<i32, _>("version")).cloned().unwrap_or_default(),
                 created_at_ms: r.get("created_at_ms"),
                 author_id: r.get::<Option<String>, _>("author_id").unwrap_or_default(),
             })
@@ -137,12 +139,13 @@ impl ListRead for ListReadSvc {
             return Ok(Response::new(GetVersionResponse { found: false, version: None, steps: vec![] }));
         };
         let vid: Uuid = v.get("id");
+        let sha = version_sha_one(id, v.get::<i32, _>("version")).await;
         let ver = Version {
             id: vid.to_string(),
             list_id: v.get::<Uuid, _>("template_id").to_string(),
             version: v.get("version"),
             note: v.get("note"),
-            commit_sha: String::new(),
+            commit_sha: sha,
             created_at_ms: v.get("created_at_ms"),
             author_id: v.get::<Option<String>, _>("author_id").unwrap_or_default(),
         };
@@ -293,6 +296,71 @@ fn block_id_of(s: &NewStep) -> Option<uuid::Uuid> {
             None
         }
     }
+}
+
+/// SHA версий из ТЕГОВ репозитория: `refs/tags/v<N>` → sha коммита.
+///
+/// Источник — git, а не колонка в Postgres, и это не вкус: по ADR-0014 канон живёт в git,
+/// Postgres — read-model. Колонка дублировала бы канон в проекции, и её пришлось бы
+/// поддерживать в согласии с ним. Тег версии И ЕСТЬ её байтовая идентичность — ровно та,
+/// ради которой поле заведено в контракте.
+///
+/// ⚠️ Репозиторий здесь НЕ материализуется. Список, которого ещё не касались по git,
+/// получает пустой SHA — это видимое лицо находки V1 («рождение списка канона не
+/// создаёт», реестр вертикали 27.08: 58 списков из 659, все версия 1), а не поломка
+/// чтения. Материализация по требованию — изменение поведения и отдельное решение
+/// (T1.3b), а чтение версий не должно менять состояние тома.
+///
+/// Сбой git тоже даёт пустоту, а не отказ: витрина версий обязана открываться, даже если
+/// том недоступен. Пустой SHA у вызывающего значит «неизвестен», и показывать его как
+/// «версии нет» нельзя — тот же класс, что `new_version = 0` у слияния.
+/// Путь репозитория, если том вообще задан.
+///
+/// ⚠️ `repo::repo_path` внутри делает `expect` на `GIT_DATA_DIR`. Команды golden-CLI
+/// (`cli::run` в `main.rs`) исполняются ДО `require_git_data_dir()` и по замыслу работают
+/// без тома — материализуют во временные каталоги. Значит зов `repo_path` отсюда уронил бы
+/// `domain-read` паникой вместо вывода JSON. Проверка переменной раньше пути — не
+/// перестраховка, а условие, при котором обещание «сбой git даёт пустоту, а не отказ»
+/// вообще выполняется: паника случилась бы ДО `spawn_blocking` и никаким `unwrap_or_default`
+/// не ловилась.
+fn bare_if_volume_set(id: Uuid) -> Option<std::path::PathBuf> {
+    std::env::var("GIT_DATA_DIR").ok()?;
+    let bare = crate::git::repo::repo_path(id);
+    bare.exists().then_some(bare)
+}
+
+async fn version_shas(id: Uuid) -> std::collections::HashMap<i32, String> {
+    let Some(bare) = bare_if_volume_set(id) else { return std::collections::HashMap::new() };
+    tokio::task::spawn_blocking(move || {
+        let mut out = std::collections::HashMap::new();
+        let Ok(repo) = git2::Repository::open_bare(&bare) else { return out };
+        let Ok(tags) = repo.references_glob("refs/tags/v*") else { return out };
+        for r in tags.flatten() {
+            let Ok(name) = r.shorthand() else { continue };
+            let Some(n) = crate::git::bundle::version_of_tag(name) else { continue };
+            // Тег может быть аннотированным — тогда нужен коммит, на который он смотрит.
+            if let Ok(commit) = r.peel_to_commit() {
+                out.insert(n, commit.id().to_string());
+            }
+        }
+        out
+    })
+    .await
+    .unwrap_or_default()
+}
+
+/// SHA ОДНОЙ версии: прямой поиск рефа вместо обхода всех тегов. Тем же приёмом, что
+/// `git::version` и `git_core` — у списка с сотней версий перечисление стоило бы сотни
+/// поисков объектов ради одного ответа.
+async fn version_sha_one(id: Uuid, version: i32) -> String {
+    let Some(bare) = bare_if_volume_set(id) else { return String::new() };
+    tokio::task::spawn_blocking(move || {
+        let Ok(repo) = git2::Repository::open_bare(&bare) else { return String::new() };
+        let Ok(r) = repo.find_reference(&format!("refs/tags/v{version}")) else { return String::new() };
+        r.peel_to_commit().map(|c| c.id().to_string()).unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn step_row(s: &NewStep) -> db::StepRow {
