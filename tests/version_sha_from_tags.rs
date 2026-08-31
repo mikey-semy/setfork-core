@@ -126,3 +126,135 @@ async fn version_sha_comes_from_the_tag_and_matches_the_write() {
         "get_version и list_versions обязаны называть один SHA"
     );
 }
+
+/// Разбор имени тега не должен принимать `vv2` за версию 2.
+///
+/// `is_version_tag` (`git_core/names.rs`) резервирует только одиночное `v` + цифры, значит
+/// `vv2` — законное имя релиза, оно ложится в тот же репозиторий и попадает под глоб
+/// `refs/tags/v*`. Прежний разбор снимал ВСЕ ведущие `v` и получал версию 2 — столкновение
+/// с настоящим тегом, победитель по порядку обхода рефов. Показанная «байтовая
+/// идентичность» указывала бы на чужой коммит и менялась от запроса к запросу.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn a_release_tag_named_vv2_does_not_hijack_version_two() {
+    let dir = support::own_git_data_dir("vv2").await;
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "bob").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+    let read = ListReadSvc { pool: pool.clone() };
+
+    let created = write
+        .create(Request::new(CreateListRequest {
+            owner_id: owner.to_string(),
+            slug: "vv-collision".into(),
+            title: lt("T"),
+            desc: lt("d"),
+            tags: vec![],
+            ordered: true,
+            visibility: String::new(),
+            status: String::new(),
+            origin: String::new(),
+            forked_from_id: String::new(),
+            moderation: String::new(),
+            note: "v1".into(),
+            steps: vec![step("Install")],
+        }))
+        .await
+        .expect("create")
+        .into_inner();
+    let written = write
+        .add_version(Request::new(AddVersionRequest {
+            list_id: created.id.clone(),
+            note: "v2".into(),
+            steps: vec![step("Configure")],
+            author_id: owner.to_string(),
+            expected_version: None,
+            meta: None,
+        }))
+        .await
+        .expect("add_version")
+        .into_inner();
+
+    // Релизный тег `vv2` на ПЕРВОМ коммите — как если бы человек назвал релиз так.
+    let list_id = uuid::Uuid::parse_str(&created.id).expect("uuid");
+    let bare = dir.path.join(format!("{list_id}.git"));
+    {
+        let repo = git2::Repository::open_bare(&bare).expect("open bare");
+        let v1 = repo.refname_to_id("refs/tags/v1").expect("тег v1 есть");
+        let obj = repo.find_object(v1, None).expect("object");
+        repo.tag_lightweight("vv2", &obj, false).expect("релизный тег vv2");
+    }
+
+    let after = read
+        .list_versions(Request::new(ListId { id: created.id.clone() }))
+        .await
+        .expect("list_versions")
+        .into_inner();
+    let v2 = after.versions.iter().find(|v| v.version == 2).expect("версия 2 есть");
+    assert_eq!(
+        v2.commit_sha, written.commit_sha,
+        "тег vv2 подменил SHA версии 2 — разбор имени снимает лишние 'v'"
+    );
+
+    let one = read
+        .get_version(Request::new(GetVersionRequest { list_id: created.id.clone(), version: 2 }))
+        .await
+        .expect("get_version")
+        .into_inner();
+    assert_eq!(
+        one.version.expect("версия есть").commit_sha,
+        written.commit_sha,
+        "одиночное чтение тоже обязано брать ровно refs/tags/v2"
+    );
+}
+
+/// Без тома чтение версий отдаёт пустой SHA, а НЕ падает.
+///
+/// Команды golden-CLI исполняются до `require_git_data_dir()` и по замыслу работают без
+/// `GIT_DATA_DIR`. `repo_path` внутри делает `expect` — значит зов пути отсюда ронял бы
+/// `domain-read` паникой вместо вывода JSON, причём ДО `spawn_blocking`, то есть никакой
+/// `unwrap_or_default` этого не поймал бы.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn reading_versions_without_a_volume_yields_empty_not_panic() {
+    // Замок тот же, что у own_git_data_dir: переменная принадлежит процессу, не тесту.
+    let _lock = support::GIT_DATA_DIR_LOCK.lock().await;
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "carol").await;
+    let write = ListWriteSvc { pool: pool.clone() };
+    let read = ListReadSvc { pool: pool.clone() };
+    let created = write
+        .create(Request::new(CreateListRequest {
+            owner_id: owner.to_string(),
+            slug: "no-volume".into(),
+            title: lt("T"),
+            desc: lt("d"),
+            tags: vec![],
+            ordered: true,
+            visibility: String::new(),
+            status: String::new(),
+            origin: String::new(),
+            forked_from_id: String::new(),
+            moderation: String::new(),
+            note: "v1".into(),
+            steps: vec![step("Install")],
+        }))
+        .await
+        .expect("create")
+        .into_inner();
+
+    let saved = std::env::var("GIT_DATA_DIR").ok();
+    // SAFETY: замок держится до конца теста — другой поток env сейчас не пишет.
+    unsafe { std::env::remove_var("GIT_DATA_DIR") };
+    let listed = read.list_versions(Request::new(ListId { id: created.id.clone() })).await;
+    let single =
+        read.get_version(Request::new(GetVersionRequest { list_id: created.id.clone(), version: 1 })).await;
+    if let Some(v) = saved {
+        unsafe { std::env::set_var("GIT_DATA_DIR", v) };
+    }
+
+    let listed = listed.expect("чтение версий без тома обязано ОТВЕТИТЬ, а не упасть").into_inner();
+    assert!(listed.versions[0].commit_sha.is_empty(), "без тома SHA неизвестен");
+    let single = single.expect("одиночное чтение без тома тоже обязано ответить").into_inner();
+    assert!(single.version.expect("версия есть").commit_sha.is_empty(), "без тома SHA неизвестен");
+}
