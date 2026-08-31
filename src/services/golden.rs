@@ -29,7 +29,18 @@ fn jnull(s: &str) -> serde_json::Value {
 fn jver(v: &Version) -> serde_json::Value {
     serde_json::json!({
         "id": v.id, "listId": v.list_id, "version": v.version, "note": v.note,
-        "commitSha": serde_json::Value::Null, "createdAtMs": v.created_at_ms,
+        // ⚠️ SHA гасится НАМЕРЕННО, а не забыт: с 31.08 ядро читает его из тегов канона
+        // (`list.rs::version_shas`), а у TS такого поля нет вовсе. Это инструмент СВЕРКИ
+        // двух реализаций — поле, которого одна сторона дать не может, нормализуется здесь
+        // так же, как `avatarRef` выше. Пробросишь `v.commit_sha` — сверка начнёт краснеть
+        // на каждом списке, и покажет она не расхождение, а разную зрелость сторон.
+        //
+        // ⚠️ И обратное, ради чего эта строка написана: из-за нормализации `domain-read`
+        // НЕ ГОДИТСЯ как инструмент проверки самого SHA — он тут всегда null. 31.08 на этом
+        // едва не закрылась ложная приёмка «SHA пустой на проде». Смотреть SHA надо там,
+        // где его отдаёт RPC, а не здесь.
+        "commitSha": serde_json::Value::Null,
+        "createdAtMs": v.created_at_ms,
     })
 }
 
