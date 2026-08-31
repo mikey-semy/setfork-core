@@ -329,15 +329,6 @@ fn bare_if_volume_set(id: Uuid) -> Option<std::path::PathBuf> {
     bare.exists().then_some(bare)
 }
 
-/// Номер версии из имени тега. `strip_prefix`, а НЕ `trim_start_matches`: второй снимает
-/// все ведущие `v` подряд, и тогда релизный тег `vv2` (законный — `is_version_tag` его
-/// версией не считает) разобрался бы как версия 2 и столкнулся с настоящим `v2`. Победитель
-/// зависел бы от порядка обхода рефов, то есть показанная «байтовая идентичность» указывала
-/// бы на чужой коммит и менялась от запроса к запросу.
-fn version_of_tag(name: &str) -> Option<i32> {
-    name.strip_prefix('v')?.parse::<i32>().ok()
-}
-
 async fn version_shas(id: Uuid) -> std::collections::HashMap<i32, String> {
     let Some(bare) = bare_if_volume_set(id) else { return std::collections::HashMap::new() };
     tokio::task::spawn_blocking(move || {
@@ -346,7 +337,7 @@ async fn version_shas(id: Uuid) -> std::collections::HashMap<i32, String> {
         let Ok(tags) = repo.references_glob("refs/tags/v*") else { return out };
         for r in tags.flatten() {
             let Ok(name) = r.shorthand() else { continue };
-            let Some(n) = version_of_tag(name) else { continue };
+            let Some(n) = crate::git::bundle::version_of_tag(name) else { continue };
             // Тег может быть аннотированным — тогда нужен коммит, на который он смотрит.
             if let Ok(commit) = r.peel_to_commit() {
                 out.insert(n, commit.id().to_string());

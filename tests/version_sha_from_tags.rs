@@ -127,7 +127,7 @@ async fn version_sha_comes_from_the_tag_and_matches_the_write() {
     );
 }
 
-/// Разбор имени тега не должен принимать `vv2` за версию 2.
+/// Разбор имени тега не должен принимать `vv2` и `v+2` за версию 2.
 ///
 /// `is_version_tag` (`git_core/names.rs`) резервирует только одиночное `v` + цифры, значит
 /// `vv2` — законное имя релиза, оно ложится в тот же репозиторий и попадает под глоб
@@ -136,7 +136,7 @@ async fn version_sha_comes_from_the_tag_and_matches_the_write() {
 /// идентичность» указывала бы на чужой коммит и менялась от запроса к запросу.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn a_release_tag_named_vv2_does_not_hijack_version_two() {
+async fn release_tags_shaped_like_versions_do_not_hijack_version_two() {
     let dir = support::own_git_data_dir("vv2").await;
     let pool = support::pool_with_schema().await;
     let owner = support::seed_user(&pool, "bob").await;
@@ -183,6 +183,10 @@ async fn a_release_tag_named_vv2_does_not_hijack_version_two() {
         let v1 = repo.refname_to_id("refs/tags/v1").expect("тег v1 есть");
         let obj = repo.find_object(v1, None).expect("object");
         repo.tag_lightweight("vv2", &obj, false).expect("релизный тег vv2");
+        // Второе имя той же семьи: `parse::<i32>()` принимает ведущий плюс, а
+        // `is_version_tag("v+2")` ложно (плюс не цифра) — значит `v+2` законный релиз.
+        // Голый parse разобрал бы его как версию 2 и столкнул с настоящим тегом.
+        repo.tag_lightweight("v+2", &obj, false).expect("релизный тег v+2");
     }
 
     let after = read
@@ -193,7 +197,7 @@ async fn a_release_tag_named_vv2_does_not_hijack_version_two() {
     let v2 = after.versions.iter().find(|v| v.version == 2).expect("версия 2 есть");
     assert_eq!(
         v2.commit_sha, written.commit_sha,
-        "тег vv2 подменил SHA версии 2 — разбор имени снимает лишние 'v'"
+        "релизный тег (vv2 или v+2) подменил SHA версии 2 — разбор шире правила резервирования"
     );
 
     let one = read

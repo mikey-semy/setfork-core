@@ -445,6 +445,29 @@ pub fn append_missing_versions(bare: &Path, versions: &[VersionData]) -> io::Res
 }
 
 /// Максимальный номер версии среди тегов v* (git2).
+/// Номер версии из имени тега — ЕДИНСТВЕННЫЙ разбор в проекте.
+///
+/// Строго зеркалит правило резервирования (`git_core::names::is_version_tag`, которое теперь
+/// через него и выражено): одиночное `v` + ТОЛЬКО десятичные цифры. Иначе разбор шире
+/// резервирования, и в щель лезут имена, которые система считает законными релизами:
+///   • `vv2` — `trim_start_matches` снимал все ведущие `v`;
+///   • `v+2` — `parse::<i32>()` принимает ведущий плюс.
+/// Оба разбирались как версия 2 и сталкивались с настоящим тегом `v2`.
+///
+/// Цена щели разная в разных местах, и худшая — здесь: релиз `v+20` на списке с восемью
+/// версиями поднял бы максимум до 20, и новые версии переставали бы доезжать в git МОЛЧА
+/// (ровно та беда, от которой заводилось резервирование). На витрине версий та же щель
+/// давала бы SHA, меняющийся от запроса к запросу.
+///
+/// Копий разбора было три; сведены сюда после второго повтора одного корня.
+pub fn version_of_tag(name: &str) -> Option<i32> {
+    let rest = name.strip_prefix('v')?;
+    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse::<i32>().ok()
+}
+
 pub fn max_tag_version(bare: &Path) -> i32 {
     match Repository::open_bare(bare) {
         Ok(r) => max_tag_in(&r),
@@ -474,9 +497,7 @@ fn max_tag_in(repo: &Repository) -> i32 {
     let mut max = 0i32;
     // git2 0.21: iter() отдаёт Result (не-UTF8 имена больше не глотаются молча).
     for name in names.iter().flatten().flatten() {
-        if let Some(num) = name.strip_prefix('v')
-            && let Ok(n) = num.parse::<i32>()
-        {
+        if let Some(n) = version_of_tag(name) {
             max = max.max(n);
         }
     }
@@ -499,4 +520,34 @@ pub fn build_bundle(versions: &[VersionData]) -> io::Result<Vec<u8>> {
     let _ = fs::remove_dir_all(&work);
     let _ = fs::remove_file(&bundle_path);
     result
+}
+
+#[cfg(test)]
+mod version_tag_tests {
+    use super::version_of_tag;
+
+    /// Разбор обязан быть УЖЕ или РАВЕН правилу резервирования, никогда шире.
+    ///
+    /// Проверка здесь, а не только в интеграционном тесте, потому что там исход зависит от
+    /// порядка обхода рефов: столкнувшись, настоящий тег и подложный выигрывают через раз, и
+    /// зелёный прогон ничего не доказывает. Мутация это и показала — снятие проверки «только
+    /// цифры» интеграционный тест НЕ уронило. Здесь исход не зависит ни от чего.
+    #[test]
+    fn only_v_plus_digits_is_a_version() {
+        assert_eq!(version_of_tag("v1"), Some(1));
+        assert_eq!(version_of_tag("v42"), Some(42));
+        // Зарезервировано правилом, разбирается — согласовано.
+        assert_eq!(version_of_tag("v02"), Some(2));
+
+        // Имена, которые система считает ЗАКОННЫМИ релизами: разбор обязан их отвергнуть,
+        // иначе они столкнутся с настоящим тегом версии.
+        assert_eq!(version_of_tag("vv2"), None, "лишнее ведущее 'v' не версия");
+        assert_eq!(version_of_tag("v+2"), None, "ведущий плюс не версия (parse его принимает)");
+        assert_eq!(version_of_tag("v-5"), None, "минус не версия");
+        assert_eq!(version_of_tag("v2.1"), None, "составное имя не версия");
+        assert_eq!(version_of_tag("v2-beta"), None, "суффикс не версия");
+        assert_eq!(version_of_tag("v"), None, "пустой номер не версия");
+        assert_eq!(version_of_tag("release-2"), None, "чужой префикс не версия");
+        assert_eq!(version_of_tag("v 2"), None, "пробел не версия");
+    }
 }

@@ -55,11 +55,28 @@ pub(super) fn valid_tag(name: &str) -> bool {
 /// Дробные и составные имена («v1.0», «v2-beta») версиями не считаются и остаются
 /// доступны человеку — под запрет попадает ровно то, что парсит max_tag_version.
 pub(super) fn is_version_tag(name: &str) -> bool {
-    name.strip_prefix('v').is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+    // Тем же кодом, что и разбор номера: правило резервирования и разбор обязаны совпадать
+    // не «по смыслу», а буквально. Разошедшись, они дают щель, в которую лезет имя, законное
+    // как релиз и разбираемое как версия (`vv2`, `v+2`) — см. bundle::version_of_tag.
+    crate::git::bundle::version_of_tag(name).is_some()
 }
 
 #[cfg(test)]
 mod branch_name_tests {
+    /// Правило резервирования выражено ТЕМ ЖЕ кодом, что разбор номера. Тест сторожит, что
+    /// связь не разорвали правкой: разойдясь, они дают щель, в которую лезет имя, законное
+    /// как релиз и разбираемое как версия (`vv2`, `v+2`) — и SHA версии подменяется чужим.
+    #[test]
+    fn the_reservation_rule_and_the_parser_never_disagree() {
+        for name in ["v1", "v02", "vv2", "v+2", "v-5", "v2.1", "v2-beta", "v", "release-2", "v 2"] {
+            assert_eq!(
+                super::is_version_tag(name),
+                crate::git::bundle::version_of_tag(name).is_some(),
+                "правило резервирования и разбор разошлись на {name:?}"
+            );
+        }
+    }
+
     use super::{is_version_tag, valid_branch, valid_tag};
 
     /// Список — дословное зеркало проверок `badBranch` на фронте
