@@ -3,7 +3,13 @@ name = "setfork-core"
 version = "0.1.0"
 edition = "2024"
 description = "SetFork git-core service (Gitaly-style): serves proto/git.proto over gRPC/Connect."
-# Проприетарный код SetFork — не публикуется в crates.io (cargo-deny: private ignore).
+# Лицензия объявлена ПОЛЕМ, а не только файлом LICENSE: инструменты (cargo-deny,
+# аудит зависимостей, генераторы SBOM) читают метаданные, а не файл рядом. Поля не
+# было вовсе, хотя AGPL лежал в корне с самого начала — то есть машина считала пакет
+# без лицензии, а человек видел AGPL.
+license = "AGPL-3.0-only"
+# Не публикуется в crates.io: это сервис, а не библиотека (cargo-deny: private ignore).
+# Открытость исходников и публикация в реестр — разные вещи.
 publish = false
 
 [[bin]]
