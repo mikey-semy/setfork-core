@@ -363,9 +363,9 @@ jobs:
           docker save "$TAG" | $SSH docker load
           tar --exclude=.git -czf - . | $SSH "mkdir -p $APP_DIR && tar -xzf - -C $APP_DIR"
           $SSH "printf 'services:\n  core:\n    image: %s\n' '$TAG' > $APP_DIR/docker-compose.image.yml"
-          # Без --remove-orphans: на netcup проектом частично управляет Dokploy, и
+          # Без --remove-orphans: на netcup рядом живут ЧУЖИЕ проекты, и
           # «лишним» compose может счесть чужой контейнер (у фронта это уже учтено).
-          $SSH "cd $APP_DIR && docker compose -f docker-compose.dokploy.yml -f docker-compose.image.yml up -d --no-build"
+          $SSH "cd $APP_DIR && docker compose -f docker-compose.prod.yml -f docker-compose.image.yml up -d --no-build"
 
       # Ждём НАСТОЯЩЕЙ готовности, а не фиксированную паузу: у образа есть
       # HEALTHCHECK через grpc_health_probe, и до первой пробы (start-period 10 с)
