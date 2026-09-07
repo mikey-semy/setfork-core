@@ -162,8 +162,9 @@ source.
 
 ```sh
 cargo build
-bash scripts/itest-env.sh              # brings up Postgres, prints TEST_DATABASE_URL
+eval "$(bash scripts/itest-env.sh)"     # brings up Postgres, sets TEST_DATABASE_URL
 cargo test -- --include-ignored        # database tests are #[ignore] by default
+bash scripts/itest-env.sh --down       # tear it down
 ```
 
 ⚠️ A plain `cargo test` **passes while skipping every test that needs a database**. CI
