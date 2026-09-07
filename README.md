@@ -146,3 +146,34 @@ Push/merge принимаются, даже если проекция верси
 ```sh
 cargo run -- reproject <owner> <slug>
 ```
+
+---
+
+## For contributors (English)
+
+`setfork-core` is the Rust git service behind [SetFork](https://setfork.com): it serves
+heavy git operations and the domain read/write ports over gRPC. Contracts are in
+`proto/`; the application repository keeps byte-identical copies of them, and a gate
+checks that they have not drifted apart.
+
+Licensed under **AGPL-3.0-only** — see [LICENSE](LICENSE). Section 13 applies to network
+use: if you run a modified version as a service, its users must be able to obtain the
+source.
+
+```sh
+cargo build
+eval "$(bash scripts/itest-env.sh)"     # brings up Postgres, sets TEST_DATABASE_URL
+cargo test -- --include-ignored        # database tests are #[ignore] by default
+bash scripts/itest-env.sh --down       # tear it down
+```
+
+⚠️ A plain `cargo test` **passes while skipping every test that needs a database**. CI
+runs them; run them the same way before you push.
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — how to propose a change, the AI policy, DCO, and
+  the CLA that will be required for the first external pull request
+- [SECURITY.md](SECURITY.md) — how to report a vulnerability (not as a public issue)
+- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
+The project is maintained by one person and pull requests are reviewed about once a
+week. That is a promise of an answer, not of speed.
