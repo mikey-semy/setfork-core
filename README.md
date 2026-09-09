@@ -3,7 +3,7 @@
 Rust git-ядро SetFork (Gitaly-стиль): обслуживает тяжёлые git-операции и доменные
 read/write-порты для Next-BFF по gRPC. Контракты — `proto/git.proto` (GitCore) и
 `proto/domain_read.proto` (ListRead/ListWrite/CurationRead/CurationWrite/CollabWrite);
-это копии из `setfork-frontend`, держать синхронными (гейт — `scripts/check-proto-sync.sh`).
+это копии из `setfork-app`, держать синхронными (гейт — `scripts/check-proto-sync.sh`).
 
 ## Структура
 

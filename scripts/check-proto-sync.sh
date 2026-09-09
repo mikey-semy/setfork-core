@@ -8,13 +8,13 @@
 # Сравниваем с ЗАКОММИЧЕННЫМ ref'ом фронта (дефолт origin/master), а не с его
 # рабочей копией: рабочая копия бывает несвежей/грязной и давала ложные разъезды
 # (поймано 2026-07-20). Переопределения:
-#   SETFORK_FRONTEND_DIR — путь к клону фронта (дефолт ../setfork-frontend)
+#   SETFORK_FRONTEND_DIR — путь к клону фронта (дефолт ../setfork-app)
 #   SETFORK_FRONTEND_REF — ref для сверки (дефолт origin/master; для парных
 #                          веток укажи ветку фронта)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-FRONT="${SETFORK_FRONTEND_DIR:-../setfork-frontend}"
+FRONT="${SETFORK_FRONTEND_DIR:-../setfork-app}"
 REF="${SETFORK_FRONTEND_REF:-origin/master}"
 if [[ ! -d "$FRONT/.git" && ! -f "$FRONT/.git" ]]; then
   # ГРОМКО, а не молча. Раньше здесь стоял тихий «пропуск», и в GitHub-CI гейт не
@@ -24,7 +24,7 @@ if [[ ! -d "$FRONT/.git" && ! -f "$FRONT/.git" ]]; then
   # Кросс-репный чекаут требует токена с доступом на чтение обоих приватных репо;
   # пока его нет, в GitHub-CI гейт остаётся невыполнимым — и говорит об этом вслух.
   echo "::warning::proto-sync НЕ ВЫПОЛНЕН: клона фронта нет ($FRONT). Локально задай"
-  echo "::warning::SETFORK_FRONTEND_DIR; в GitHub-CI нужен токен на чтение setfork-frontend."
+  echo "::warning::SETFORK_FRONTEND_DIR; в GitHub-CI нужен токен на чтение setfork-app."
   echo "proto-sync: НЕ ВЫПОЛНЕН (нет клона фронта) — это не «ок», это отсутствие проверки"
   exit 0
 fi
