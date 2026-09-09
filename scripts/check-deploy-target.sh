@@ -22,7 +22,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-FRONT="${SETFORK_FRONTEND_DIR:-../setfork-frontend}"
+FRONT="${SETFORK_FRONTEND_DIR:-../setfork-app}"
 REF="${SETFORK_FRONTEND_REF:-origin/master}"
 
 # Адрес выкатки = значение `DEPLOY:` в любом воркфлоу. Берём уникальные.

@@ -76,12 +76,12 @@ jobs:
             echo "::warning::FRONTEND_RO_TOKEN не задан — кросс-репные гейты не выполнятся"
             exit 0
           fi
-          url="https://x-access-token:${FRONTEND_TOKEN}@github.com/mikey-semy/setfork-frontend.git"
-          if [ -d ../setfork-frontend/.git ]; then
-            git -C ../setfork-frontend fetch --quiet --depth 50 "$url" master:refs/remotes/origin/master \
+          url="https://x-access-token:${FRONTEND_TOKEN}@github.com/mikey-semy/setfork-app.git"
+          if [ -d ../setfork-app/.git ]; then
+            git -C ../setfork-app fetch --quiet --depth 50 "$url" master:refs/remotes/origin/master \
               || echo "::warning::fetch фронта не удался — гейты сверятся с УСТАРЕВШИМ клоном"
           else
-            git clone --quiet --depth 50 "$url" ../setfork-frontend \
+            git clone --quiet --depth 50 "$url" ../setfork-app \
               || echo "::warning::клон фронта не удался — кросс-репные гейты пропущены"
           fi
 
