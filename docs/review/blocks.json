@@ -1,0 +1,189 @@
+{
+ "review_id": "setfork-core-2026-09",
+ "created": "2026-09-21",
+ "note": "Ядро в десять раз меньше приложения, поэтому нарезка плоская: слои видны по каталогам. Цена ошибки здесь выше — у ядра нет второго рубежа, приложение его не проверяет.",
+ "exclusions": [
+  {
+   "pattern": "Cargo.lock",
+   "reason": "замок зависимостей: читается не построчно, за версиями следит audit"
+  },
+  {
+   "pattern": "tests/fixtures/**",
+   "reason": "эталоны, а не код: сверяются прогоном canon_roundtrip"
+  }
+ ],
+ "blocks": [
+  {
+   "id": "C1",
+   "slug": "git-receive",
+   "phase": 1,
+   "role": "reviewer",
+   "title": "Приём пака и запись версии",
+   "goal": "Найти места, где принятое по git содержимое становится версией не так, как обещано: вето обходится, запись частична, отказ не доезжает до клиента.",
+   "paths": [
+    "src/git/bundle.rs",
+    "src/git/magic.rs",
+    "src/git/mod.rs",
+    "src/git/repo.rs",
+    "src/git/smart_http.rs",
+    "src/git/update.rs",
+    "src/git/version.rs",
+    "src/git/write.rs",
+    "tests/content_push.rs",
+    "tests/gc_packs.rs",
+    "tests/hook_probe.rs",
+    "tests/lock_probe.rs",
+    "tests/main_ref_guard.rs",
+    "tests/squash_probe.rs",
+    "tests/tree_limits.rs",
+    "tests/update_branch_probe.rs",
+    "tests/write_gate.rs",
+    "tests/write_gate_guard.rs"
+   ],
+   "ref_paths": [
+    "src/gate.rs"
+   ]
+  },
+  {
+   "id": "C2",
+   "slug": "git-canon",
+   "phase": 1,
+   "role": "reviewer",
+   "title": "Проекция и канон",
+   "goal": "Найти расхождения между тем, что лежит в git, и тем, что ядро считает версией: потерянные поля, неоднозначная сериализация, несимметричный разбор.",
+   "paths": [
+    "src/blocks.rs",
+    "src/git/canon.rs",
+    "src/git/history.rs",
+    "src/git/messages.rs",
+    "src/git/project.rs",
+    "src/git/serialize.rs",
+    "tests/block_id_visibility.rs",
+    "tests/broken_json_probe.rs",
+    "tests/canon_data_roundtrip.rs",
+    "tests/canon_roundtrip.rs",
+    "tests/create_canon_gap.rs",
+    "tests/domain.rs",
+    "tests/f2a_schema_kind.rs",
+    "tests/fixtures",
+    "tests/golden.rs",
+    "tests/projection.rs",
+    "tests/roundtrip.rs",
+    "tests/version_sha_from_tags.rs",
+    "tests/web_version.rs"
+   ],
+   "ref_paths": [
+    "proto"
+   ]
+  },
+  {
+   "id": "C3",
+   "slug": "services",
+   "phase": 1,
+   "role": "reviewer",
+   "title": "Поверхность gRPC",
+   "goal": "Прочитать все точки входа сразу и найти то, чего нет ни в одной: общая проверка прав, единый отказ, согласованность с контрактом.",
+   "paths": [
+    "proto",
+    "src/pb.rs",
+    "src/pb_domain.rs",
+    "src/services",
+    "tests/contributor_namespace.rs",
+    "tests/issue_number_probe.rs",
+    "tests/merge_reason_wire.rs",
+    "tests/merge_state_probe.rs",
+    "tests/review_p1.rs",
+    "tests/star_count_probe.rs",
+    "tests/support"
+   ],
+   "ref_paths": [
+    "src/db"
+   ]
+  },
+  {
+   "id": "C4",
+   "slug": "gate-limits",
+   "phase": 1,
+   "role": "reviewer",
+   "title": "Ворота, лимиты и доверие",
+   "goal": "Найти места, где ядро доверяет приложению больше, чем следует, или отказывает не так, как обещает: обратный канал, лимиты, троттлинг, токен.",
+   "paths": [
+    "src/gate.rs",
+    "src/ratelimit.rs",
+    "src/reason.rs",
+    "src/throttle.rs",
+    "tests/log_carries_reason.rs",
+    "tests/operator_language.rs",
+    "tests/ratelimit_probe.rs"
+   ],
+   "ref_paths": []
+  },
+  {
+   "id": "C5",
+   "slug": "db",
+   "phase": 1,
+   "role": "reviewer",
+   "title": "Хранилище и схема",
+   "goal": "Найти рукописный SQL, расходящийся со схемой, и записи, теряющие поля или порядок.",
+   "paths": [
+    "src/db",
+    "schema"
+   ],
+   "ref_paths": [
+    "src/services"
+   ]
+  },
+  {
+   "id": "C6",
+   "slug": "entry",
+   "phase": 1,
+   "role": "reviewer",
+   "title": "Вход, конфигурация и наблюдаемость",
+   "goal": "Найти, что ядро скрывает о себе при запуске и в работе: непрочитанная настройка, проглоченная ошибка, молчащий отказ.",
+   "paths": [
+    "src/cli.rs",
+    "src/config.rs",
+    "src/git/mirror.rs",
+    "src/lib.rs",
+    "src/main.rs",
+    "src/telemetry.rs",
+    "tests/mirror.rs",
+    "tests/mirror_attempts.rs",
+    "tests/sync_heal_probe.rs"
+   ],
+   "ref_paths": []
+  },
+  {
+   "id": "C7",
+   "slug": "build",
+   "phase": 1,
+   "role": "reviewer",
+   "title": "Сборка, образ и выкатка",
+   "goal": "Найти расхождения между тем, что собирается, и тем, что едет на прод.",
+   "paths": [
+    ".dockerignore",
+    ".env.example",
+    ".gitattributes",
+    ".github",
+    ".gitignore",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "Cargo.lock",
+    "Cargo.toml",
+    "Dockerfile",
+    "LICENSE",
+    "LICENSE-NOTICE.md",
+    "README.md",
+    "SECURITY.md",
+    "build.rs",
+    "deny.toml",
+    "docker-compose.prod.yml",
+    "docker-compose.yml",
+    "docs",
+    "rustfmt.toml",
+    "scripts"
+   ],
+   "ref_paths": []
+  }
+ ]
+}
