@@ -10,8 +10,8 @@
 //! отключила бы заморозку, а её уже один раз обходили живьём (линза 02, F3).
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use setfork_core::gate::{ContentRefusal, DenyDetail, ensure_content_allowed_at, ensure_writable_at};
 use setfork_core::reason::REASON_KEY;
@@ -28,6 +28,10 @@ struct Stub {
     addr: String,
     stop: Arc<AtomicBool>,
     handle: Option<std::thread::JoinHandle<()>>,
+    /// Тела ВСЕХ пришедших запросов. Нужны там, где проверяется не ответ гейта,
+    /// а сам ВОПРОС: форму тела видит только приложение, и сверять её иначе как
+    /// по проводу значило бы сверять код с самим собой.
+    seen: Arc<Mutex<Vec<String>>>,
 }
 
 impl Stub {
@@ -42,18 +46,26 @@ impl Stub {
         Stub::start_inner(head, true)
     }
 
+    /// Тела пришедших запросов, по порядку.
+    fn asked(&self) -> Vec<String> {
+        self.seen.lock().expect("seen").clone()
+    }
+
     fn start_inner(reply: &'static str, stall: bool) -> Stub {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = format!("http://{}", listener.local_addr().expect("addr"));
         let stop = Arc::new(AtomicBool::new(false));
         let stop_t = stop.clone();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_t = seen.clone();
         let handle = std::thread::spawn(move || {
             for stream in listener.incoming() {
                 if stop_t.load(Ordering::Relaxed) {
                     return;
                 }
                 let Ok(mut s) = stream else { continue };
-                serve_one(&mut s, reply);
+                let body = serve_one(&mut s, reply);
+                seen_t.lock().expect("seen").push(body);
                 if stall {
                     // Держим соединение открытым дольше таймаута гейта: закрыть
                     // его значило бы проверить обрыв, а не залипание.
@@ -61,7 +73,7 @@ impl Stub {
                 }
             }
         });
-        Stub { addr, stop, handle: Some(handle) }
+        Stub { addr, stop, handle: Some(handle), seen }
     }
 }
 
@@ -76,7 +88,8 @@ impl Drop for Stub {
     }
 }
 
-fn serve_one(s: &mut TcpStream, reply: &str) {
+/// Отвечает и ВОЗВРАЩАЕТ тело запроса — по нему сверяется форма вопроса.
+fn serve_one(s: &mut TcpStream, reply: &str) -> String {
     // Дочитываем запрос до конца заголовков и тела (Content-Length), иначе
     // клиент увидит обрыв вместо ответа.
     let mut reader = BufReader::new(s.try_clone().expect("clone"));
@@ -84,7 +97,8 @@ fn serve_one(s: &mut TcpStream, reply: &str) {
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line).unwrap_or(0) == 0 {
-            return;
+            // Соединение оборвалось до конца заголовков: вопроса не было.
+            return String::new();
         }
         if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
             len = v.trim().parse().unwrap_or(0);
@@ -93,13 +107,14 @@ fn serve_one(s: &mut TcpStream, reply: &str) {
             break;
         }
     }
+    let mut body = vec![0u8; len];
     if len > 0 {
-        let mut body = vec![0u8; len];
         use std::io::Read;
         let _ = reader.read_exact(&mut body);
     }
     let _ = s.write_all(reply.as_bytes());
     let _ = s.flush();
+    String::from_utf8_lossy(&body).to_string()
 }
 
 fn http(body: &str) -> String {
@@ -307,4 +322,27 @@ async fn an_unreachable_app_stops_the_content_too() {
         ensure_content_allowed_at(&addr, "mike", "list", &[Some("rm -rf /".into())]).await,
         Err(ContentRefusal::Unavailable(_))
     ));
+}
+
+/// ОКНО ВЫКАТКИ, проверенное ПО ПРОВОДУ. Форму вопроса видит только приложение,
+/// и `ask_payload` сам по себе её не гарантирует: достаточно, чтобы вызывающий
+/// передал не тот аргумент. Обычное предусловие записи обязано спрашивать ровно
+/// тем же телом, что и до этой правки, — приложение отличает «ядро не
+/// спрашивало про содержимое» от «спросило про пустой список», и лишнее поле
+/// заставило бы его считать команды там, где их взять неоткуда.
+#[tokio::test]
+async fn the_write_precondition_asks_exactly_as_it_did_before() {
+    let stub = Stub::start(Box::leak(http(r#"{"allow":true}"#).into_boxed_str()));
+    ensure_writable_at(&stub.addr, "mike", "list").await.expect("allow");
+    assert_eq!(stub.asked(), vec![r#"{"owner":"mike","slug":"list"}"#.to_string()]);
+
+    let content = Stub::start(Box::leak(http(r#"{"allow":true}"#).into_boxed_str()));
+    ensure_content_allowed_at(&content.addr, "mike", "list", &[Some("make".into()), None])
+        .await
+        .expect("allow");
+    assert_eq!(
+        content.asked(),
+        vec![r#"{"owner":"mike","slug":"list","blocks":[{"command":"make"},{"command":null}]}"#.to_string()],
+        "вопрос о содержимом обязан нести блоки, и каждый на своём месте"
+    );
 }
