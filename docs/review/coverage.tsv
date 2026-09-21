@@ -23,6 +23,14 @@ build.rs	C7
 deny.toml	C7
 docker-compose.prod.yml	C7
 docker-compose.yml	C7
+docs/review/README.md	C7
+docs/review/blocks.json	C7
+docs/review/coverage.tsv	C7
+docs/review/findings.jsonl	C7
+docs/review/prompts/fix.md	C7
+docs/review/prompts/hunter.md	C7
+docs/review/prompts/verify.md	C7
+docs/review/state.json	C7
 proto/domain_read.proto	C3
 proto/git.proto	C3
 rustfmt.toml	C7
@@ -31,6 +39,7 @@ scripts/check-deploy-target.sh	C7
 scripts/check-proto-sync.sh	C7
 scripts/ci-local.sh	C7
 scripts/itest-env.sh	C7
+scripts/review/review.py	C7
 src/blocks.rs	C2
 src/cli.rs	C6
 src/config.rs	C6

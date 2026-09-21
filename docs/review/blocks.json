@@ -22,7 +22,6 @@
    "goal": "Найти места, где принятое по git содержимое становится версией не так, как обещано: вето обходится, запись частична, отказ не доезжает до клиента.",
    "paths": [
     "src/git/bundle.rs",
-    "src/git/lock.rs",
     "src/git/magic.rs",
     "src/git/mod.rs",
     "src/git/repo.rs",
@@ -35,7 +34,6 @@
     "tests/hook_probe.rs",
     "tests/lock_probe.rs",
     "tests/main_ref_guard.rs",
-    "tests/push_guard.rs",
     "tests/squash_probe.rs",
     "tests/tree_limits.rs",
     "tests/update_branch_probe.rs",
@@ -114,10 +112,8 @@
     "src/ratelimit.rs",
     "src/reason.rs",
     "src/throttle.rs",
-    "tests/gate.rs",
     "tests/log_carries_reason.rs",
     "tests/operator_language.rs",
-    "tests/ratelimit.rs",
     "tests/ratelimit_probe.rs"
    ],
    "ref_paths": []
@@ -180,7 +176,6 @@
     "README.md",
     "SECURITY.md",
     "build.rs",
-    "clippy.toml",
     "deny.toml",
     "docker-compose.prod.yml",
     "docker-compose.yml",
