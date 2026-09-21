@@ -305,6 +305,20 @@ pub struct ListParts {
     pub steps: Vec<ProjStep>,
 }
 
+/// Команды блоков В ПОРЯДКЕ ФАЙЛА — вход вопроса «безопасно ли это содержимое»
+/// (H15-002). `None` — list.json не разобрался: версии из него всё равно не
+/// выйдет (`project_pushed_commit` вернёт `Ok(None)`), спрашивать не о чем.
+///
+/// ⚠️ НИЧЕГО НЕ ФИЛЬТРУЕТ, в отличие от `parse_steps`. Приложение отвечает
+/// «шаг N» как индекс в присланном массиве плюс единица, а человек потом ищет
+/// этот шаг глазами в своём list.json. Выбрось отсюда хоть один элемент — и
+/// номер в отказе укажет не на тот шаг; отказ, указывающий не туда, хуже
+/// молчания.
+pub fn block_commands(raw: &[u8]) -> Option<Vec<Option<String>>> {
+    let parsed: RawList = serde_json::from_slice(raw).ok()?;
+    Some(parsed.steps.unwrap_or_default().into_iter().map(|s| s.command).collect())
+}
+
 /// None — значение не объект манифеста (массив, число, строка).
 pub fn parse_list_value(value: serde_json::Value) -> Option<ListParts> {
     let parsed: RawList = serde_json::from_value(value).ok()?;
@@ -561,5 +575,39 @@ mod tests {
     #[test]
     fn broken_canon_yields_no_readme() {
         assert_eq!(readme_from_canon(b"not json"), None);
+    }
+
+    // ── H15-002: команды для вопроса приложению ───────────────────────────────
+
+    /// ГЛАВНОЕ свойство — СОХРАНЁННЫЕ МЕСТА. Приложение отвечает «шаг N» как
+    /// индекс в присланном массиве плюс единица, и человек ищет этот шаг у себя
+    /// в list.json. Стоит выбросить блок без команды или шаг без заголовка (а
+    /// `parse_steps` выбрасывает и тот и другой) — и номер в отказе поедет.
+    #[test]
+    fn block_commands_keep_every_place_in_file_order() {
+        let canon = r#"{"steps":[
+            {"type":"text","content":{"md":"вводная"}},
+            {"title":"","command":"rm -rf /"},
+            {"title":"Собрать","command":"make"}
+        ]}"#
+        .as_bytes();
+        assert_eq!(
+            super::block_commands(canon),
+            Some(vec![None, Some("rm -rf /".into()), Some("make".into())]),
+            "блок без команды обязан занимать СВОЁ место, иначе номер шага в отказе поедет"
+        );
+        // Шаг без заголовка проекция выбрасывает — но спросить о его команде всё
+        // равно надо: сегодня выбрасывает, а завтра правило поменяется, и тихо
+        // пропущенная команда станет исполняемой.
+        assert_eq!(super::block_commands(canon).unwrap()[1].as_deref(), Some("rm -rf /"));
+    }
+
+    /// Нечего спрашивать — так и сказать. `None` означает «версии из этого
+    /// коммита всё равно не выйдет», и вызывающий по нему пуш ПРОПУСКАЕТ.
+    #[test]
+    fn block_commands_say_nothing_about_unreadable_canon() {
+        assert_eq!(super::block_commands(b"not json"), None);
+        assert_eq!(super::block_commands(b"[]"), None, "массив — не манифест");
+        assert_eq!(super::block_commands(b"{}"), Some(vec![]), "манифест без шагов — пустой вопрос");
     }
 }

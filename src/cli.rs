@@ -264,6 +264,100 @@ async fn sync_repos(pool: &PgPool) -> CliResult {
     Ok(())
 }
 
+// ── H15-002: вопрос о содержимом из pre-receive ──────────────────────────────
+
+/// Команда, которую зовёт `pre-receive` на КАЖДЫЙ пуш в main и refs/for/main.
+///
+/// Живёт отдельно от `COMMANDS` и разбирается в `main` РАНЬШЕ всего остального —
+/// до `Config::from_env`, до пула Postgres и до инициализации логов. Причины все
+/// три разные и все три обязательные:
+///
+/// * База ей не нужна, а соединение на каждый пуш стоило бы и денег, и новой
+///   причины отказа: «Postgres прилёг — git не принимает».
+/// * Конфиг сервера ей тоже не нужен: требовать от хука полный набор переменных
+///   сервера значит однажды уронить приём пушей правкой, к пушам отношения не
+///   имеющей.
+/// * Логи пишутся в stderr, а stderr хука — это то, что человек читает в выводе
+///   `git push`. Строка `INFO …` выглядит там поломкой.
+pub const DBLESS_COMMAND: &str = "check-content";
+
+/// `check-content <owner> <slug>` — list.json пушнутого коммита на stdin.
+/// `None` — аргумент не эта команда; `Some(код)` — код возврата процессу.
+///
+/// Читает канон ИЗ STDIN, а не из git: объекты пуша лежат в карантине
+/// receive-pack, а добираются до них через переменные `GIT_*`, которые понимает
+/// шелловый `git`, но не обязан понимать libgit2. Хук эти объекты уже читает
+/// (`git cat-file`) — пусть и читает, а сюда отдаёт готовые байты. Так в горячем
+/// пути записи не заводится второго способа достать те же данные.
+pub async fn run_dbless() -> Option<i32> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) != Some(DBLESS_COMMAND) {
+        return None;
+    }
+    let (owner, slug) = (args.get(2).cloned().unwrap_or_default(), args.get(3).cloned().unwrap_or_default());
+    let mut canon = Vec::new();
+    let read = std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut canon);
+    Some(match read {
+        Ok(_) => check_content(&owner, &slug, &canon).await,
+        // Канон не прочитался — значит его и не было (`git cat-file` не нашёл
+        // list.json или упал). Версии из такого коммита всё равно не выйдет,
+        // судить нечего: молчим и пропускаем, как пропускали до этой проверки.
+        Err(_) => 0,
+    })
+}
+
+/// 0 — можно писать (или спрашивать не о чем), 1 — отказ, объяснение в stderr.
+///
+/// ⚠️ Все «спрашивать не о чем» ведут в 0 сознательно, и ни один из них не
+/// является дырой:
+/// * list.json не разобрался → `project_pushed_commit` вернёт `Ok(None)`, версии
+///   не будет, в канон ничего не попадёт;
+/// * ни одной команды → приложению нечего искать, а лишний сетевой вызов на
+///   рабочем пути записи — это лишний способ пуш уронить;
+/// * адрес приложения не задан → это явный локальный dev (сервер без
+///   `SETFORK_APP_URL` не стартует), и ровно так же ведёт себя `ensure_writable`.
+async fn check_content(owner: &str, slug: &str, canon: &[u8]) -> i32 {
+    use setfork_core::gate::{ContentRefusal, ensure_content_allowed_at};
+    use setfork_core::git::messages::say;
+
+    if owner.is_empty() || slug.is_empty() {
+        return 0;
+    }
+    let Some(commands) = git::project::block_commands(canon) else {
+        return 0;
+    };
+    if commands.iter().all(|c| c.as_deref().unwrap_or("").trim().is_empty()) {
+        return 0;
+    }
+    let Some(base) = setfork_core::gate::app_url() else {
+        return 0;
+    };
+    let Err(refusal) = ensure_content_allowed_at(base, owner, slug, &commands).await else {
+        return 0;
+    };
+    // Природа отказа названа ВСЛУХ, потому что советы человеку тут
+    // противоположные: своё содержимое он чинит сам, а на недоступную проверку
+    // может только повторить пуш.
+    let lines = match refusal {
+        ContentRefusal::Destructive(d) => vec![
+            say("content_destructive", &[&d.step.to_string(), &d.fragment, &d.rule]),
+            say("content_hint", &[]),
+        ],
+        ContentRefusal::Denied(reason) => vec![say("content_denied", &[&reason])],
+        ContentRefusal::Unavailable(why) => vec![say("content_check_unavailable", &[&why])],
+        // Своя поломка и непонятый ответ печатаются одной строкой намеренно:
+        // человеку у `git push` оба означают одно — «проверка не сработала, и
+        // это не про ваш список». Различает их лог и код возврата gRPC-пути.
+        ContentRefusal::NotUnderstood(why) | ContentRefusal::NotAsked(why) => {
+            vec![say("content_check_not_understood", &[&why])]
+        }
+    };
+    for line in lines {
+        eprintln!("{line}");
+    }
+    1
+}
+
 #[cfg(test)]
 mod cli_list_tests {
     /// Список команд и ветки `match` обязаны совпадать.

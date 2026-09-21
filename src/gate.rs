@@ -101,12 +101,25 @@ fn client() -> &'static HttpClient {
     C.get_or_init(|| Client::builder(TokioExecutor::new()).build(HttpConnector::new()))
 }
 
+/// МЕСТО запрещённой команды в присланном списке блоков: номер шага (с единицы,
+/// как его считает приложение), код правила и совпавший кусок команды.
+///
+/// Без этих трёх полей отказ звучал бы просто «нельзя», и человеку с сорока
+/// шагами в списке осталось бы искать причину перебором.
+#[derive(Debug, PartialEq, Eq)]
+pub struct DenyDetail {
+    pub step: u32,
+    pub rule: String,
+    pub fragment: String,
+}
+
 /// Вердикт приложения. `Allow` — можно писать; всё остальное — причина отказа.
 #[derive(Debug, PartialEq, Eq)]
 enum Verdict {
     Allow,
-    /// Продуктовый запрет с кодом причины ('frozen' | 'archived' | 'not-found').
-    Deny(String),
+    /// Продуктовый запрет с кодом причины ('frozen' | 'archived' | 'not-found' |
+    /// 'destructive'). Второе поле — место находки, есть только у 'destructive'.
+    Deny(String, Option<DenyDetail>),
     /// Спросить не удалось ПО СВЯЗИ: приложение не отвечает, оборвалось тело,
     /// пришёл 5xx, вышел таймаут. Ответ всё равно «нет», но беда ПРЕХОДЯЩАЯ —
     /// клиенту честно сказать «повтори», и код для этого один: `Unavailable`.
@@ -121,7 +134,8 @@ enum Verdict {
     Local(String),
 }
 
-/// Разбор тела ответа. Форма — `{"allow":true}` или `{"allow":false,"reason":"frozen"}`.
+/// Разбор тела ответа. Форма — `{"allow":true}` или `{"allow":false,"reason":"frozen"}`,
+/// а у запрещённой команды ещё и место: `{"reason":"destructive","step":3,"rule":…,"fragment":…}`.
 /// Неожиданная форма — это НЕ «можно»: непонятый ответ значит «спросить не удалось».
 fn parse_verdict(body: &[u8]) -> Verdict {
     let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) else {
@@ -130,14 +144,38 @@ fn parse_verdict(body: &[u8]) -> Verdict {
     match v.get("allow").and_then(|a| a.as_bool()) {
         Some(true) => Verdict::Allow,
         Some(false) => {
-            Verdict::Deny(v.get("reason").and_then(|r| r.as_str()).unwrap_or("denied").to_string())
+            let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("denied").to_string();
+            // Место читаем МЯГКО и только у 'destructive': поля появились вместе
+            // с этой причиной, и требовать их у 'frozen' значило бы превратить
+            // обычный отказ в «ответ непонятен».
+            let detail = (reason == "destructive").then(|| DenyDetail {
+                step: v.get("step").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32,
+                rule: v.get("rule").and_then(|r| r.as_str()).unwrap_or("").to_string(),
+                fragment: v.get("fragment").and_then(|f| f.as_str()).unwrap_or("").to_string(),
+            });
+            Verdict::Deny(reason, detail)
         }
         None => Verdict::Malformed("verdict has no 'allow' field".into()),
     }
 }
 
-async fn ask(base: &str, owner: &str, slug: &str) -> Verdict {
-    let payload = serde_json::json!({ "owner": owner, "slug": slug }).to_string();
+/// Тело вопроса. `blocks` кладётся ТОЛЬКО когда спрашивают о содержимом.
+///
+/// ⚠️ Не «всегда, просто пустым»: приложение отличает «ядро не спрашивало» от
+/// «спросило про пустой список», и лишнее поле у обычного предусловия записи
+/// заставило бы его считать команды там, где их взять неоткуда.
+fn ask_payload(owner: &str, slug: &str, commands: Option<&[Option<String>]>) -> String {
+    let mut body = serde_json::json!({ "owner": owner, "slug": slug });
+    if let Some(cmds) = commands {
+        let blocks: Vec<serde_json::Value> =
+            cmds.iter().map(|c| serde_json::json!({ "command": c })).collect();
+        body["blocks"] = serde_json::Value::Array(blocks);
+    }
+    body.to_string()
+}
+
+async fn ask(base: &str, owner: &str, slug: &str, commands: Option<&[Option<String>]>) -> Verdict {
+    let payload = ask_payload(owner, slug, commands);
     let mut builder = Request::builder()
         .method("POST")
         .uri(format!("{base}/api/internal/write-allowed"))
@@ -210,9 +248,11 @@ pub async fn ensure_writable(owner: &str, slug: &str) -> Result<(), Status> {
 /// подменяющий его переменной окружения, гонялся бы с соседними тестами за
 /// первую инициализацию. Явный параметр убирает и кэш, и гонку.
 pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(), Status> {
-    match ask(base, owner, slug).await {
+    // Без `blocks`: на этом шаге пака ещё нет, и содержимого тоже — про него
+    // спрашивает `ensure_content_allowed_at` из pre-receive.
+    match ask(base, owner, slug, None).await {
         Verdict::Allow => Ok(()),
-        Verdict::Deny(reason) => {
+        Verdict::Deny(reason, _) => {
             metrics::counter!("write_gate_denied_total", "reason" => reason.clone()).increment(1);
             // Вердикт приложения — уже машиночитаемый код; переводим его в
             // причину провода, чтобы фронт различал заморозку и архив, а не
@@ -274,6 +314,77 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
     }
 }
 
+/// Почему содержимое не пропущено. Пять случаев — ровно те же пять, что у
+/// `ensure_writable_at`, и различать их обязательно: человеку у `git push` надо
+/// сказать разное. «В шаге 3 запрещённая команда» — это его работа, и чинит её
+/// он сам. «Проверка не ответила» — не его вина, и правильный совет тут
+/// «повторите», а не «перепишите шаг».
+#[derive(Debug, PartialEq, Eq)]
+pub enum ContentRefusal {
+    /// Запрещённая команда + МЕСТО: шаг (с единицы), код правила, фрагмент.
+    Destructive(DenyDetail),
+    /// Продуктовый отказ без места: список успели заморозить или убрать в архив,
+    /// пока шёл пак. Редко, но возможно — и тогда честнее назвать эту причину.
+    Denied(String),
+    /// Срыв связи (5xx, обрыв, таймаут) — преходяще, повтор уместен.
+    Unavailable(String),
+    /// Приложение ответило, но не то (4xx, не JSON, нет `allow`) — повтор не лечит.
+    NotUnderstood(String),
+    /// Спросить не смогли по своей вине: запрос не собрался.
+    NotAsked(String),
+}
+
+/// Второй вопрос приложению: БЕЗОПАСНО ЛИ ЭТО СОДЕРЖИМОЕ (H15-002).
+///
+/// # Почему отдельный вызов, а не поле в `ensure_writable`
+///
+/// `ensure_writable` зовётся из `receive_pack` ДО приёма пака: объектов ещё нет,
+/// и сказать о содержимом нечего. А единственное вето над паком — `pre-receive`,
+/// и он шелл-скрипт. Поэтому вопрос задаёт подкоманда `check-content` этого же
+/// бинаря, которую хук зовёт вместо HTTP (curl в runtime-образе нет, и заводить
+/// его ради одного POST значило бы тянуть в образ лишнее).
+///
+/// # Почему не после разбора пака, в Rust
+///
+/// Там git-репозиторий УЖЕ обновлён: отказ на этом месте дал бы расхождение «в
+/// git есть, в продукте нет», а человек увидел бы успешный push и отсутствующую
+/// версию. Тихая потеря версии в этом проекте уже стоила отдельной находки
+/// (аудит 2026-07-20, P0-1), и повторять её ради проверки, которая обязана
+/// говорить вслух, нельзя.
+///
+/// # Старое приложение
+///
+/// Оно про `blocks` не знает, лишнее поле в теле игнорирует и отвечает прежним
+/// `{"allow":true}` — то есть `Allow`, то есть пуш проходит ровно как сегодня.
+/// Никакой особой ветки на это не нужно, и это нарочно: ветка «а вдруг старое»
+/// неминуемо начала бы открывать дверь и новому.
+///
+/// # Недоступное приложение
+///
+/// Fail-closed, как и у соседа: всё, что не явное `allow: true`, останавливает
+/// запись. Отказ при этом НАЗЫВАЕТ свою природу — связь это или содержимое, —
+/// потому что советы человеку тут противоположные.
+pub async fn ensure_content_allowed_at(
+    base: &str,
+    owner: &str,
+    slug: &str,
+    commands: &[Option<String>],
+) -> Result<(), ContentRefusal> {
+    // Метрик тут нет СОЗНАТЕЛЬНО: код исполняется в короткоживущем процессе
+    // подкоманды, где prometheus-рекордер не поднят, и счётчик утёк бы в пустоту.
+    // Видимость даёт сам отказ — он уезжает человеку в вывод `git push`.
+    match ask(base, owner, slug, Some(commands)).await {
+        Verdict::Allow => Ok(()),
+        Verdict::Deny(reason, Some(detail)) if reason == "destructive" => {
+            Err(ContentRefusal::Destructive(detail))
+        }
+        Verdict::Deny(reason, _) => Err(ContentRefusal::Denied(reason)),
+        Verdict::Unreachable(why) => Err(ContentRefusal::Unavailable(why)),
+        Verdict::Malformed(why) => Err(ContentRefusal::NotUnderstood(why)),
+        Verdict::Local(why) => Err(ContentRefusal::NotAsked(why)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,11 +414,64 @@ mod tests {
     #[test]
     fn verdict_parses() {
         assert_eq!(parse_verdict(br#"{"allow":true}"#), Verdict::Allow);
-        assert_eq!(parse_verdict(br#"{"allow":false,"reason":"frozen"}"#), Verdict::Deny("frozen".into()));
+        assert_eq!(
+            parse_verdict(br#"{"allow":false,"reason":"frozen"}"#),
+            Verdict::Deny("frozen".into(), None)
+        );
         assert_eq!(
             parse_verdict(br#"{"allow":false}"#),
-            Verdict::Deny("denied".into()),
+            Verdict::Deny("denied".into(), None),
             "отказ без причины остаётся отказом"
+        );
+    }
+
+    /// Место находки обязано доехать целиком: по нему человек и чинит свой
+    /// список. Отказ без шага и фрагмента — это «нельзя» без объяснения, а
+    /// именно его находка H15-002 и требовала не допустить.
+    #[test]
+    fn destructive_verdict_carries_the_place() {
+        assert_eq!(
+            parse_verdict(
+                br#"{"allow":false,"reason":"destructive","step":3,"rule":"rm_rf","fragment":"rm -rf /"}"#
+            ),
+            Verdict::Deny(
+                "destructive".into(),
+                Some(DenyDetail { step: 3, rule: "rm_rf".into(), fragment: "rm -rf /".into() })
+            )
+        );
+        // Место у ОСТАЛЬНЫХ причин не ищем: полей там нет и не было.
+        assert_eq!(
+            parse_verdict(br#"{"allow":false,"reason":"archived","step":3}"#),
+            Verdict::Deny("archived".into(), None)
+        );
+        // Причина та, а полей нет — отказ остаётся отказом, а не превращается в
+        // «ответ непонятен»: пропустить разрушительную команду из-за неполного
+        // ответа было бы хуже, чем сказать без места.
+        assert_eq!(
+            parse_verdict(br#"{"allow":false,"reason":"destructive"}"#),
+            Verdict::Deny(
+                "destructive".into(),
+                Some(DenyDetail { step: 0, rule: String::new(), fragment: String::new() })
+            )
+        );
+    }
+
+    /// ОКНО ВЫКАТКИ в обе стороны. Обычное предусловие записи обязано спрашивать
+    /// РОВНО тем же телом, что и раньше: приложение отличает «ядро не
+    /// спрашивало про содержимое» от «спросило про пустой список», и лишний
+    /// `blocks` у `ensure_writable` изменил бы смысл вопроса.
+    #[test]
+    fn only_the_content_question_carries_blocks() {
+        assert_eq!(ask_payload("mike", "list", None), r#"{"owner":"mike","slug":"list"}"#);
+        assert_eq!(
+            ask_payload("mike", "list", Some(&[Some("echo hi".into()), None])),
+            r#"{"owner":"mike","slug":"list","blocks":[{"command":"echo hi"},{"command":null}]}"#,
+            "блок без команды едет как null и занимает СВОЁ место: по индексу считается номер шага"
+        );
+        assert_eq!(
+            ask_payload("mike", "list", Some(&[])),
+            r#"{"owner":"mike","slug":"list","blocks":[]}"#,
+            "пустой список — это спрошенный вопрос, а не отсутствие вопроса"
         );
     }
 

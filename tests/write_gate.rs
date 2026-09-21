@@ -13,7 +13,7 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use setfork_core::gate::ensure_writable_at;
+use setfork_core::gate::{ContentRefusal, DenyDetail, ensure_content_allowed_at, ensure_writable_at};
 use setfork_core::reason::REASON_KEY;
 
 /// Причина отказа из трейлера — то, по чему клиент различает случаи (И1).
@@ -219,4 +219,92 @@ async fn a_stuck_reply_body_does_not_hold_the_write_forever() {
         started.elapsed() < std::time::Duration::from_secs(15),
         "отказ пришёл по таймауту, а не по обрыву"
     );
+}
+
+// ── H15-002: второй вопрос — БЕЗОПАСНО ЛИ СОДЕРЖИМОЕ ─────────────────────────
+//
+// Края здесь те же самые, и проверяются они по той же причине: отказ у `git push`
+// читает человек, и «в шаге 3 запрещённая команда» с «проверка не ответила» —
+// это два противоположных совета. Слепить их в один «нельзя» значило бы послать
+// человека переписывать шаг, в котором всё в порядке.
+
+/// Место находки доезжает целиком — по нему человек и чинит свой список.
+#[tokio::test]
+async fn a_destructive_command_names_the_step_and_the_command() {
+    let stub = Stub::start(Box::leak(
+        http(r#"{"allow":false,"reason":"destructive","step":3,"rule":"rm_rf","fragment":"rm -rf /"}"#)
+            .into_boxed_str(),
+    ));
+    let err = ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("rm -rf /".into())])
+        .await
+        .expect_err("разрушительная команда не проходит");
+    assert_eq!(
+        err,
+        ContentRefusal::Destructive(DenyDetail {
+            step: 3,
+            rule: "rm_rf".into(),
+            fragment: "rm -rf /".into()
+        })
+    );
+}
+
+/// ОКНО ВЫКАТКИ. Приложение старше этой правки поля `blocks` не знает и отвечает
+/// прежним `{"allow":true}` — пуш обязан пройти ровно как вчера. Ветки «а вдруг
+/// старое» для этого нет намеренно: такая ветка однажды открыла бы дверь и новому.
+#[tokio::test]
+async fn an_app_that_ignores_blocks_lets_the_push_through() {
+    let stub = Stub::start(Box::leak(http(r#"{"allow":true}"#).into_boxed_str()));
+    assert!(
+        ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("rm -rf /".into())]).await.is_ok(),
+        "старое приложение = сегодняшнее поведение, а не отказ"
+    );
+}
+
+/// Список успели заморозить, пока ехал пак: причина называется своя, а не
+/// «запрещённая команда» — иначе человек пойдёт править шаг, который ни при чём.
+#[tokio::test]
+async fn a_product_refusal_without_a_place_keeps_its_own_reason() {
+    let stub = Stub::start(Box::leak(http(r#"{"allow":false,"reason":"frozen"}"#).into_boxed_str()));
+    let err = ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("make".into())])
+        .await
+        .expect_err("отказ");
+    assert_eq!(err, ContentRefusal::Denied("frozen".into()));
+}
+
+/// Те же две беды и та же развилка, что у предусловия записи: 5xx преходящ и
+/// лечится повтором, 4xx — расхождение контракта, повтор бесполезен. Советы
+/// человеку разные, значит и случаи обязаны быть разными.
+#[tokio::test]
+async fn transport_and_contract_failures_stay_apart() {
+    let five = Stub::start("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
+    assert!(matches!(
+        ensure_content_allowed_at(&five.addr, "mike", "list", &[Some("make".into())]).await,
+        Err(ContentRefusal::Unavailable(_))
+    ));
+
+    let four = Stub::start("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
+    assert!(matches!(
+        ensure_content_allowed_at(&four.addr, "mike", "list", &[Some("make".into())]).await,
+        Err(ContentRefusal::NotUnderstood(_))
+    ));
+
+    let garbage = Stub::start(Box::leak(http("<html>не json</html>").into_boxed_str()));
+    assert!(matches!(
+        ensure_content_allowed_at(&garbage.addr, "mike", "list", &[Some("make".into())]).await,
+        Err(ContentRefusal::NotUnderstood(_))
+    ));
+}
+
+/// Приложения нет вовсе — fail-closed, как и у соседа. Дверь, открытая при сбое,
+/// обесценила бы всю проверку: уронить фронт проще, чем обойти правило.
+#[tokio::test]
+async fn an_unreachable_app_stops_the_content_too() {
+    let addr = {
+        let l = TcpListener::bind("127.0.0.1:0").expect("bind");
+        format!("http://{}", l.local_addr().expect("addr"))
+    };
+    assert!(matches!(
+        ensure_content_allowed_at(&addr, "mike", "list", &[Some("rm -rf /".into())]).await,
+        Err(ContentRefusal::Unavailable(_))
+    ));
 }
