@@ -38,19 +38,73 @@ fn run_git_io(
     git_protocol: Option<&str>,
     lang: Option<&str>,
 ) -> io::Result<Vec<u8>> {
-    run_git_io_env(args, input, git_protocol, lang, None, None)
+    run_git_io_env(args, input, git_protocol, lang, PushEnv::default())
 }
 
-/// То же плюс контекст пушащего для хука: ник (Ф4 — магический реф
-/// `refs/for/<base>` без него отвергается, коммиты некуда класть) и роль
-/// (Ф5 — правило пространства имён для посторонних).
+/// Контекст пуша для `pre-receive` — всё, чего хук не может узнать сам.
+///
+/// Структурой, а не отдельными параметрами: полей ровно столько, сколько
+/// переменных окружения ядро ставит хуку, и держать их вместе значит не забыть
+/// СНЯТЬ очередную — а именно от этого защищается каждое `env_remove` ниже.
+#[derive(Default, Clone, Copy)]
+pub struct PushEnv<'a> {
+    /// Ф4: ник. Без него магический реф `refs/for/<base>` отвергается — коммиты
+    /// некуда класть.
+    pub actor: Option<&'a str>,
+    /// Ф5: роль пушащего — правило пространства имён для посторонних.
+    pub role: Option<&'a str>,
+    /// H15-002: чей это список. Приложение спрашивают про него по имени.
+    pub owner: Option<&'a str>,
+    pub slug: Option<&'a str>,
+}
+
+/// Путь к бинарю ядра для хука (H15-002).
+///
+/// Хук — шелл, HTTP он не умеет, а curl в runtime-образе нет; вопрос о
+/// содержимом задаёт подкоманда ЭТОГО ЖЕ бинаря. `current_exe` берёт ровно тот
+/// файл, который сейчас обслуживает пуш, — проверка и приём не могут разъехаться
+/// по версиям. Переменная-override оставлена ради тестов и аварийного случая.
+fn core_bin() -> Option<String> {
+    if let Ok(v) = std::env::var("SETFORK_CORE_BIN")
+        && !v.trim().is_empty()
+    {
+        return Some(v);
+    }
+    std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Кладёт контекст пуша в окружение дочернего git — оттуда его наследует хук.
+///
+/// КАЖДАЯ переменная либо ставится, либо СНИМАЕТСЯ, и второе не менее важно:
+/// унаследованное от сервиса значение означало бы чужие коммиты в ветке
+/// случайного человека (ник), право постороннего писать в main (роль) или
+/// вопрос про ОДИН список, заданный глядя на ДРУГОЙ (имя списка).
+///
+/// Отдельной функцией — чтобы это можно было ПРОВЕРИТЬ: `run_git_io_env` зовёт
+/// настоящий `git receive-pack`, и добраться до его окружения из теста нельзя, а
+/// до этой функции можно любым дочерним процессом.
+fn apply_push_env(cmd: &mut Command, push: PushEnv<'_>) {
+    for (key, value) in [
+        ("SETFORK_ACTOR", push.actor.map(str::to_string)),
+        ("SETFORK_ROLE", push.role.map(str::to_string)),
+        ("SETFORK_OWNER", push.owner.map(str::to_string)),
+        ("SETFORK_SLUG", push.slug.map(str::to_string)),
+        ("SETFORK_CORE_BIN", core_bin()),
+    ] {
+        match value.filter(|v| !v.is_empty()) {
+            Some(v) => cmd.env(key, v),
+            None => cmd.env_remove(key),
+        };
+    }
+}
+
+/// То же плюс контекст пушащего для хука (см. `PushEnv`).
 fn run_git_io_env(
     args: &[&str],
     input: Option<&[u8]>,
     git_protocol: Option<&str>,
     lang: Option<&str>,
-    actor: Option<&str>,
-    role: Option<&str>,
+    push: PushEnv<'_>,
 ) -> io::Result<Vec<u8>> {
     let mut cmd = Command::new("git");
     cmd.args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -69,24 +123,7 @@ fn run_git_io_env(
     // его, и человек, не просивший русского, получит русский отказ — причём
     // одинаково у всех, кто пушит в этот инстанс (авто-ревью core#74, P2).
     apply_lang(&mut cmd, lang);
-    // Снимаем так же, как язык: унаследованный от сервиса ник означал бы, что
-    // чужие коммиты лягут в ветку случайного человека.
-    match actor.filter(|a| !a.is_empty()) {
-        Some(a) => cmd.env("SETFORK_ACTOR", a),
-        None => cmd.env_remove("SETFORK_ACTOR"),
-    };
-    // Ф5: роль пушащего. РЕШАЕТ приложение (сессия, allowFrom, модерация — это
-    // пользовательская авторизация, и по ADR-0011 §2 она остаётся там), ядро лишь
-    // МЕХАНИЧЕСКИ исполняет правило пространства имён.
-    //
-    // Снимается так же, как ник и язык, и по той же причине, только цена ошибки
-    // тут выше: унаследованная от сервиса роль владельца дала бы постороннему
-    // право писать в main. Отсутствие переменной хук трактует как «посторонний» —
-    // строгая сторона по умолчанию.
-    match role.filter(|r| !r.is_empty()) {
-        Some(r) => cmd.env("SETFORK_ROLE", r),
-        None => cmd.env_remove("SETFORK_ROLE"),
-    };
+    apply_push_env(&mut cmd, push);
     let mut child = cmd.spawn()?;
     let mut stdin = child.stdin.take().expect("stdin piped");
     let out = std::thread::scope(|s| -> io::Result<std::process::Output> {
@@ -151,11 +188,10 @@ pub fn receive_pack_rpc(
     body: &[u8],
     git_protocol: Option<&str>,
     lang: Option<&str>,
-    actor: Option<&str>,
-    role: Option<&str>,
+    push: PushEnv<'_>,
 ) -> io::Result<Vec<u8>> {
     let dir = repo_dir.to_string_lossy().to_string();
-    run_git_io_env(&["receive-pack", "--stateless-rpc", &dir], Some(body), git_protocol, lang, actor, role)
+    run_git_io_env(&["receive-pack", "--stateless-rpc", &dir], Some(body), git_protocol, lang, push)
 }
 
 #[cfg(test)]
@@ -182,6 +218,40 @@ mod tests {
         // инстанса протечёт всем пушащим.
         assert_eq!(lang_env(None), Some(None), "переменная должна сниматься явно");
         assert_eq!(lang_env(Some("")), Some(None), "пустой язык = явный английский");
+    }
+
+    /// H15-002: ЧТО РЕАЛЬНО ВИДИТ хук. Проверяем настоящим дочерним процессом, а
+    /// не чтением карты окружения: между картой и процессом стоит `Command`, и
+    /// ошибка вида «поставили не ту переменную» на карте была бы незаметна.
+    ///
+    /// Две стороны одной монеты. Имя списка ОБЯЗАНО доехать — иначе хук молча
+    /// пропустит проверку, и весь этот путь окажется мёртвым. И оно обязано
+    /// СНИМАТЬСЯ — иначе значение, оставшееся от соседнего пуша или от
+    /// окружения сервиса, заставит спрашивать про один список, глядя на другой.
+    #[test]
+    fn the_list_name_reaches_the_hook_and_never_leaks_from_elsewhere() {
+        let probe = "printf '%s|%s|%s' \"${SETFORK_OWNER:-нет}\" \
+                     \"${SETFORK_SLUG:-нет}\" \"${SETFORK_CORE_BIN:+есть}\"";
+        let run = |push: super::PushEnv<'_>| {
+            let mut cmd = Command::new("sh");
+            cmd.args(["-c", probe]);
+            // Заранее подложенное чужое значение — то самое, что осталось бы от
+            // соседнего пуша, если бы переменная не снималась.
+            cmd.env("SETFORK_OWNER", "чужой").env("SETFORK_SLUG", "чужой");
+            super::apply_push_env(&mut cmd, push);
+            String::from_utf8_lossy(&cmd.output().expect("sh").stdout).to_string()
+        };
+
+        assert_eq!(
+            run(super::PushEnv { owner: Some("mike"), slug: Some("deploy"), ..Default::default() }),
+            "mike|deploy|есть",
+            "имя списка и путь к бинарю обязаны доехать до хука — на них держится вся проверка"
+        );
+        assert_eq!(
+            run(super::PushEnv::default()),
+            "нет|нет|есть",
+            "чужое значение обязано СНИМАТЬСЯ, а не доживать до следующего пуша"
+        );
     }
 
     // Регрессия дедлока (аудит P1-4): git пишет вывод, ПОКА мы пишем ввод.

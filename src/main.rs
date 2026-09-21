@@ -28,6 +28,14 @@ macro_rules! capped {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+    // ПЕРВЫМ ДЕЛОМ, до конфига, базы и логов — вопрос о содержимом (H15-002),
+    // который `pre-receive` задаёт на каждый пуш. Ни база, ни конфиг сервера ему
+    // не нужны, а логи прямо вредны: stderr хука человек читает в выводе
+    // `git push`, и строка `INFO …` выглядит там поломкой. Почему так —
+    // подробно у `cli::DBLESS_COMMAND`.
+    if let Some(code) = cli::run_dbless().await {
+        std::process::exit(code);
+    }
     init_tracing(); // до Config::from_env — иначе warn'ы валидации конфига пропадут
     let cfg = config::Config::from_env()?;
     let pool = db::connect(&cfg.database_url, cfg.pgpool_max).await?;

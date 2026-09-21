@@ -319,6 +319,10 @@ impl GitCore for GitCoreSvc {
             );
         }
         let role = actor_role.clone();
+        // H15-002: имя списка едет в хук — по нему он спрашивает приложение,
+        // безопасно ли СОДЕРЖИМОЕ приехавшего коммита. `repo` нужен снаружи
+        // замыкания (проекция ниже), поэтому копии.
+        let (owner_env, slug_env) = (repo.owner.clone(), repo.slug.clone());
         let (data, moved, magic) = tokio::task::spawn_blocking(
             move || -> std::io::Result<(Vec<u8>, bool, Vec<crate::git::magic::MagicPush>)> {
                 let before = main_oid(&bare_recv);
@@ -333,8 +337,12 @@ impl GitCore for GitCoreSvc {
                     &body,
                     opt(&git_protocol),
                     opt(&lang),
-                    opt(&actor),
-                    opt(&role),
+                    smart_http::PushEnv {
+                        actor: opt(&actor),
+                        role: opt(&role),
+                        owner: opt(&owner_env),
+                        slug: opt(&slug_env),
+                    },
                 )?;
                 let after = main_oid(&bare_recv);
                 // Ф4: магические рефы разбираем ВНУТРИ той же критической секции,

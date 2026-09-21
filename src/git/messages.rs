@@ -108,7 +108,73 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         en: "SetFork: cannot tell who is pushing — re-authenticate with your API token",
         ru: "SetFork: непонятно, кто пушит — повторите вход со своим API-токеном",
     },
+    // ── H15-002: вопрос о СОДЕРЖИМОМ ────────────────────────────────────────
+    //
+    // Пять строк отсюда печатает не шелл, а Rust — подкоманда `check-content`,
+    // которую хук зовёт вместо HTTP (шелл его не умеет, curl в runtime-образе
+    // нет). Лежат они всё равно ЗДЕСЬ: поверхность одна и та же — stderr `git
+    // push`, и оба языка обязаны быть видны рядом. В шелл-функцию они попадут
+    // тоже (генератор берёт таблицу целиком), и это безвредно: этих ключей шелл
+    // не зовёт. Шестую, `content_check_missing`, печатает как раз шелл.
+    HookMessage {
+        key: "content_destructive",
+        en: "SetFork: step %s contains a command that is not allowed here: %s (rule %s)",
+        ru: "SetFork: в шаге %s команда, которую здесь выполнять нельзя: %s (правило %s)",
+    },
+    HookMessage {
+        key: "content_hint",
+        // Без апострофа намеренно: текст уезжает в одинарные кавычки шелла.
+        en: "Remove or rewrite that command in list.json and push again.",
+        ru: "Уберите или перепишите эту команду в list.json и повторите пуш.",
+    },
+    HookMessage {
+        key: "content_denied",
+        en: "SetFork: the app refused this content: %s",
+        ru: "SetFork: приложение отклонило это содержимое: %s",
+    },
+    HookMessage {
+        key: "content_check_unavailable",
+        en: "SetFork: the content check did not answer (%s); nothing was written, try the push again",
+        ru: "SetFork: проверка содержимого не ответила (%s); ничего не записано, повторите пуш",
+    },
+    HookMessage {
+        key: "content_check_not_understood",
+        en: "SetFork: the content check answered something unexpected (%s); the push is stopped",
+        ru: "SetFork: проверка содержимого ответила непонятным (%s); пуш остановлен",
+    },
+    HookMessage {
+        key: "content_check_missing",
+        en: "SetFork: the content check could not be started, this push went unchecked",
+        ru: "SetFork: проверку содержимого запустить не удалось, этот пуш не проверен",
+    },
 ];
+
+/// Тот же текст, но собранный В РАСТЕ: подкоманда `check-content` печатает
+/// человеку прямо в stderr хука, шелл ей в этом не посредник.
+///
+/// Язык берётся из того же `SETFORK_LANG`: переменная доезжает до хука вместе с
+/// окружением receive-pack, а подкоманда наследует её от хука.
+///
+/// Подстановка идёт РАЗБИЕНИЕМ по `%s`, а не поиском-заменой: аргумент здесь —
+/// кусок пользовательской команды, и `%s` может оказаться в нём самом. Замена по
+/// месту тогда подставила бы следующий аргумент внутрь предыдущего.
+pub fn say(key: &str, args: &[&str]) -> String {
+    let ru = std::env::var("SETFORK_LANG").map(|l| l.starts_with("ru")).unwrap_or(false);
+    let text = match HOOK_MESSAGES.iter().find(|m| m.key == key) {
+        Some(m) if ru => m.ru,
+        Some(m) => m.en,
+        // Тот же запасной вариант, что у шелла: пустая строка читалась бы как
+        // «сломалось», а не как «нельзя».
+        None => return format!("SetFork: {key}"),
+    };
+    let mut parts = text.split("%s");
+    let mut out = String::from(parts.next().unwrap_or_default());
+    for (i, tail) in parts.enumerate() {
+        out.push_str(args.get(i).copied().unwrap_or("?"));
+        out.push_str(tail);
+    }
+    out
+}
 
 /// Шелл-функция `msg <ключ> [аргументы…]`, печатающая строку на языке `$SETFORK_LANG`.
 ///
@@ -172,6 +238,25 @@ mod tests {
                 m.key
             );
         }
+    }
+
+    /// Подстановка в Rust-ветке. Главное здесь — второй случай: кусок команды
+    /// приезжает от пользователя, и `%s` внутри него не имеет права втянуть
+    /// следующий аргумент.
+    #[test]
+    fn say_substitutes_each_argument_once() {
+        assert_eq!(
+            say("content_destructive", &["3", "rm -rf /", "rm_rf"]),
+            "SetFork: step 3 contains a command that is not allowed here: rm -rf / (rule rm_rf)"
+        );
+        assert_eq!(
+            say("content_destructive", &["1", "printf %s", "fmt"]),
+            "SetFork: step 1 contains a command that is not allowed here: printf %s (rule fmt)",
+            "%s внутри аргумента — это данные, а не место для следующего аргумента"
+        );
+        // Недостача аргументов не имеет права съесть текст вокруг подстановки.
+        assert_eq!(say("content_denied", &[]), "SetFork: the app refused this content: ?");
+        assert_eq!(say("нет такого ключа", &[]), "SetFork: нет такого ключа");
     }
 
     #[test]
