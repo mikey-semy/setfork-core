@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="docs/img/hero.webp" width="860"
+       alt="Шахта SetFork Core: гномы обслуживают gRPC, ветки, merge, теги, репозитории, синхронизацию и коммиты">
+</p>
+
 # setfork-core
 
 Rust git-ядро SetFork (Gitaly-стиль): обслуживает тяжёлые git-операции и доменные
