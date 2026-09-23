@@ -381,3 +381,34 @@ fn the_hook_rejects_a_binary_in_assets() {
     assert!(!ok, "бинарь в assets/ обязан быть отвергнут: {err}");
     assert!(err.contains("assets/logo.png"), "{err}");
 }
+
+// Версия, чей коммит САМ добавил авторские файлы (пуш, совпавший с каноном
+// побайтно), и тег которой потерялся. Сверка по авторским каталогам РОДИТЕЛЯ её не
+// узнавала, и выравнивание клало рядом пустого двойника. Авторские каталоги не
+// генерируются — сравнивать надо сгенерированную часть, а авторскую брать у самого
+// коммита.
+#[test]
+fn realignment_recognises_a_version_whose_own_commit_added_scripts() {
+    let root = tmp("skill-realign-own");
+    let bare = bundle::materialize_repo(&[ver(1, vec![step(1, "a")])]).expect("materialize");
+    let _g = Tmp(bare.clone());
+    install_hook(&bare).expect("хук");
+    let work = root.0.join("work");
+    git_ok(&root.0, &["clone", "-q", bare.to_str().unwrap(), work.to_str().unwrap()]);
+    git_ok(&work, &["config", "user.email", "t@example.com"]);
+    git_ok(&work, &["config", "user.name", "Тест"]);
+
+    // Пуш кладёт канон v2 ровно в той форме, в какой его собрало бы ядро, и скрипт рядом.
+    let v2 = ver(2, vec![step(1, "b")]);
+    for (path, content) in bundle::version_files(&v2) {
+        std::fs::write(work.join(&path), content).expect("канон v2");
+    }
+    write_exec(&work, "scripts/run.sh", b"echo hi\n");
+    let (ok, err) = commit_push(&work, "v2 пушем вместе со скриптом");
+    assert!(ok, "{err}");
+    let tip = git_ok(&bare, &["rev-parse", "main"]);
+
+    bundle::append_missing_versions(&bare, &[v2]).expect("выравнивание");
+    assert_eq!(git_ok(&bare, &["rev-parse", "main"]), tip, "выравнивание положило двойника вместо тега");
+    assert_eq!(git_ok(&bare, &["rev-parse", "v2^{commit}"]), tip, "тег встал не на свой коммит");
+}

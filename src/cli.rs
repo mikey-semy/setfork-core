@@ -326,9 +326,10 @@ async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i
     if owner.is_empty() || slug.is_empty() {
         return 0;
     }
-    let Some(mut commands) = git::project::block_commands(canon) else {
-        return 0;
-    };
+    // Неразборчивый манифест — не повод не судить скрипты: версии из него не выйдет,
+    // но `scripts/` следующая правка с сайта перенесёт в настоящую версию (авторские
+    // каталоги берутся из родителя). Шагов тогда просто нет — пустой список.
+    let mut commands = git::project::block_commands(canon).unwrap_or_default();
     // СКРИПТЫ ИДУТ НА ТУ ЖЕ ПРОВЕРКУ, ЧТО И КОМАНДЫ ШАГОВ. Иначе `rm -rf /`, который
     // форма не пропустила бы в шаг, спокойно въезжал бы в `scripts/run.sh` пушем — и
     // уходил дальше в каждый поставленный скилл. Файл подаётся приложению ещё одной

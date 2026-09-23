@@ -501,10 +501,10 @@ fn tail_commits(
     for v in versions.iter().rev() {
         let Some(oid) = cur else { return Ok(None) };
         let commit = repo.find_commit(oid)?;
-        // Сверяем с деревом, которое собрала бы запись поверх ЕГО родителя: иначе
-        // коммит с перенесёнными `scripts/` не узнавался бы своей же версией, и
-        // выравнивание положило бы рядом пустого двойника.
-        let expected = build_tree(repo, v, parent_tree(repo, commit.parent_ids().next())?.as_ref())?;
+        // Авторские каталоги берём У САМОГО КОММИТА: их не генерируют, сравнивать надо
+        // сгенерированную часть. Сверка с родительскими не узнавала версию, чей коммит
+        // САМ добавил `scripts/` (пуш), — и выравнивание клало рядом пустого двойника.
+        let expected = build_tree(repo, v, Some(&commit.tree()?))?;
         if commit.tree_id() != expected {
             return Ok(None);
         }

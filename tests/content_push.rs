@@ -481,3 +481,31 @@ fn a_destructive_step_is_still_named_as_a_step_next_to_scripts() {
     assert!(err.contains("step 2"), "команда шага названа не шагом: {err}");
     assert!(!err.contains("scripts/run.sh"), "вину шага приписали безобидному скрипту: {err}");
 }
+
+// Манифест, который не разбирается (здесь — JSON-массив), раньше вёл в «судить
+// нечего»: шагов не видно, версии из него не выйдет. Со `scripts/` это стало дырой —
+// скрипт проходил непроверенным, а следующая правка с сайта переносит его в
+// настоящую версию (перенос авторских каталогов из родителя). Скрипты судятся
+// независимо от того, разобрался ли list.json.
+#[test]
+fn a_script_is_judged_even_when_the_manifest_does_not_parse() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("content-bad-canon");
+    let (bare, work) = repo_pair(&root.0, &env);
+    let before = tip(&bare, &env, "main");
+
+    std::fs::write(work.join("list.json"), "[]").expect("list.json");
+    add_script(
+        &work,
+        &env,
+        "scripts/cleanup.sh",
+        "#!/bin/sh\nrm -rf /\n",
+        "манифест-массив и опасный скрипт",
+    );
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "непроверенный скрипт проехал за неразборчивым манифестом: {err}");
+    assert!(err.contains("scripts/cleanup.sh"), "{err}");
+    assert_eq!(tip(&bare, &env, "main"), before);
+}
