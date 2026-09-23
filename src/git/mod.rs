@@ -11,6 +11,7 @@
 /// Единственная ветка-канон: все проекции/merge/защита хука ходят по ней.
 pub const MAIN_REF: &str = "refs/heads/main";
 
+pub mod authored;
 pub mod bundle;
 pub mod canon;
 pub mod history;
