@@ -128,9 +128,9 @@ pub fn parse_canon(text: &str) -> Result<super::project::ListParts, Vec<CanonIss
     Ok(parsed)
 }
 
-/// Придирки схемы. Крейт отдаёт `instance_path` уже в виде JSON Pointer.
-/// Придирки схемы. Второе значение — нарушено ли `anyOf`: у ссылки это правило
-/// «адрес или подпись», его дубль с понятной `ref_empty` гасит `parse_canon`.
+/// Придирки схемы. Крейт отдаёт `instance_path` уже в виде JSON Pointer. Второе
+/// значение — нарушено ли `anyOf`: у ссылки это правило «адрес или подпись», его
+/// дубль с понятной `ref_empty` гасит `parse_canon`.
 fn schema_issues(value: &serde_json::Value) -> Vec<(CanonIssue, bool)> {
     let schema: serde_json::Value = match serde_json::from_str(SCHEMA) {
         Ok(s) => s,
