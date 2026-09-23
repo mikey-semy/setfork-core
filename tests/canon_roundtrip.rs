@@ -168,26 +168,36 @@ async fn image_and_mark_from_the_text_reach_the_caller() {
     assert!(step.danger, "разрушительный пункт пережил провод");
 }
 
+/// Через сервис, как ходит редактор канона: ссылка одним адресом разбирается и
+/// возвращается (#148), а ссылка без адреса и подписи — придирка, а не молчание.
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
-async fn a_ref_without_a_label_is_not_lost_silently() {
+async fn a_url_only_ref_survives_and_an_empty_ref_is_not_lost_silently() {
     let pool = support::pool_with_schema().await;
     seed_list(&pool, "canon-ссылка", "стенд").await;
     let svc = GitCoreSvc { pool };
-
-    let text = r#"{"$schema":"https://setfork.com/schema/list.v1.json","title":"Т","desc":"","tags":[],"ordered":true,"version":1,"steps":[{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"  ","url":"https://example.com"}]}]}"#;
-
-    let out = svc
-        .parse_canon(Request::new(ParseCanonRequest {
+    let parse = |refs: &str| {
+        format!(
+            r#"{{"$schema":"https://setfork.com/schema/list.v1.json","title":"Т","desc":"","tags":[],"ordered":true,"version":1,"steps":[{{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{refs}]}}]}}"#
+        )
+    };
+    let ask = |canon: String| {
+        svc.parse_canon(Request::new(ParseCanonRequest {
             repo: Some(RepoRef { owner: "canon-ссылка".into(), slug: "стенд".into() }),
-            canon: text.into(),
+            canon,
         }))
-        .await
-        .expect("разбор состоялся")
-        .into_inner();
-    let issue = out.issues.first().expect("придирка");
-    assert_eq!(issue.code, "ref_label_required");
-    assert_eq!(issue.path, "/steps/0/refs/0/label");
+    };
+
+    let ok = ask(parse(r#"{"url":"https://example.com"}"#)).await.expect("разбор состоялся").into_inner();
+    assert!(ok.issues.is_empty(), "ссылка одним адресом законна: {:?}", ok.issues);
+    let refs = &ok.content.expect("содержимое").steps[0].refs;
+    assert_eq!(refs.len(), 1, "ссылка одним адресом не пропала");
+    assert_eq!(refs[0].url, "https://example.com");
+
+    let bad = ask(parse(r#"{"label":"  "}"#)).await.expect("разбор состоялся").into_inner();
+    let issue = bad.issues.first().expect("придирка");
+    assert_eq!(issue.code, "ref_empty");
+    assert_eq!(issue.path, "/steps/0/refs/0");
 }
 
 #[tokio::test]

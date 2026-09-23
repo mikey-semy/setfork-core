@@ -9,6 +9,16 @@ pub struct StepRef {
     pub label: String,
     pub url: Option<String>,
 }
+
+/// Живёт ли ссылка — ОДНО правило на все пути ядра (#148).
+///
+/// Ссылка — это адрес ИЛИ подпись. Без подписи интерфейс показывает домен, и фронт с
+/// 04.08.2026 хранит такие ссылки (их кладут одним адресом). Раньше подпись требовали
+/// пять мест — два загрузчика из базы, проекция пуша, разбор канона и валидатор, —
+/// каждое своей строкой, и ссылка одним адресом молча пропадала из git-канона.
+pub fn keeps_ref(label: &str, url: Option<&str>) -> bool {
+    !label.trim().is_empty() || url.is_some_and(|u| !u.trim().is_empty())
+}
 pub struct SerStep {
     pub n: i32,
     // Блочная модель: None/Some("step") = шаг; иначе text/image. content — payload
@@ -102,7 +112,11 @@ pub fn list_json(v: &VersionData) -> String {
                 .iter()
                 .map(|r| {
                     let mut m = serde_json::Map::new();
-                    m.insert("label".into(), serde_json::Value::String(r.label.clone()));
+                    // Подпись необязательна (#148): пишется только при наличии, как
+                    // blockId и imageKey, — у ссылки одним адресом ключа нет вовсе.
+                    if !r.label.is_empty() {
+                        m.insert("label".into(), serde_json::Value::String(r.label.clone()));
+                    }
                     if let Some(u) = &r.url {
                         m.insert("url".into(), serde_json::Value::String(u.clone()));
                     }
@@ -168,11 +182,15 @@ pub fn list_json(v: &VersionData) -> String {
     s
 }
 
-/// Ссылка → markdown-элемент (label или [label](url)).
+/// Ссылка → markdown-элемент (label, [label](url) или <url>).
+///
+/// Ссылка без подписи — автоссылка `<url>`: по CommonMark она показывает сам адрес.
+/// `[](url)` в markdown невидим, и такая ссылка пропадала бы из витрины (#148).
 fn ref_item(r: &StepRef) -> String {
-    match &r.url {
-        Some(u) => format!("[{}]({})", r.label, u),
-        None => r.label.clone(),
+    match (&r.url, r.label.trim().is_empty()) {
+        (Some(u), true) => format!("<{}>", u),
+        (Some(u), false) => format!("[{}]({})", r.label, u),
+        (None, _) => r.label.clone(),
     }
 }
 
@@ -701,5 +719,31 @@ mod tests {
         let files = version_files(&ver(vec![text]));
         let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
         assert!(readme.contains("- [Источник](https://example.org/src)"), "{readme}");
+    }
+
+    /// Ссылка одним адресом в витрине — автоссылка, а не невидимое `[](url)` (#148).
+    #[test]
+    fn readme_shows_url_only_ref_as_autolink() {
+        let mut s = step(1, "Install Redis");
+        s.refs = vec![StepRef { label: String::new(), url: Some("https://redis.io/docs".into()) }];
+        let files = version_files(&ver(vec![s]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("- <https://redis.io/docs>"), "{readme}");
+        assert!(!readme.contains("[](https://redis.io/docs)"), "невидимая ссылка: {readme}");
+    }
+
+    /// Подпись в list.json пишется только при наличии: у ссылки одним адресом ключа
+    /// `label` нет, как нет `imageKey` у шага без картинки (#148).
+    #[test]
+    fn list_json_omits_empty_label() {
+        let mut s = step(1, "Install Redis");
+        s.refs = vec![
+            StepRef { label: String::new(), url: Some("https://redis.io/docs".into()) },
+            StepRef { label: "docs".into(), url: Some("https://redis.io".into()) },
+        ];
+        let json: serde_json::Value = serde_json::from_str(&list_json(&ver(vec![s]))).unwrap();
+        let refs = &json["steps"][0]["refs"];
+        assert_eq!(refs[0], serde_json::json!({ "url": "https://redis.io/docs" }));
+        assert_eq!(refs[1], serde_json::json!({ "label": "docs", "url": "https://redis.io" }));
     }
 }

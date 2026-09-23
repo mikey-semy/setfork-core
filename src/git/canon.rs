@@ -20,6 +20,7 @@ use serde::Deserialize;
 
 /// Что не так с текстом. `path` — JSON Pointer (RFC 6901) к месту ошибки: редактор
 /// находит по нему узел в своём дереве разбора и подсвечивает.
+#[derive(Debug)]
 pub struct CanonIssue {
     /// JSON Pointer к узлу: `/steps/3/title`. Пусто — ошибка относится ко всему тексту.
     pub path: String,
@@ -42,8 +43,9 @@ pub enum IssueCode {
     Schema,
     /// Шаг без заголовка: проекция молча выбросила бы такой пункт.
     StepTitleRequired,
-    /// Ссылка без подписи: проекция молча выбросила бы саму ссылку.
-    RefLabelRequired,
+    /// Ссылка без адреса И без подписи: проекция молча выбросила бы её. Ссылка одним
+    /// адресом законна (#148) — придирки к ней нет.
+    RefEmpty,
 }
 
 impl IssueCode {
@@ -53,7 +55,7 @@ impl IssueCode {
             IssueCode::Syntax => "syntax",
             IssueCode::Schema => "schema",
             IssueCode::StepTitleRequired => "step_title_required",
-            IssueCode::RefLabelRequired => "ref_label_required",
+            IssueCode::RefEmpty => "ref_empty",
         }
     }
 }
@@ -74,6 +76,7 @@ struct LossProbe {
 #[derive(Deserialize)]
 struct RefProbe {
     label: Option<String>,
+    url: Option<String>,
 }
 
 /// Строгий разбор: либо содержимое, либо ВСЕ найденные придирки разом.
@@ -94,8 +97,19 @@ pub fn parse_canon(text: &str) -> Result<super::project::ListParts, Vec<CanonIss
         }
     };
 
-    let mut issues = schema_issues(&value);
-    issues.extend(silent_loss_issues(&value));
+    // Пустую ссылку ловят И схема (anyOf «адрес или подпись», #148), И смысловая
+    // проверка. Автору — одна понятная придирка ref_empty, а не две о том же: гасим
+    // ТОЛЬКО нарушение anyOf ровно по адресу этой ссылки. Остальные придирки схемы к
+    // той же ссылке (лишний ключ, формат адреса) остаются — разбор отдаёт ВСЕ придирки
+    // разом (находка Codex на #149: гашение по пути прятало их до следующего прохода).
+    let loss = silent_loss_issues(&value);
+    let empty_ref = |p: &str| loss.iter().any(|l| l.code == IssueCode::RefEmpty && p == l.path);
+    let mut issues: Vec<CanonIssue> = schema_issues(&value)
+        .into_iter()
+        .filter(|(s, any_of)| !(*any_of && empty_ref(&s.path)))
+        .map(|(s, _)| s)
+        .collect();
+    issues.extend(loss);
     if !issues.is_empty() {
         return Err(issues);
     }
@@ -114,8 +128,10 @@ pub fn parse_canon(text: &str) -> Result<super::project::ListParts, Vec<CanonIss
     Ok(parsed)
 }
 
-/// Придирки схемы. Крейт отдаёт `instance_path` уже в виде JSON Pointer.
-fn schema_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
+/// Придирки схемы. Крейт отдаёт `instance_path` уже в виде JSON Pointer. Второе
+/// значение — нарушено ли `anyOf`: у ссылки это правило «адрес или подпись», его
+/// дубль с понятной `ref_empty` гасит `parse_canon`.
+fn schema_issues(value: &serde_json::Value) -> Vec<(CanonIssue, bool)> {
     let schema: serde_json::Value = match serde_json::from_str(SCHEMA) {
         Ok(s) => s,
         // Вшитая схема битой быть не может; если стала — это наш сбой, не читателя.
@@ -133,12 +149,16 @@ fn schema_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
     };
     validator
         .iter_errors(value)
-        .map(|e| CanonIssue {
-            path: e.instance_path().to_string(),
-            code: IssueCode::Schema,
-            message: e.to_string(),
-            line: 0,
-            column: 0,
+        .map(|e| {
+            let any_of = matches!(e.kind(), jsonschema::error::ValidationErrorKind::AnyOf { .. });
+            let issue = CanonIssue {
+                path: e.instance_path().to_string(),
+                code: IssueCode::Schema,
+                message: e.to_string(),
+                line: 0,
+                column: 0,
+            };
+            (issue, any_of)
         })
         .collect()
 }
@@ -168,13 +188,14 @@ fn silent_loss_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
                 column: 0,
             });
         }
-        // Ссылка без подписи — выбрасывается сама ссылка вместе с адресом.
+        // Ссылка без адреса И без подписи — выбрасывается целиком (#148). Одним адресом
+        // ссылка законна: интерфейс показывает её доменом, и разбор её сохраняет.
         for (k, r) in probe.refs.unwrap_or_default().iter().enumerate() {
-            if blank(&r.label) {
+            if !crate::git::serialize::keeps_ref(r.label.as_deref().unwrap_or(""), r.url.as_deref()) {
                 out.push(CanonIssue {
-                    path: format!("/steps/{i}/refs/{k}/label"),
-                    code: IssueCode::RefLabelRequired,
-                    message: "a reference requires a non-empty label".into(),
+                    path: format!("/steps/{i}/refs/{k}"),
+                    code: IssueCode::RefEmpty,
+                    message: "a reference requires a url or a label".into(),
                     line: 0,
                     column: 0,
                 });
@@ -252,16 +273,70 @@ mod tests {
         assert!(issues.iter().any(|i| i.code == IssueCode::StepTitleRequired), "шаг без заголовка");
     }
 
+    /// Ссылка одним адресом — законна (#148): интерфейс показывает её доменом, и фронт
+    /// хранит такие ссылки. Раньше разбор отвергал её, а мягкий парс выбрасывал молча.
     #[test]
-    fn ref_without_label_is_an_error_not_silent_loss() {
-        // Схема пропускает: пустая строка — законная строка. А мягкий парс
-        // выбрасывает ссылку целиком, вместе с адресом.
-        let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"   ","url":"https://example.com"}]}"#;
+    fn url_only_ref_is_kept_with_or_without_label_key() {
+        for r in [r#"{"label":"   ","url":"https://example.com"}"#, r#"{"url":"https://example.com"}"#] {
+            let s = format!(
+                r#"{{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{r}]}}"#
+            );
+            let parts = parse_canon(&canon(&s))
+                .unwrap_or_else(|e| panic!("ссылка одним адресом отвергнута: {r} → {e:?}"));
+            let refs = &parts.steps[0].refs;
+            assert_eq!(refs.len(), 1, "ссылка одним адресом пропала: {r}");
+            assert_eq!(refs[0].url.as_deref(), Some("https://example.com"));
+        }
+    }
+
+    /// Ссылка без адреса И без подписи — не ссылка. Мягкий парс её выбрасывает, значит
+    /// разбор обязан сказать об этом, а не промолчать.
+    #[test]
+    fn empty_ref_is_an_error_not_silent_loss() {
+        let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"   "}]}"#;
         let Err(issues) = parse_canon(&canon(s)) else {
-            panic!("ссылка без подписи обязана отвергнуться")
+            panic!("пустая ссылка обязана отвергнуться")
         };
-        let it = issues.iter().find(|i| i.code == IssueCode::RefLabelRequired).expect("придирка");
-        assert_eq!(it.path, "/steps/0/refs/0/label");
+        let it = issues.iter().find(|i| i.code == IssueCode::RefEmpty).expect("придирка");
+        assert_eq!(it.path, "/steps/0/refs/0");
+        // Схема ловит ту же ссылку (anyOf), но автору — ОДНА понятная придирка.
+        assert_eq!(issues.len(), 1, "дубль придирки схемы: {issues:?}");
+    }
+
+    /// У пустой ссылки гасится только дубль «адрес или подпись», а чужие придирки к
+    /// ней остаются: разбор отдаёт все придирки за один проход (находка Codex на #149).
+    #[test]
+    fn empty_ref_keeps_unrelated_schema_complaints() {
+        let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":" ","unexpected":true}]}"#;
+        let Err(issues) = parse_canon(&canon(s)) else { panic!("обязана отвергнуться") };
+        assert!(issues.iter().any(|i| i.code == IssueCode::RefEmpty), "ref_empty: {issues:?}");
+        assert!(
+            issues.iter().any(|i| i.code == IssueCode::Schema && i.message.contains("unexpected")),
+            "придирка к лишнему ключу потерялась: {issues:?}"
+        );
+    }
+
+    /// Опубликованная схема сама выражает правило keeps_ref (#148): сторонний валидатор
+    /// по ней отвергает то же, что ядро, и принимает то же.
+    #[test]
+    fn published_schema_matches_keeps_ref() {
+        let issues_for = |r: &str| {
+            let s = format!(
+                r#"{{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{r}]}}"#
+            );
+            let v: serde_json::Value = serde_json::from_str(&canon(&s)).unwrap();
+            schema_issues(&v)
+        };
+        for ok in [
+            r#"{"url":"https://example.com"}"#,
+            r#"{"label":"  ","url":"https://example.com"}"#,
+            r#"{"label":"док"}"#,
+        ] {
+            assert!(issues_for(ok).is_empty(), "схема отвергла законную ссылку {ok}: {:?}", issues_for(ok));
+        }
+        for bad in [r#"{}"#, r#"{"label":"   "}"#, r#"{"url":""}"#] {
+            assert!(!issues_for(bad).is_empty(), "схема приняла пустую ссылку {bad}");
+        }
     }
 
     #[test]

@@ -243,7 +243,12 @@ fn parse_steps(steps_raw: &[RawStep]) -> Vec<ProjStep> {
                 .as_ref()
                 .map(|rs| {
                     rs.iter()
-                        .filter(|r| !r.label.as_deref().unwrap_or("").trim().is_empty())
+                        .filter(|r| {
+                            crate::git::serialize::keeps_ref(
+                                r.label.as_deref().unwrap_or(""),
+                                r.url.as_deref(),
+                            )
+                        })
                         .map(|r| ProjRef { label: r.label.clone().unwrap_or_default(), url: r.url.clone() })
                         .collect()
                 })

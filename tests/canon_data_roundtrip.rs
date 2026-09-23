@@ -119,7 +119,7 @@ const FULL_STEPS: &str = "\
  ($1, 1, '11111111-1111-1111-1111-111111111111', 'step', '{}', '{\"en\":\"Шаг с ВСЕМИ полями\"}', \
   '{\"en\":\"описание с «кавычками» и — тире\"}', 'rm -rf /tmp/х', 'img/скрин.png', 'required', true, \
   '{\"en\":\"Точно сносим?\"}', true, '{\"en\":\"иначе не взлетит\"}', '{\"en\":\"Раздел\"}', \
-  '[{\"en\":\"подзадача\"}]', '[{\"label\":{\"en\":\"док\"},\"url\":\"https://setfork.com\"}]'), \
+  '[{\"en\":\"подзадача\"}]', '[{\"label\":{\"en\":\"док\"},\"url\":\"https://setfork.com\"},{\"label\":{},\"url\":\"https://setfork.com/only-url\"}]'), \
  ($1, 2, '22222222-2222-2222-2222-222222222222', 'text', '{\"md\":\"Вводный **абзац**\"}', '{}', '{}', '', \
   null, 'optional', false, '{}', false, '{}', '{}', '[]', \
   '[{\"label\":{\"en\":\"источник\"},\"url\":\"https://ru.wikisource.org/wiki/src\"}]')";
@@ -155,6 +155,8 @@ async fn the_round_trip_keeps_every_list_field() {
         // Ссылки ТЕКСТОВОГО блока (фронт setfork-app#962): круг обязан их нести, иначе
         // первый же push стёр бы источники справочного списка.
         ("text refs", "\"url\": \"https://ru.wikisource.org/wiki/src\""),
+        // Ссылка одним адресом (#148): канон несёт её сам, до и после настоящего push.
+        ("url-only ref", "\"url\": \"https://setfork.com/only-url\""),
     ] {
         assert!(
             before.contains(expected),
@@ -425,4 +427,23 @@ async fn readme_shows_text_block_refs_loaded_from_the_database() {
         readme.contains("- [Только источник](https://ru.wikisource.org/wiki/b)"),
         "ссылки текста без слов витрина не прячет:\n{readme}"
     );
+}
+
+/// Ссылка одним адресом доезжает до витрины по НАСТОЯЩЕМУ пути — база →
+/// `load_bundle_data` → README (#148). Юнит-тест в serialize.rs строит `StepRef` руками
+/// и загрузку не проходит; именно на загрузке такая ссылка раньше и пропадала.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn url_only_ref_reaches_readme_from_the_database() {
+    let pool = support::pool_with_schema().await;
+    let steps = "\
+ ($1, 1, '55555555-5555-5555-5555-555555555551', 'step', '{}', '{\"en\":\"Шаг\"}', '{}', '', \
+  null, 'required', false, '{}', false, '{}', '{}', '[]', \
+  '[{\"label\":{},\"url\":\"https://example.org/only-url\"}]')";
+    let id = seed(&pool, "urlonlyreadme", None, steps).await;
+    let versions = db::load_bundle_data(&pool, id).await.expect("load bundle");
+    let v = versions.into_iter().find(|v| v.version == 1).expect("версия есть");
+    let files = serialize::version_files(&v);
+    let readme = &files.iter().find(|(p, _)| p == "README.md").expect("README").1;
+    assert!(readme.contains("<https://example.org/only-url>"), "ссылка одним адресом в витрине:\n{readme}");
 }
