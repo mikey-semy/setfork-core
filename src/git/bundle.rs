@@ -40,7 +40,7 @@ fn upd_io(e: MainUpdateError) -> io::Error {
 // плоский корень, steps/ из формата удалены). treebuilder.write() канонично
 // сортирует записи — как git, поэтому SHA дерева совпадает.
 //
-// ⚠️ АВТОРСКИЕ КАТАЛОГИ (`scripts/`, `references/`) ПЕРЕНОСЯТСЯ ИЗ РОДИТЕЛЯ. Их не
+// ⚠️ АВТОРСКИЕ КАТАЛОГИ (`AUTHORED_DIRS`: `scripts/`, `references/`, `assets/`) ПЕРЕНОСЯТСЯ ИЗ РОДИТЕЛЯ. Их не
 // генерирует ядро — они приходят пушем, — а дерево здесь собирается с нуля. Без
 // переноса первая же правка с сайта молча стирала бы скрипты, пришедшие пушем:
 // версия выглядела бы законной, а файлов в ней уже не было. Переносим каталог
@@ -277,9 +277,10 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     // \\xNN-экранированием, якорное правило по ним не совпадает, и законный
     // `steps/шаг.md` отвергается из-за ФОРМЫ ВЫВОДА, а не из-за содержания
     // (F6 линзы 02: в отказе было видно `"steps/шаг.md"` — с кавычками).
-    // `scripts/<файл>` и `references/<файл>` — авторские файлы скилла (близнец
-    // `serialize::authored_path`: один уровень, непустое имя).
-    r#"    bad=$(git -c core.quotePath=false ls-tree -r --name-only "$c" </dev/null | grep -v -E '^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md|(scripts|references)/[^/]+)$' | sort -u | head -5)"#,
+    // `<каталог>/<файл>` для авторских каталогов скилла (близнец
+    // `serialize::authored_path`: один уровень, непустое имя). Список каталогов
+    // подставляется в шапку хука из `AUTHORED_DIRS` — копии здесь нет.
+    r#"    bad=$(git -c core.quotePath=false ls-tree -r --name-only "$c" </dev/null | grep -v -E "^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md|($authored_re)/[^/]+)\$" | sort -u | head -5)"#,
     "    if [ -n \"$bad\" ]; then",
     "      msg tree_allowlist >&2",
     "      msg tree_foreign_header \"$c\" >&2",
@@ -292,7 +293,7 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     //
     // `ls-tree -l` печатает `<режим> <тип> <объект> <размер>\t<путь>`: режим отличает
     // ссылку (120000) и подмодуль (160000) от файла, размер нужен сумме.
-    r#"    authored=$(git -c core.quotePath=false ls-tree -r -l "$c" -- scripts references </dev/null)"#,
+    r#"    authored=$(git -c core.quotePath=false ls-tree -r -l "$c" -- $authored_dirs </dev/null)"#,
     "    if [ -n \"$authored\" ]; then",
     r#"      notfile=$(printf '%s\n' "$authored" | awk -F '\t' '{ split($1, f, " "); if (f[1] != "100644" && f[1] != "100755") print $2 }' | head -1)"#,
     "      if [ -n \"$notfile\" ]; then msg authored_not_file \"$notfile\" >&2; exit 1; fi",
@@ -358,10 +359,14 @@ fn pre_receive() -> String {
 zero=0000000000000000000000000000000000000000
 authored_max_files={}
 authored_max_bytes={}
+authored_dirs='{}'
+authored_re='{}'
 {}{}
 ",
         super::serialize::AUTHORED_MAX_FILES,
         super::serialize::AUTHORED_MAX_BYTES,
+        super::serialize::AUTHORED_DIRS.join(" "),
+        super::serialize::AUTHORED_DIRS.join("|"),
         super::messages::shell_msg_fn(),
         PRE_RECEIVE_BODY.join(
             "

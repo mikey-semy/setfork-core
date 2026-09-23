@@ -360,7 +360,7 @@ pub fn tree_path_allowed(path: &str) -> bool {
             .is_some_and(|stem| !stem.is_empty() && !stem.contains('/'))
 }
 
-/// Каталоги АВТОРСКИХ файлов — `scripts/` и `references/` стандарта Agent Skills
+/// Каталоги АВТОРСКИХ файлов — `scripts/`, `references/` и `assets/` стандарта Agent Skills
 /// (agentskills.io/specification). В отличие от README.md и list.json их не
 /// генерирует ядро: они приходят пушем (а позже — импортом) и хранятся как есть.
 ///
@@ -372,7 +372,10 @@ pub fn tree_path_allowed(path: &str) -> bool {
 /// правится предложением, как шаг.
 ///
 /// Скрипты НИКОГДА не исполняются на сервере — ядро их только хранит.
-pub const AUTHORED_DIRS: [&str; 2] = ["scripts", "references"];
+/// `assets/` — шаблоны и данные скилла; решение владельца 23.09: те же правила, что у
+/// остальных двух, то есть ТОЛЬКО ТЕКСТ. Бинарные ассеты — в S3 по хешу, как решено для
+/// блока «Файл».
+pub const AUTHORED_DIRS: [&str; 3] = ["scripts", "references", "assets"];
 
 /// Потолки авторских файлов на дерево — лимиты-кандидаты из того же §4, принятые
 /// владельцем вместе с решением: текст скилла не больше 1 МБ и не больше 50 файлов.
@@ -382,7 +385,7 @@ pub const AUTHORED_DIRS: [&str; 2] = ["scripts", "references"];
 pub const AUTHORED_MAX_FILES: usize = 50;
 pub const AUTHORED_MAX_BYTES: u64 = 1024 * 1024;
 
-/// Путь авторского файла: ровно `scripts/<имя>` или `references/<имя>`.
+/// Путь авторского файла: ровно `<каталог>/<имя>` для каталога из `AUTHORED_DIRS`.
 ///
 /// ОДИН уровень, без вложенных каталогов: стандарт советует держать ссылки из
 /// SKILL.md на один уровень вглубь, а правило, которое потом придётся ослабить,

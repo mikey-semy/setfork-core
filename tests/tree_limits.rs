@@ -71,15 +71,15 @@ fn the_hook_rejects_a_foreign_file_and_names_it() {
     let root = tmp("tree-hook");
     let (_bare, work) = repo_pair(&root.0);
 
-    std::fs::create_dir_all(work.join("assets")).expect("mkdir");
-    std::fs::write(work.join("assets/big.bin"), vec![0u8; 1024]).expect("blob");
+    std::fs::create_dir_all(work.join("images")).expect("mkdir");
+    std::fs::write(work.join("images/big.bin"), vec![0u8; 1024]).expect("blob");
     git_ok(&work, &["add", "-A"]);
     git_ok(&work, &["commit", "-q", "-m", "мусор"]);
 
     let out = git(&work, &["push", "origin", "main"]);
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "пуш с лишним файлом обязан быть отвергнут: {err}");
-    assert!(err.contains("assets/big.bin"), "отказ обязан НАЗВАТЬ путь, а не только факт: {err}");
+    assert!(err.contains("images/big.bin"), "отказ обязан НАЗВАТЬ путь, а не только факт: {err}");
 }
 
 // Мусор в промежуточном коммите — главный смысл проверки по всем новым объектам,
@@ -285,9 +285,9 @@ fn update_main_rejects_a_foreign_path() {
     let clean = mk(&[("list.json", "{}"), ("README.md", "# t")], None);
     assert_eq!(update_main(&repo, clean, None, "тест"), Ok(()), "чистое дерево проходит");
 
-    let dirty = mk(&[("list.json", "{}"), ("assets/x.png", "\u{0}")], Some(clean));
+    let dirty = mk(&[("list.json", "{}"), ("images/x.png", "\u{0}")], Some(clean));
     match update_main(&repo, dirty, Some(clean), "тест") {
-        Err(MainUpdateError::ForeignPath(p)) => assert_eq!(p, "assets/x.png"),
+        Err(MainUpdateError::ForeignPath(p)) => assert_eq!(p, "images/x.png"),
         other => panic!("ожидался ForeignPath, получено {other:?}"),
     }
 
@@ -305,7 +305,7 @@ fn the_path_allowlist_matches_the_version_format() {
     }
     for bad in [
         "steps", // ФАЙЛ с таким именем; каталог сюда не попадает — он не лист
-        "assets/x.png",
+        "images/x.png",
         "steps/nested/deep.md", // подкаталог внутри steps — не легаси-форма
         "steps/x.bin",
         ".github/workflows/ci.yml",

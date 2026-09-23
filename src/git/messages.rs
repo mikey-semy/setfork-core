@@ -58,8 +58,8 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
     },
     HookMessage {
         key: "tree_allowlist",
-        en: "SetFork: a list tree may hold only README.md, list.json, .gitattributes, scripts/<file> and references/<file>.",
-        ru: "SetFork: в дереве списка разрешены только README.md, list.json, .gitattributes, scripts/<файл> и references/<файл>.",
+        en: "SetFork: a list tree may hold only README.md, list.json, .gitattributes and scripts/, references/, assets/ (one level, text only).",
+        ru: "SetFork: в дереве списка разрешены только README.md, list.json, .gitattributes и scripts/, references/, assets/ (один уровень, только текст).",
     },
     HookMessage {
         key: "tree_foreign_header",
@@ -74,7 +74,7 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         en: "Remove them from the commit: list content lives in list.json.",
         ru: "Уберите их из коммита: содержимое списка живёт в list.json.",
     },
-    // Авторские файлы скилла (scripts/, references/) — решение §4 исследования
+    // Авторские файлы скилла (scripts/, references/, assets/) — решение §4 исследования
     // Agent Skills: текст живёт в дереве, бинарь — в S3 по хешу.
     HookMessage {
         key: "authored_not_file",
@@ -83,18 +83,18 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
     },
     HookMessage {
         key: "authored_binary",
-        en: "SetFork: %s is binary; scripts/ and references/ hold text only (attach binaries as file blocks)",
-        ru: "SetFork: %s — бинарный файл; в scripts/ и references/ только текст (бинарь — блоком «Файл»)",
+        en: "SetFork: %s is binary; scripts/, references/ and assets/ hold text only (attach binaries as file blocks)",
+        ru: "SetFork: %s — бинарный файл; в scripts/, references/ и assets/ только текст (бинарь — блоком «Файл»)",
     },
     HookMessage {
         key: "authored_too_many",
-        en: "SetFork: scripts/ and references/ hold %s files; the limit is %s",
-        ru: "SetFork: в scripts/ и references/ %s файлов; предел %s",
+        en: "SetFork: scripts/, references/ and assets/ hold %s files; the limit is %s",
+        ru: "SetFork: в scripts/, references/ и assets/ %s файлов; предел %s",
     },
     HookMessage {
         key: "authored_too_large",
-        en: "SetFork: scripts/ and references/ hold %s bytes; the limit is %s",
-        ru: "SetFork: scripts/ и references/ занимают %s байт; предел %s",
+        en: "SetFork: scripts/, references/ and assets/ hold %s bytes; the limit is %s",
+        ru: "SetFork: scripts/, references/ и assets/ занимают %s байт; предел %s",
     },
     HookMessage {
         key: "magic_needs_actor",

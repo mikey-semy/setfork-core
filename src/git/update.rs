@@ -47,7 +47,7 @@ fn first_foreign_path(tree: &git2::Tree<'_>) -> Result<Option<String>, git2::Err
     Ok(foreign)
 }
 
-/// Что не так с АВТОРСКИМИ файлами (`scripts/`, `references/`) — или None.
+/// Что не так с АВТОРСКИМИ файлами (`AUTHORED_DIRS`) — или None.
 ///
 /// Путь сам по себе проверяет `tree_path_allowed`; здесь — то, чего по пути не
 /// видно: что это обычный файл, что это текст и что всего в пределах лимита.
@@ -100,9 +100,9 @@ pub enum MainUpdateError {
     /// то, что обязано пережить clone и вернуться через push (ADR-0014).
     /// Несёт сам путь — отказ обязан называть причину, а не только факт.
     ForeignPath(String),
-    /// В `scripts/` или `references/` лежит не обычный файл (ссылка, подмодуль).
+    /// В авторском каталоге лежит не обычный файл (ссылка, подмодуль).
     AuthoredNotFile(String),
-    /// В `scripts/` или `references/` лежит бинарь: ему место в S3, а не в git.
+    /// В авторском каталоге лежит бинарь: ему место в S3, а не в git.
     AuthoredBinary(String),
     /// Авторских файлов больше `AUTHORED_MAX_FILES`.
     AuthoredTooMany(usize),
@@ -122,19 +122,25 @@ impl std::fmt::Display for MainUpdateError {
             MainUpdateError::MissingListJson => write!(f, "list.json is required at the repo root"),
             MainUpdateError::ForeignPath(p) => write!(
                 f,
-                "only README.md, list.json, .gitattributes, scripts/<file> and references/<file> are allowed in a list tree; foreign path: {p}"
+                "only README.md, list.json, .gitattributes and scripts/, references/, assets/ files are allowed in a list tree; foreign path: {p}"
             ),
             MainUpdateError::AuthoredNotFile(p) => {
                 write!(f, "{p} must be a regular file (no symlinks or submodules)")
             }
             MainUpdateError::AuthoredBinary(p) => {
-                write!(f, "{p} is binary; scripts/ and references/ hold text only")
+                write!(f, "{p} is binary; scripts/, references/ and assets/ hold text only")
             }
             MainUpdateError::AuthoredTooMany(n) => {
-                write!(f, "scripts/ and references/ hold {n} files; the limit is {AUTHORED_MAX_FILES}")
+                write!(
+                    f,
+                    "scripts/, references/ and assets/ hold {n} files; the limit is {AUTHORED_MAX_FILES}"
+                )
             }
             MainUpdateError::AuthoredTooLarge(b) => {
-                write!(f, "scripts/ and references/ hold {b} bytes; the limit is {AUTHORED_MAX_BYTES}")
+                write!(
+                    f,
+                    "scripts/, references/ and assets/ hold {b} bytes; the limit is {AUTHORED_MAX_BYTES}"
+                )
             }
             MainUpdateError::NonFastForward => write!(f, "non-fast-forward update of main is forbidden"),
             MainUpdateError::Stale => write!(f, "main moved concurrently (stale expected tip)"),

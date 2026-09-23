@@ -97,8 +97,8 @@ fn write_exec(work: &Path, path: &str, bytes: &[u8]) {
 // ── Правило путей ────────────────────────────────────────────────────────────
 
 #[test]
-fn authored_paths_are_one_level_under_two_dirs() {
-    for ok in ["scripts/run.sh", "references/context.md", "scripts/шаг.sh"] {
+fn authored_paths_are_one_level_under_three_dirs() {
+    for ok in ["scripts/run.sh", "references/context.md", "assets/blocks.example.json", "scripts/шаг.sh"] {
         assert!(tree_path_allowed(ok) && authored_path(ok), "{ok} — законный авторский файл");
     }
     for bad in [
@@ -106,9 +106,11 @@ fn authored_paths_are_one_level_under_two_dirs() {
         "scripts/",
         "scripts/lib/x.sh",
         "references/a/b.md",
+        "assets/img/logo.svg",
+        "assets",
         "scripts/..",
         "scripts/.",
-        "assets/x.png",
+        "images/x.png",
         "scriptsx/run.sh",
     ] {
         assert!(!tree_path_allowed(bad), "{bad} проходить не должен");
@@ -123,6 +125,7 @@ fn the_hook_accepts_scripts_and_references() {
     let (_bare, work) = repo_pair(&root.0);
     write_exec(&work, "scripts/run.sh", b"#!/bin/sh\necho hi\n");
     write(&work, "references/context.md", "# Контекст\n".as_bytes());
+    write(&work, "assets/template.md", "# Шаблон\n".as_bytes());
     let (ok, err) = commit_push(&work, "скилл");
     assert!(ok, "законные файлы скилла обязаны проходить: {err}");
 }
@@ -166,7 +169,7 @@ fn the_hook_counts_files_across_both_dirs() {
     // Ровно предел — законно; следующий файл — отказ. Половина в каждом каталоге:
     // лимит на дерево, а не на каталог.
     for i in 0..AUTHORED_MAX_FILES {
-        let dir = if i % 2 == 0 { "scripts" } else { "references" };
+        let dir = ["scripts", "references", "assets"][i % 3];
         write(&work, &format!("{dir}/f{i}.txt"), format!("{i}\n").as_bytes());
     }
     let (ok, err) = commit_push(&work, "ровно предел");
@@ -183,7 +186,7 @@ fn the_hook_sums_bytes_across_both_dirs() {
     let (_bare, work) = repo_pair(&root.0);
     let half = (AUTHORED_MAX_BYTES / 2 + 1) as usize;
     write(&work, "scripts/a.txt", &vec![b'a'; half]);
-    write(&work, "references/b.txt", &vec![b'b'; half]);
+    write(&work, "assets/b.txt", &vec![b'b'; half]);
     let (ok, err) = commit_push(&work, "два половинных файла");
     assert!(!ok, "сумма больше предела обязана быть отвергнута: {err}");
     assert!(err.contains(&AUTHORED_MAX_BYTES.to_string()), "отказ называет предел: {err}");
@@ -305,10 +308,12 @@ fn a_web_version_keeps_pushed_scripts_byte_for_byte() {
 
     write_exec(&work, "scripts/run.sh", b"#!/bin/sh\necho hi\n");
     write(&work, "references/context.md", "# Почему так\n".as_bytes());
+    write(&work, "assets/template.md", "# Шаблон\n".as_bytes());
     let (ok, err) = commit_push(&work, "скрипт пушем");
     assert!(ok, "{err}");
     let pushed_scripts = git_ok(&bare, &["rev-parse", "main:scripts"]);
     let pushed_refs = git_ok(&bare, &["rev-parse", "main:references"]);
+    let pushed_assets = git_ok(&bare, &["rev-parse", "main:assets"]);
 
     // Правка с сайта: новая версия собирается ядром заново.
     bundle::append_versions(&bare, &[ver(2, vec![step(1, "Проверить сеть"), step(2, "Проверить диск")])])
@@ -320,6 +325,7 @@ fn a_web_version_keeps_pushed_scripts_byte_for_byte() {
         "правка с сайта стёрла или изменила скрипты, пришедшие пушем"
     );
     assert_eq!(git_ok(&bare, &["rev-parse", "main:references"]), pushed_refs);
+    assert_eq!(git_ok(&bare, &["rev-parse", "main:assets"]), pushed_assets, "правка с сайта стёрла assets/");
     let mode = git_ok(&bare, &["ls-tree", "main", "scripts/run.sh"]);
     assert!(mode.starts_with("100755"), "скрипт потерял право на запуск: {mode}");
     assert!(git_ok(&bare, &["show", "main:list.json"]).contains("Проверить диск"), "версия легла");
@@ -362,4 +368,16 @@ fn realignment_recognises_a_version_that_carries_scripts() {
     bundle::append_missing_versions(&bare, &[v2]).expect("выравнивание");
     assert_eq!(git_ok(&bare, &["rev-parse", "main"]), tip, "выравнивание положило двойника вместо тега");
     assert_eq!(git_ok(&bare, &["rev-parse", "v2^{commit}"]), tip, "тег вернулся не на свой коммит");
+}
+
+// Бинарю место в S3 и в `assets/` тоже: каталог «ассетов» соблазняет положить туда
+// картинку, и правило обязано сработать ровно так же, как в двух других.
+#[test]
+fn the_hook_rejects_a_binary_in_assets() {
+    let root = tmp("skill-asset-bin");
+    let (_bare, work) = repo_pair(&root.0);
+    write(&work, "assets/logo.png", &[0x89, b'P', b'N', b'G', 0, 0, 0, 13]);
+    let (ok, err) = commit_push(&work, "картинка");
+    assert!(!ok, "бинарь в assets/ обязан быть отвергнут: {err}");
+    assert!(err.contains("assets/logo.png"), "{err}");
 }

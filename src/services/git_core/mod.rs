@@ -118,7 +118,7 @@ fn main_status(e: MainUpdateError) -> Status {
             Code::FailedPrecondition,
             Reason::ForeignPath,
             format!(
-                "only README.md, list.json, .gitattributes, scripts/<file> and references/<file> are allowed in the list tree; foreign path: {p}"
+                "only README.md, list.json, .gitattributes and scripts/, references/, assets/ files are allowed in the list tree; foreign path: {p}"
             ),
         ),
         // Авторские файлы вне формата — тот же класс «дерево собрано не по формату»,
