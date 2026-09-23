@@ -11,16 +11,17 @@ use super::util::{db_status, internal};
 use crate::db;
 use crate::git::bundle::VersionData;
 use crate::git::update::{MainUpdateError, update_main};
-use crate::git::{MAIN_REF, bundle, history, project, repo, smart_http, write};
+use crate::git::{MAIN_REF, authored, bundle, history, project, repo, smart_http, write};
 use crate::pb::git_core_server::GitCore;
 use crate::pb::{
-    Branch, BranchOpResponse, BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse,
-    CanonIssue, CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest,
-    CommitToBranchResponse, CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest,
-    InfoRefsRequest, ListCommitsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest,
-    MergeStateRequest, MergeStateResponse, MirrorCheckResponse, MirrorPushResponse, ParseCanonRequest,
-    ParseCanonResponse, PostRequest, ReceivePackResponse, RenderCanonRequest, RenderCanonResponse, RepoRef,
-    Tag, TagsResponse, UpdateBranchRequest, UpdateBranchResponse,
+    AuthoredFile, AuthoredFilesRequest, AuthoredFilesResponse, Branch, BranchOpResponse,
+    BranchSnapshotRequest, BranchSnapshotResponse, BranchesResponse, BytesResponse, CanonIssue,
+    CapabilitiesRequest, CapabilitiesResponse, Commit, CommitToBranchRequest, CommitToBranchResponse,
+    CommitsResponse, CreateBranchRequest, CreateTagRequest, DeleteBranchRequest, InfoRefsRequest,
+    ListCommitsRequest, MergeBranchRequest, MergeBranchResponse, MergeResolvedRequest, MergeStateRequest,
+    MergeStateResponse, MirrorCheckResponse, MirrorPushResponse, ParseCanonRequest, ParseCanonResponse,
+    PostRequest, ReceivePackResponse, RenderCanonRequest, RenderCanonResponse, RepoRef, Tag, TagsResponse,
+    UpdateBranchRequest, UpdateBranchResponse,
 };
 
 /// GitCore: git-операции (smart-HTTP, ветки/теги/merge, bundle) поверх общего пула.
@@ -722,6 +723,33 @@ impl GitCore for GitCoreSvc {
         let (bare_m, id_m) = self.ensure(&repo.owner, &repo.slug).await?;
         spawn_mirror(self.pool.clone(), id_m, bare_m);
         Ok(Response::new(BranchOpResponse { tip_sha: sha }))
+    }
+
+    /// Авторские файлы версии (ADR-0028) — для экспорта скилла, байтами из дерева тега `vN`
+    /// (при `version = 0` — вершины main). Нет такой версии → `found = false`, а не ошибка:
+    /// приложение тогда собирает скилл из блоков, как для списка без авторских файлов.
+    async fn get_authored_files(
+        &self,
+        req: Request<AuthoredFilesRequest>,
+    ) -> Result<Response<AuthoredFilesResponse>, Status> {
+        let AuthoredFilesRequest { repo: repo_ref, version } = req.into_inner();
+        let RepoRef { owner, slug } = repo_ref.ok_or_else(|| Status::invalid_argument("repo is required"))?;
+        let (bare, _id) = self.ensure(&owner, &slug).await?;
+        let found = with_repo(bare, move |repo| {
+            let Some(commit) = authored::version_commit(repo, version) else { return Ok(None) };
+            authored::authored_files(repo, commit).map(Some).map_err(internal)
+        })
+        .await?;
+        Ok(Response::new(match found {
+            None => AuthoredFilesResponse { found: false, files: vec![] },
+            Some(files) => AuthoredFilesResponse {
+                found: true,
+                files: files
+                    .into_iter()
+                    .map(|f| AuthoredFile { path: f.path, content: f.content, executable: f.executable })
+                    .collect(),
+            },
+        }))
     }
 
     async fn list_tags(&self, req: Request<RepoRef>) -> Result<Response<TagsResponse>, Status> {
