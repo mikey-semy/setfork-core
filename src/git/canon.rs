@@ -20,6 +20,7 @@ use serde::Deserialize;
 
 /// Что не так с текстом. `path` — JSON Pointer (RFC 6901) к месту ошибки: редактор
 /// находит по нему узел в своём дереве разбора и подсвечивает.
+#[derive(Debug)]
 pub struct CanonIssue {
     /// JSON Pointer к узлу: `/steps/3/title`. Пусто — ошибка относится ко всему тексту.
     pub path: String,
