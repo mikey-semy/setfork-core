@@ -121,7 +121,8 @@ const FULL_STEPS: &str = "\
   '{\"en\":\"Точно сносим?\"}', true, '{\"en\":\"иначе не взлетит\"}', '{\"en\":\"Раздел\"}', \
   '[{\"en\":\"подзадача\"}]', '[{\"label\":{\"en\":\"док\"},\"url\":\"https://setfork.com\"}]'), \
  ($1, 2, '22222222-2222-2222-2222-222222222222', 'text', '{\"md\":\"Вводный **абзац**\"}', '{}', '{}', '', \
-  null, 'optional', false, '{}', false, '{}', '{}', '[]', '[]')";
+  null, 'optional', false, '{}', false, '{}', '{}', '[]', \
+  '[{\"label\":{\"en\":\"источник\"},\"url\":\"https://ru.wikisource.org/wiki/src\"}]')";
 
 #[tokio::test]
 #[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
@@ -151,6 +152,9 @@ async fn the_round_trip_keeps_every_list_field() {
         ("section", "\"section\": \"Раздел\""),
         ("subtasks", "\"подзадача\""),
         ("refs", "\"url\": \"https://setfork.com\""),
+        // Ссылки ТЕКСТОВОГО блока (фронт setfork-app#962): круг обязан их нести, иначе
+        // первый же push стёр бы источники справочного списка.
+        ("text refs", "\"url\": \"https://ru.wikisource.org/wiki/src\""),
     ] {
         assert!(
             before.contains(expected),
@@ -389,5 +393,36 @@ async fn duplicate_block_id_resolves_predictably() {
         (true, true),
         "побеждает последний по порядку в списке — выбор произвольный, но ОБЪЯСНИМЫЙ; \
          без `order by` здесь решал порядок строк, которого Postgres не обещает"
+    );
+}
+
+/// README текстового блока — по НАСТОЯЩЕМУ пути: строки в базе → `load_bundle_data`
+/// → файлы версии. Юнит-тест в serialize.rs строит `StepRef` руками и путь загрузки
+/// не проходит; здесь проверяется, что ссылки текста доезжают до витрины из базы, в
+/// том числе у текста без слов (находка Codex на setfork-app#963).
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn readme_shows_text_block_refs_loaded_from_the_database() {
+    let pool = support::pool_with_schema().await;
+    let steps = "\
+ ($1, 1, '44444444-4444-4444-4444-444444444441', 'text', '{\"md\":\"Первый документ\"}', '{}', '{}', '', \
+  null, 'required', false, '{}', false, '{}', '{}', '[]', \
+  '[{\"label\":{\"en\":\"Декрет — текст\"},\"url\":\"https://ru.wikisource.org/wiki/a\"}]'), \
+ ($1, 2, '44444444-4444-4444-4444-444444444442', 'text', '{\"md\":\"\"}', '{}', '{}', '', \
+  null, 'required', false, '{}', false, '{}', '{}', '[]', \
+  '[{\"label\":{\"en\":\"Только источник\"},\"url\":\"https://ru.wikisource.org/wiki/b\"}]')";
+    let id = seed(&pool, "textrefsreadme", None, steps).await;
+    let versions = db::load_bundle_data(&pool, id).await.expect("load bundle");
+    let v = versions.into_iter().find(|v| v.version == 1).expect("версия есть");
+    let files = serialize::version_files(&v);
+    let readme = &files.iter().find(|(p, _)| p == "README.md").expect("README").1;
+
+    let at_text = readme.find("Первый документ").expect("текст в README");
+    let at_ref =
+        readme.find("- [Декрет — текст](https://ru.wikisource.org/wiki/a)").expect("ссылка текста в README");
+    assert!(at_ref > at_text, "ссылка идёт ПОД текстом:\n{readme}");
+    assert!(
+        readme.contains("- [Только источник](https://ru.wikisource.org/wiki/b)"),
+        "ссылки текста без слов витрина не прячет:\n{readme}"
     );
 }
