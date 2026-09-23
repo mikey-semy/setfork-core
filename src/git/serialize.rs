@@ -168,17 +168,11 @@ pub fn list_json(v: &VersionData) -> String {
     s
 }
 
-/// Ссылка → markdown-элемент (label, [label](url) или <url>).
-///
-/// Ссылка без подписи — нормальная ссылка: интерфейс показывает её доменом. Раньше
-/// она уходила в README как `[](url)`, а у такой ссылки в markdown нет видимого
-/// текста — в витрине её не было вовсе, ни у шага, ни у текста. Автоссылка `<url>`
-/// по CommonMark показывает сам адрес.
+/// Ссылка → markdown-элемент (label или [label](url)).
 fn ref_item(r: &StepRef) -> String {
-    match (&r.url, r.label.trim().is_empty()) {
-        (Some(u), true) => format!("<{}>", u),
-        (Some(u), false) => format!("[{}]({})", r.label, u),
-        (None, _) => r.label.clone(),
+    match &r.url {
+        Some(u) => format!("[{}]({})", r.label, u),
+        None => r.label.clone(),
     }
 }
 
@@ -707,16 +701,5 @@ mod tests {
         let files = version_files(&ver(vec![text]));
         let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
         assert!(readme.contains("- [Источник](https://example.org/src)"), "{readme}");
-    }
-
-    /// Ссылка без подписи не пропадает из витрины: `[](url)` в markdown невидим.
-    #[test]
-    fn readme_shows_unlabelled_ref_as_autolink() {
-        let mut s = step(1, "Install Redis");
-        s.refs = vec![StepRef { label: String::new(), url: Some("https://redis.io/docs".into()) }];
-        let files = version_files(&ver(vec![s]));
-        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
-        assert!(readme.contains("- <https://redis.io/docs>"), "{readme}");
-        assert!(!readme.contains("[](https://redis.io/docs)"), "невидимая ссылка: {readme}");
     }
 }
