@@ -118,9 +118,19 @@ fn main_status(e: MainUpdateError) -> Status {
             Code::FailedPrecondition,
             Reason::ForeignPath,
             format!(
-                "only README.md, list.json and .gitattributes are allowed in the list tree; foreign path: {p}"
+                "only README.md, list.json, .gitattributes and scripts/, references/, assets/ files are allowed in the list tree; foreign path: {p}"
             ),
         ),
+        // Авторские файлы вне формата — тот же класс «дерево собрано не по формату»,
+        // поэтому тот же машинный код: новый потребовал бы от фронта нового
+        // сопоставления, а на этой двери отказ практически недостижим — веб-запись и
+        // слияние переносят только файлы, уже прошедшие хук. Текст называет причину.
+        e @ (MainUpdateError::AuthoredNotFile(_)
+        | MainUpdateError::AuthoredBinary(_)
+        | MainUpdateError::AuthoredTooMany(_)
+        | MainUpdateError::AuthoredTooLarge(_)) => {
+            reason::status(Code::FailedPrecondition, Reason::ForeignPath, e.to_string())
+        }
         MainUpdateError::Stale => reason::status(Code::Aborted, Reason::Stale, "main moved concurrently"),
         MainUpdateError::NonFastForward => {
             Status::internal("non-fast-forward update of main (invariant breach)")

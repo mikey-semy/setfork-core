@@ -58,8 +58,8 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
     },
     HookMessage {
         key: "tree_allowlist",
-        en: "SetFork: only README.md, list.json and .gitattributes are allowed in a list tree.",
-        ru: "SetFork: в дереве списка разрешены только README.md, list.json и .gitattributes.",
+        en: "SetFork: a list tree may hold only README.md, list.json, .gitattributes and scripts/, references/, assets/ (one level, text only).",
+        ru: "SetFork: в дереве списка разрешены только README.md, list.json, .gitattributes и scripts/, references/, assets/ (один уровень, только текст).",
     },
     HookMessage {
         key: "tree_foreign_header",
@@ -73,6 +73,28 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         // тест `texts_are_safe_for_shell_and_printf`.
         en: "Remove them from the commit: list content lives in list.json.",
         ru: "Уберите их из коммита: содержимое списка живёт в list.json.",
+    },
+    // Авторские файлы скилла (scripts/, references/, assets/) — решение §4 исследования
+    // Agent Skills: текст живёт в дереве, бинарь — в S3 по хешу.
+    HookMessage {
+        key: "authored_not_file",
+        en: "SetFork: %s must be a regular file (no symlinks or submodules)",
+        ru: "SetFork: %s обязан быть обычным файлом (без ссылок и подмодулей)",
+    },
+    HookMessage {
+        key: "authored_binary",
+        en: "SetFork: %s is binary; scripts/, references/ and assets/ hold text only (attach binaries as file blocks)",
+        ru: "SetFork: %s — бинарный файл; в scripts/, references/ и assets/ только текст (бинарь — блоком «Файл»)",
+    },
+    HookMessage {
+        key: "authored_too_many",
+        en: "SetFork: scripts/, references/ and assets/ hold %s files; the limit is %s",
+        ru: "SetFork: в scripts/, references/ и assets/ %s файлов; предел %s",
+    },
+    HookMessage {
+        key: "authored_too_large",
+        en: "SetFork: scripts/, references/ and assets/ hold %s bytes; the limit is %s",
+        ru: "SetFork: scripts/, references/ и assets/ занимают %s байт; предел %s",
     },
     HookMessage {
         key: "magic_needs_actor",
@@ -120,6 +142,16 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         key: "content_destructive",
         en: "SetFork: step %s contains a command that is not allowed here: %s (rule %s)",
         ru: "SetFork: в шаге %s команда, которую здесь выполнять нельзя: %s (правило %s)",
+    },
+    HookMessage {
+        key: "content_destructive_file",
+        en: "SetFork: %s contains a command that is not allowed here: %s (rule %s)",
+        ru: "SetFork: в %s команда, которую здесь выполнять нельзя: %s (правило %s)",
+    },
+    HookMessage {
+        key: "content_hint_file",
+        en: "Remove or rewrite that command in the script and push again.",
+        ru: "Уберите или перепишите эту команду в скрипте и повторите пуш.",
     },
     HookMessage {
         key: "content_hint",

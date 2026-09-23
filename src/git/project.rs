@@ -324,6 +324,46 @@ pub fn block_commands(raw: &[u8]) -> Option<Vec<Option<String>>> {
     Some(parsed.steps.unwrap_or_default().into_iter().map(|s| s.command).collect())
 }
 
+/// Файлы `scripts/` из дерева коммита `commit` — (путь, текст), по порядку дерева.
+///
+/// Через ШЕЛЛОВЫЙ `git`, а не libgit2: вызывается из `pre-receive`, где объекты пуша
+/// лежат в карантине receive-pack, и добраться до них умеет только процесс, унаследовавший
+/// переменные `GIT_*` хука (см. `run_dbless`). Пустой `commit` — хук старше ADR-0028,
+/// скриптов он не передаёт: судить нечего.
+///
+/// Ошибка — не «скриптов нет». Проверка содержимого закрыта по умолчанию, и
+/// недоставший файлы вызов обязан это сказать, а не пропустить пуш молча.
+pub fn authored_scripts(commit: &str) -> Result<Vec<(String, String)>, String> {
+    use std::process::{Command, Stdio};
+    if commit.is_empty() {
+        return Ok(Vec::new());
+    }
+    let git = |args: &[&str]| -> Result<Vec<u8>, String> {
+        let out =
+            Command::new("git").args(args).stdin(Stdio::null()).output().map_err(|e| format!("git: {e}"))?;
+        if !out.status.success() {
+            return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        Ok(out.stdout)
+    };
+    let listing = git(&["ls-tree", "-z", commit, "--", "scripts/"])?;
+    let mut files = Vec::new();
+    for entry in listing.split(|b| *b == 0).filter(|e| !e.is_empty()) {
+        // `<режим> <тип> <объект>\t<путь>`; не-блобы (подкаталог, ссылка) правило путей
+        // и лимиты хука уже отвергли раньше этой проверки.
+        let entry = String::from_utf8_lossy(entry);
+        let Some((meta, path)) = entry.split_once('\t') else { continue };
+        let mut meta = meta.split(' ');
+        let (Some(_mode), Some(kind), Some(oid)) = (meta.next(), meta.next(), meta.next()) else { continue };
+        if kind != "blob" {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&git(&["cat-file", "blob", oid])?).into_owned();
+        files.push((path.to_string(), text));
+    }
+    Ok(files)
+}
+
 /// None — значение не объект манифеста (массив, число, строка).
 pub fn parse_list_value(value: serde_json::Value) -> Option<ListParts> {
     let parsed: RawList = serde_json::from_value(value).ok()?;

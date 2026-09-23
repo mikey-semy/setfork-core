@@ -39,18 +39,45 @@ fn upd_io(e: MainUpdateError) -> io::Error {
 // Дерево версии из version_files (Ф2b: README.md, list.json, .gitattributes —
 // плоский корень, steps/ из формата удалены). treebuilder.write() канонично
 // сортирует записи — как git, поэтому SHA дерева совпадает.
-fn build_tree(repo: &Repository, v: &VersionData) -> Result<Oid, git2::Error> {
+//
+// ⚠️ АВТОРСКИЕ КАТАЛОГИ (`AUTHORED_DIRS`: `scripts/`, `references/`, `assets/`) ПЕРЕНОСЯТСЯ ИЗ РОДИТЕЛЯ. Их не
+// генерирует ядро — они приходят пушем, — а дерево здесь собирается с нуля. Без
+// переноса первая же правка с сайта молча стирала бы скрипты, пришедшие пушем:
+// версия выглядела бы законной, а файлов в ней уже не было. Переносим каталог
+// целиком (тот же объект дерева), поэтому его байты и SHA не меняются.
+//
+// У списка без авторских файлов дерево прежнее до байта — SHA версий, собранных
+// раньше, и сверка с фронтом не сдвигаются.
+fn build_tree(
+    repo: &Repository,
+    v: &VersionData,
+    parent_tree: Option<&git2::Tree<'_>>,
+) -> Result<Oid, git2::Error> {
     let mut root = repo.treebuilder(None)?;
     for (path, content) in version_files(v) {
         let blob = repo.blob(content.as_bytes())?;
         root.insert(path.as_str(), blob, 0o100644)?;
     }
+    if let Some(parent) = parent_tree {
+        for dir in super::serialize::AUTHORED_DIRS {
+            if let Some(entry) = parent.get_name(dir)
+                && entry.kind() == Some(ObjectType::Tree)
+            {
+                root.insert(dir, entry.id(), entry.filemode())?;
+            }
+        }
+    }
     root.write()
+}
+
+/// Дерево родителя коммита (или None у корневого) — источник авторских каталогов.
+fn parent_tree(repo: &Repository, parent: Option<Oid>) -> Result<Option<git2::Tree<'_>>, git2::Error> {
+    parent.map(|oid| repo.find_commit(oid).and_then(|c| c.tree())).transpose()
 }
 
 // Один коммит версии с фиксированной идентичностью/датой (SHA-идентично `git commit`).
 fn commit_version(repo: &Repository, parent: Option<Oid>, v: &VersionData) -> Result<Oid, git2::Error> {
-    let tree = repo.find_tree(build_tree(repo, v)?)?;
+    let tree = repo.find_tree(build_tree(repo, v, parent_tree(repo, parent)?.as_ref())?)?;
     let sig = Signature::new(AUTHOR_NAME, AUTHOR_EMAIL, &Time::new(v.ts, 0))?; // offset 0 → +0000
     let msg = commit_message(v);
     let parents: Vec<git2::Commit> = match parent {
@@ -161,6 +188,9 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     "core=\"${SETFORK_CORE_BIN:-}\"",
     "owner=\"${SETFORK_OWNER:-}\"",
     "slug=\"${SETFORK_SLUG:-}\"",
+    // Хеши уже проверенных авторских блобов — на весь пуш (см. проверку бинарности).
+    "seen_blobs=$(mktemp)",
+    "trap 'rm -f \"$seen_blobs\"' EXIT",
     "while read old new ref; do",
     // ЧТО МОЖЕТ ПОСТОРОННИЙ (Ф5): предъявить правку — и ничего больше.
     //
@@ -250,13 +280,42 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     // \\xNN-экранированием, якорное правило по ним не совпадает, и законный
     // `steps/шаг.md` отвергается из-за ФОРМЫ ВЫВОДА, а не из-за содержания
     // (F6 линзы 02: в отказе было видно `"steps/шаг.md"` — с кавычками).
-    r#"    bad=$(git -c core.quotePath=false ls-tree -r --name-only "$c" </dev/null | grep -v -E '^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md)$' | sort -u | head -5)"#,
+    // `<каталог>/<файл>` для авторских каталогов скилла (близнец
+    // `serialize::authored_path`: один уровень, непустое имя). Список каталогов
+    // подставляется в шапку хука из `AUTHORED_DIRS` — копии здесь нет.
+    r#"    bad=$(git -c core.quotePath=false ls-tree -r --name-only "$c" </dev/null | grep -v -E "^(README\.md|list\.json|\.gitattributes|steps/[^/]+\.md|($authored_re)/[^/]+)\$" | sort -u | head -5)"#,
     "    if [ -n \"$bad\" ]; then",
     "      msg tree_allowlist >&2",
     "      msg tree_foreign_header \"$c\" >&2",
     r#"      echo "$bad" | sed 's/^/  /' >&2"#,
     "      msg tree_foreign_hint >&2",
     "      exit 1",
+    "    fi",
+    // АВТОРСКИЕ ФАЙЛЫ: путь уже проверен выше, здесь — то, чего по пути не видно.
+    // Близнец `update::authored_violation`; правила обязаны совпадать.
+    //
+    // `ls-tree -l` печатает `<режим> <тип> <объект> <размер>\t<путь>`: режим отличает
+    // ссылку (120000) и подмодуль (160000) от файла, размер нужен сумме.
+    r#"    authored=$(git -c core.quotePath=false ls-tree -r -l "$c" -- $authored_dirs </dev/null)"#,
+    "    if [ -n \"$authored\" ]; then",
+    r#"      notfile=$(printf '%s\n' "$authored" | awk -F '\t' '{ split($1, f, " "); if (f[1] != "100644" && f[1] != "100755") print $2 }' | head -1)"#,
+    "      if [ -n \"$notfile\" ]; then msg authored_not_file \"$notfile\" >&2; exit 1; fi",
+    // Бинарь — есть байт NUL: без него размер после `tr -d '\000'` совпадает с
+    // исходным. `</dev/null` у git обязателен: stdin внутреннего цикла — это
+    // перечень файлов, и cat-file не должен его подъедать.
+    // ⚠️ Каждый блоб — ОДИН РАЗ за пуш, по хешу. Замер линзы 06 «ресурсы»: 200 коммитов
+    // при 50 файлах давали 58 секунд хука (линейно, ~0,3 с на коммит), потому что каждый
+    // коммит заново читал ВСЕ файлы, хотя меняется обычно один. Импорт скилла вместе с
+    // историей — ровно сотни коммитов. Уже проверенные хеши лежат в `$seen_blobs`.
+    // Читаются в BEGIN, а не приёмом `NR == FNR`: тот ломается на ПУСТОМ первом файле —
+    // ровно на первом коммите пуша, — и молча считал «виденными» все блобы.
+    r#"      fresh=$(printf '%s\n' "$authored" | awk -F '\t' -v seen_file="$seen_blobs" 'BEGIN { while ((getline h < seen_file) > 0) seen[h] = 1 } { split($1, f, " "); if (!(f[3] in seen)) print }')"#,
+    r#"      binary=$(printf '%s\n' "$fresh" | while IFS="$(printf '\t')" read -r meta path; do [ -n "$meta" ] || continue; set -- $meta; n=$(git cat-file blob "$3" </dev/null | tr -d '\000' | wc -c | tr -d ' '); [ "$n" = "$4" ] || { printf '%s\n' "$path"; break; }; printf '%s\n' "$3" >> "$seen_blobs"; done)"#,
+    "      if [ -n \"$binary\" ]; then msg authored_binary \"$binary\" >&2; exit 1; fi",
+    r#"      totals=$(printf '%s\n' "$authored" | awk -F '\t' '{ split($1, f, " "); n++; s += f[4] } END { print n + 0, s + 0 }')"#,
+    "      files=${totals% *}; bytes=${totals#* }",
+    "      if [ \"$files\" -gt \"$authored_max_files\" ]; then msg authored_too_many \"$files\" \"$authored_max_files\" >&2; exit 1; fi",
+    "      if [ \"$bytes\" -gt \"$authored_max_bytes\" ]; then msg authored_too_large \"$bytes\" \"$authored_max_bytes\" >&2; exit 1; fi",
     "    fi",
     "  done",
     // H15-002: СОДЕРЖИМОЕ. До этой строки хук судил только форму дерева, а
@@ -281,7 +340,7 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     "  case \"$ref\" in",
     "    refs/heads/main|refs/for/main)",
     "      if [ -n \"$core\" ] && [ -n \"$owner\" ] && [ -n \"$slug\" ]; then",
-    r#"        git cat-file -p "$new:list.json" </dev/null | "$core" check-content "$owner" "$slug""#,
+    r#"        git cat-file -p "$new:list.json" </dev/null | "$core" check-content "$owner" "$slug" "$new""#,
     "        rc=$?",
     "        case \"$rc\" in",
     "          0) ;;",
@@ -303,11 +362,21 @@ const PRE_RECEIVE_BODY: &[&str] = &[
 
 /// Полный текст хука: шапка + сгенерированная `msg()` + тело.
 fn pre_receive() -> String {
+    // Лимиты авторских файлов — из тех же констант, что у `update_main`: одно
+    // число на две двери, а не две копии, которые однажды разъедутся.
     format!(
         "#!/bin/sh
 zero=0000000000000000000000000000000000000000
+authored_max_files={}
+authored_max_bytes={}
+authored_dirs='{}'
+authored_re='{}'
 {}{}
 ",
+        super::serialize::AUTHORED_MAX_FILES,
+        super::serialize::AUTHORED_MAX_BYTES,
+        super::serialize::AUTHORED_DIRS.join(" "),
+        super::serialize::AUTHORED_DIRS.join("|"),
         super::messages::shell_msg_fn(),
         PRE_RECEIVE_BODY.join(
             "
@@ -442,7 +511,11 @@ fn tail_commits(
     for v in versions.iter().rev() {
         let Some(oid) = cur else { return Ok(None) };
         let commit = repo.find_commit(oid)?;
-        if commit.tree_id() != build_tree(repo, v)? {
+        // Авторские каталоги берём У САМОГО КОММИТА: их не генерируют, сравнивать надо
+        // сгенерированную часть. Сверка с родительскими не узнавала версию, чей коммит
+        // САМ добавил `scripts/` (пуш), — и выравнивание клало рядом пустого двойника.
+        let expected = build_tree(repo, v, Some(&commit.tree()?))?;
+        if commit.tree_id() != expected {
             return Ok(None);
         }
         oids.push(oid);
