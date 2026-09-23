@@ -168,11 +168,17 @@ pub fn list_json(v: &VersionData) -> String {
     s
 }
 
-/// Ссылка → markdown-элемент (label или [label](url)).
+/// Ссылка → markdown-элемент (label, [label](url) или <url>).
+///
+/// Ссылка без подписи — нормальная ссылка: интерфейс показывает её доменом. Раньше
+/// она уходила в README как `[](url)`, а у такой ссылки в markdown нет видимого
+/// текста — в витрине её не было вовсе, ни у шага, ни у текста. Автоссылка `<url>`
+/// по CommonMark показывает сам адрес.
 fn ref_item(r: &StepRef) -> String {
-    match &r.url {
-        Some(u) => format!("[{}]({})", r.label, u),
-        None => r.label.clone(),
+    match (&r.url, r.label.trim().is_empty()) {
+        (Some(u), true) => format!("<{}>", u),
+        (Some(u), false) => format!("[{}]({})", r.label, u),
+        (None, _) => r.label.clone(),
     }
 }
 
@@ -239,6 +245,16 @@ fn readme(v: &VersionData) -> String {
                         lines.push(String::new());
                         lines.push(md.to_string());
                         lines.push(String::new());
+                        // Источники текста — списком под ним, как у шага (фронт #962).
+                        // Показываются только вместе с текстом: пустой текст-блок
+                        // интерфейс не рисует, и витрина не должна показывать его ссылки
+                        // без того, к чему они относятся.
+                        let refs: Vec<String> =
+                            s.refs.iter().map(ref_item).filter(|x| !x.is_empty()).collect();
+                        if !refs.is_empty() {
+                            lines.extend(refs.into_iter().map(|x| format!("- {x}")));
+                            lines.push(String::new());
+                        }
                     }
                 }
                 Some("image") => {
@@ -662,5 +678,34 @@ mod tests {
         assert_eq!(commit_message(&v), "v3\n");
         v.note = String::new();
         assert_eq!(commit_message(&v), "v3\n");
+    }
+
+    /// Источники текстового блока видны в витрине — как у шага (фронт #962).
+    /// Канон их и так держал; README показывал текст без них.
+    #[test]
+    fn readme_shows_text_block_refs_under_the_text() {
+        let mut text = block(1, "text", serde_json::json!({ "md": "Первый документ новой власти." }));
+        text.refs = vec![StepRef {
+            label: "Декрет о мире".into(),
+            url: Some("https://ru.wikisource.org/wiki/D".into()),
+        }];
+        let files = version_files(&ver(vec![text]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        let at_text = readme.find("Первый документ новой власти.").expect("текст в README");
+        let at_ref = readme
+            .find("- [Декрет о мире](https://ru.wikisource.org/wiki/D)")
+            .expect("ссылка текста в README");
+        assert!(at_ref > at_text, "ссылка идёт ПОД текстом: {readme}");
+    }
+
+    /// Ссылка без подписи не пропадает из витрины: `[](url)` в markdown невидим.
+    #[test]
+    fn readme_shows_unlabelled_ref_as_autolink() {
+        let mut s = step(1, "Install Redis");
+        s.refs = vec![StepRef { label: String::new(), url: Some("https://redis.io/docs".into()) }];
+        let files = version_files(&ver(vec![s]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("- <https://redis.io/docs>"), "{readme}");
+        assert!(!readme.contains("[](https://redis.io/docs)"), "невидимая ссылка: {readme}");
     }
 }
