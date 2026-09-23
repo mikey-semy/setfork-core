@@ -144,6 +144,16 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         ru: "SetFork: в шаге %s команда, которую здесь выполнять нельзя: %s (правило %s)",
     },
     HookMessage {
+        key: "content_destructive_file",
+        en: "SetFork: %s contains a command that is not allowed here: %s (rule %s)",
+        ru: "SetFork: в %s команда, которую здесь выполнять нельзя: %s (правило %s)",
+    },
+    HookMessage {
+        key: "content_hint_file",
+        en: "Remove or rewrite that command in the script and push again.",
+        ru: "Уберите или перепишите эту команду в скрипте и повторите пуш.",
+    },
+    HookMessage {
         key: "content_hint",
         // Без апострофа намеренно: текст уезжает в одинарные кавычки шелла.
         en: "Remove or rewrite that command in list.json and push again.",

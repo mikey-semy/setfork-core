@@ -395,3 +395,89 @@ fn the_refusal_speaks_the_language_of_the_push() {
     assert!(!out.status.success(), "{err}");
     assert!(err.contains("в шаге 2"), "русский отказ обязан прийти по-русски: {err}");
 }
+
+// ── Скрипты из `scripts/` (ADR-0028) ────────────────────────────────────────
+//
+// Дерево принимает авторские скрипты, и без этой проверки они становились
+// обходом всей H15-002: `rm -rf /`, который форма не пустит в шаг, въезжал бы в
+// `scripts/run.sh` пушем — и дальше в каждый поставленный скилл.
+
+fn add_script(work: &Path, env: &Env, path: &str, text: &str, message: &str) {
+    let p = work.join(path);
+    std::fs::create_dir_all(p.parent().unwrap()).expect("mkdir");
+    std::fs::write(p, text).expect("script");
+    git_ok(work, env, &["add", "-A"]);
+    git_ok(work, env, &["commit", "-q", "-m", message]);
+}
+
+#[test]
+fn a_destructive_script_does_not_get_in_and_is_named_by_file() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("content-script-deny");
+    let (bare, work) = repo_pair(&root.0, &env);
+    let before = tip(&bare, &env, "main");
+
+    // Опасная строка — в СЕРЕДИНЕ многострочного файла, как в настоящем скрипте.
+    add_script(
+        &work,
+        &env,
+        "scripts/cleanup.sh",
+        "#!/bin/sh\nset -e\necho cleanup\nrm -rf /\necho done\n",
+        "скрипт",
+    );
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success(), "разрушительный скрипт обязан быть отвергнут: {err}");
+    assert!(err.contains("scripts/cleanup.sh"), "отказ обязан назвать ФАЙЛ: {err}");
+    // У списка два блока; «step 3» указывал бы в пустоту — такого шага нет нигде.
+    assert!(!err.contains("step 3"), "файл назван номером несуществующего шага: {err}");
+    assert_eq!(tip(&bare, &env, "main"), before, "main не имеет права сдвинуться после отказа");
+}
+
+#[test]
+fn a_harmless_script_goes_through() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("content-script-allow");
+    let (bare, work) = repo_pair(&root.0, &env);
+    let before = tip(&bare, &env, "main");
+
+    add_script(&work, &env, "scripts/run.sh", "#!/bin/sh\nmake build\n", "скрипт");
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    assert!(out.status.success(), "безобидный скрипт: {}", String::from_utf8_lossy(&out.stderr));
+    assert_ne!(tip(&bare, &env, "main"), before);
+}
+
+// Справка — не исполняемое: `references/` описывают опасное словами, и отказ за
+// «rm -rf» в документе про то, почему так нельзя, был бы ложным.
+#[test]
+fn references_are_not_judged_as_commands() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("content-refs");
+    let (_bare, work) = repo_pair(&root.0, &env);
+
+    add_script(&work, &env, "references/why.md", "Never run `rm -rf /` on a server.\n", "справка");
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    assert!(out.status.success(), "справка не команда: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+// Обратная сторона сопоставления номера с файлом: команда ШАГА по-прежнему
+// называется шагом, даже когда рядом лежат скрипты.
+#[test]
+fn a_destructive_step_is_still_named_as_a_step_next_to_scripts() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("content-step-and-script");
+    let (_bare, work) = repo_pair(&root.0, &env);
+
+    add_script(&work, &env, "scripts/run.sh", "#!/bin/sh\nmake build\n", "скрипт");
+    commit_command(&work, &env, "rm -rf /", "почистить");
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(err.contains("step 2"), "команда шага названа не шагом: {err}");
+    assert!(!err.contains("scripts/run.sh"), "вину шага приписали безобидному скрипту: {err}");
+}

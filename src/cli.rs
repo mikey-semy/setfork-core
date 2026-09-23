@@ -295,10 +295,13 @@ pub async fn run_dbless() -> Option<i32> {
         return None;
     }
     let (owner, slug) = (args.get(2).cloned().unwrap_or_default(), args.get(3).cloned().unwrap_or_default());
+    // Вершина коммита — с тех пор, как дерево принимает `scripts/` (ADR-0028). Хук
+    // старше этого её не передаёт, и тогда судятся только команды шагов, как раньше.
+    let commit = args.get(4).cloned().unwrap_or_default();
     let mut canon = Vec::new();
     let read = std::io::Read::read_to_end(&mut std::io::stdin().lock(), &mut canon);
     Some(match read {
-        Ok(_) => check_content(&owner, &slug, &canon).await,
+        Ok(_) => check_content(&owner, &slug, &canon, &commit).await,
         // Канон не прочитался — значит его и не было (`git cat-file` не нашёл
         // list.json или упал). Версии из такого коммита всё равно не выйдет,
         // судить нечего: молчим и пропускаем, как пропускали до этой проверки.
@@ -316,16 +319,30 @@ pub async fn run_dbless() -> Option<i32> {
 ///   рабочем пути записи — это лишний способ пуш уронить;
 /// * адрес приложения не задан → это явный локальный dev (сервер без
 ///   `SETFORK_APP_URL` не стартует), и ровно так же ведёт себя `ensure_writable`.
-async fn check_content(owner: &str, slug: &str, canon: &[u8]) -> i32 {
+async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i32 {
     use setfork_core::gate::{ContentRefusal, ensure_content_allowed_at};
     use setfork_core::git::messages::say;
 
     if owner.is_empty() || slug.is_empty() {
         return 0;
     }
-    let Some(commands) = git::project::block_commands(canon) else {
+    let Some(mut commands) = git::project::block_commands(canon) else {
         return 0;
     };
+    // СКРИПТЫ ИДУТ НА ТУ ЖЕ ПРОВЕРКУ, ЧТО И КОМАНДЫ ШАГОВ. Иначе `rm -rf /`, который
+    // форма не пропустила бы в шаг, спокойно въезжал бы в `scripts/run.sh` пушем — и
+    // уходил дальше в каждый поставленный скилл. Файл подаётся приложению ещё одной
+    // «командой» ПОСЛЕ блоков: так приложение не меняется, а номер, указывающий за
+    // последний блок, однозначно называет файл.
+    let blocks = commands.len();
+    let scripts = match git::project::authored_scripts(commit) {
+        Ok(files) => files,
+        Err(why) => {
+            eprintln!("{}", say("content_check_not_understood", &[&why]));
+            return 1;
+        }
+    };
+    commands.extend(scripts.iter().map(|(_, text)| Some(text.clone())));
     if commands.iter().all(|c| c.as_deref().unwrap_or("").trim().is_empty()) {
         return 0;
     }
@@ -339,10 +356,20 @@ async fn check_content(owner: &str, slug: &str, canon: &[u8]) -> i32 {
     // противоположные: своё содержимое он чинит сам, а на недоступную проверку
     // может только повторить пуш.
     let lines = match refusal {
-        ContentRefusal::Destructive(d) => vec![
-            say("content_destructive", &[&d.step.to_string(), &d.fragment, &d.rule]),
-            say("content_hint", &[]),
-        ],
+        // Номер за последним блоком — это файл из `scripts/`, и назвать надо ЕГО: «шаг 14»
+        // у списка из двенадцати шагов человек не нашёл бы нигде.
+        ContentRefusal::Destructive(d) => {
+            match (d.step as usize).checked_sub(blocks + 1).and_then(|i| scripts.get(i)) {
+                Some((path, _)) => vec![
+                    say("content_destructive_file", &[path, &d.fragment, &d.rule]),
+                    say("content_hint_file", &[]),
+                ],
+                None => vec![
+                    say("content_destructive", &[&d.step.to_string(), &d.fragment, &d.rule]),
+                    say("content_hint", &[]),
+                ],
+            }
+        }
         ContentRefusal::Denied(reason) => vec![say("content_denied", &[&reason])],
         ContentRefusal::Unavailable(why) => vec![say("content_check_unavailable", &[&why])],
         // Своя поломка и непонятый ответ печатаются одной строкой намеренно:

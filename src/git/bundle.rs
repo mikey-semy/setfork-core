@@ -329,7 +329,7 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     "  case \"$ref\" in",
     "    refs/heads/main|refs/for/main)",
     "      if [ -n \"$core\" ] && [ -n \"$owner\" ] && [ -n \"$slug\" ]; then",
-    r#"        git cat-file -p "$new:list.json" </dev/null | "$core" check-content "$owner" "$slug""#,
+    r#"        git cat-file -p "$new:list.json" </dev/null | "$core" check-content "$owner" "$slug" "$new""#,
     "        rc=$?",
     "        case \"$rc\" in",
     "          0) ;;",
