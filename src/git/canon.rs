@@ -98,16 +98,17 @@ pub fn parse_canon(text: &str) -> Result<super::project::ListParts, Vec<CanonIss
     };
 
     // Пустую ссылку ловят И схема (anyOf «адрес или подпись», #148), И смысловая
-    // проверка. Автору — одна понятная придирка ref_empty, а не две о том же: придирку
-    // схемы по адресу этой ссылки (и вглубь неё) убираем. Сравнение — по сегменту
-    // пути, иначе /refs/1 глушило бы и /refs/10.
+    // проверка. Автору — одна понятная придирка ref_empty, а не две о том же: гасим
+    // ТОЛЬКО нарушение anyOf ровно по адресу этой ссылки. Остальные придирки схемы к
+    // той же ссылке (лишний ключ, формат адреса) остаются — разбор отдаёт ВСЕ придирки
+    // разом (находка Codex на #149: гашение по пути прятало их до следующего прохода).
     let loss = silent_loss_issues(&value);
-    let covered = |p: &str| {
-        loss.iter()
-            .any(|l| l.code == IssueCode::RefEmpty && (p == l.path || p.starts_with(&format!("{}/", l.path))))
-    };
-    let mut issues: Vec<CanonIssue> =
-        schema_issues(&value).into_iter().filter(|s| !covered(&s.path)).collect();
+    let empty_ref = |p: &str| loss.iter().any(|l| l.code == IssueCode::RefEmpty && p == l.path);
+    let mut issues: Vec<CanonIssue> = schema_issues(&value)
+        .into_iter()
+        .filter(|(s, any_of)| !(*any_of && empty_ref(&s.path)))
+        .map(|(s, _)| s)
+        .collect();
     issues.extend(loss);
     if !issues.is_empty() {
         return Err(issues);
@@ -128,7 +129,9 @@ pub fn parse_canon(text: &str) -> Result<super::project::ListParts, Vec<CanonIss
 }
 
 /// Придирки схемы. Крейт отдаёт `instance_path` уже в виде JSON Pointer.
-fn schema_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
+/// Придирки схемы. Второе значение — нарушено ли `anyOf`: у ссылки это правило
+/// «адрес или подпись», его дубль с понятной `ref_empty` гасит `parse_canon`.
+fn schema_issues(value: &serde_json::Value) -> Vec<(CanonIssue, bool)> {
     let schema: serde_json::Value = match serde_json::from_str(SCHEMA) {
         Ok(s) => s,
         // Вшитая схема битой быть не может; если стала — это наш сбой, не читателя.
@@ -146,12 +149,16 @@ fn schema_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
     };
     validator
         .iter_errors(value)
-        .map(|e| CanonIssue {
-            path: e.instance_path().to_string(),
-            code: IssueCode::Schema,
-            message: e.to_string(),
-            line: 0,
-            column: 0,
+        .map(|e| {
+            let any_of = matches!(e.kind(), jsonschema::error::ValidationErrorKind::AnyOf { .. });
+            let issue = CanonIssue {
+                path: e.instance_path().to_string(),
+                code: IssueCode::Schema,
+                message: e.to_string(),
+                line: 0,
+                column: 0,
+            };
+            (issue, any_of)
         })
         .collect()
 }
@@ -294,6 +301,19 @@ mod tests {
         assert_eq!(it.path, "/steps/0/refs/0");
         // Схема ловит ту же ссылку (anyOf), но автору — ОДНА понятная придирка.
         assert_eq!(issues.len(), 1, "дубль придирки схемы: {issues:?}");
+    }
+
+    /// У пустой ссылки гасится только дубль «адрес или подпись», а чужие придирки к
+    /// ней остаются: разбор отдаёт все придирки за один проход (находка Codex на #149).
+    #[test]
+    fn empty_ref_keeps_unrelated_schema_complaints() {
+        let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":" ","unexpected":true}]}"#;
+        let Err(issues) = parse_canon(&canon(s)) else { panic!("обязана отвергнуться") };
+        assert!(issues.iter().any(|i| i.code == IssueCode::RefEmpty), "ref_empty: {issues:?}");
+        assert!(
+            issues.iter().any(|i| i.code == IssueCode::Schema && i.message.contains("unexpected")),
+            "придирка к лишнему ключу потерялась: {issues:?}"
+        );
     }
 
     /// Опубликованная схема сама выражает правило keeps_ref (#148): сторонний валидатор
