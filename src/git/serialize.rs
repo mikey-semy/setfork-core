@@ -239,22 +239,22 @@ fn readme(v: &VersionData) -> String {
             // Презентационные блоки — inline в README.
             match s.block_type.as_deref() {
                 Some("text") => {
-                    if let Some(md) = s.content.get("md").and_then(|v| v.as_str())
-                        && !md.is_empty()
-                    {
+                    let md = s.content.get("md").and_then(|v| v.as_str()).unwrap_or("");
+                    // Источники текста — списком под ним, как у шага (фронт #962). Текст
+                    // без слов, но со ссылками — законный блок-«источники»: интерфейс его
+                    // показывает, и витрина не должна его прятать (находка Codex на #963).
+                    let refs: Vec<String> = s.refs.iter().map(ref_item).filter(|x| !x.is_empty()).collect();
+                    if !md.is_empty() {
                         lines.push(String::new());
                         lines.push(md.to_string());
                         lines.push(String::new());
-                        // Источники текста — списком под ним, как у шага (фронт #962).
-                        // Показываются только вместе с текстом: пустой текст-блок
-                        // интерфейс не рисует, и витрина не должна показывать его ссылки
-                        // без того, к чему они относятся.
-                        let refs: Vec<String> =
-                            s.refs.iter().map(ref_item).filter(|x| !x.is_empty()).collect();
-                        if !refs.is_empty() {
-                            lines.extend(refs.into_iter().map(|x| format!("- {x}")));
+                    }
+                    if !refs.is_empty() {
+                        if md.is_empty() {
                             lines.push(String::new());
                         }
+                        lines.extend(refs.into_iter().map(|x| format!("- {x}")));
+                        lines.push(String::new());
                     }
                 }
                 Some("image") => {
@@ -696,6 +696,17 @@ mod tests {
             .find("- [Декрет о мире](https://ru.wikisource.org/wiki/D)")
             .expect("ссылка текста в README");
         assert!(at_ref > at_text, "ссылка идёт ПОД текстом: {readme}");
+    }
+
+    /// Текст без слов, но со ссылками — в витрине есть: интерфейс его показывает.
+    #[test]
+    fn readme_shows_refs_of_a_text_block_without_words() {
+        let mut text = block(1, "text", serde_json::json!({ "md": "" }));
+        text.refs =
+            vec![StepRef { label: "Источник".into(), url: Some("https://example.org/src".into()) }];
+        let files = version_files(&ver(vec![text]));
+        let readme = &files.iter().find(|(p, _)| p == "README.md").unwrap().1;
+        assert!(readme.contains("- [Источник](https://example.org/src)"), "{readme}");
     }
 
     /// Ссылка без подписи не пропадает из витрины: `[](url)` в markdown невидим.
