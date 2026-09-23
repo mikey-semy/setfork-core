@@ -14,7 +14,7 @@
 use git2::{ErrorCode, Oid, Repository, TreeWalkMode, TreeWalkResult};
 
 use super::MAIN_REF;
-use super::serialize::tree_path_allowed;
+use super::serialize::{AUTHORED_DIRS, AUTHORED_MAX_BYTES, AUTHORED_MAX_FILES, tree_path_allowed};
 
 /// Первый путь дерева вне allowlist'а (или None — дерево чистое).
 ///
@@ -47,6 +47,50 @@ fn first_foreign_path(tree: &git2::Tree<'_>) -> Result<Option<String>, git2::Err
     Ok(foreign)
 }
 
+/// Что не так с АВТОРСКИМИ файлами (`scripts/`, `references/`) — или None.
+///
+/// Путь сам по себе проверяет `tree_path_allowed`; здесь — то, чего по пути не
+/// видно: что это обычный файл, что это текст и что всего в пределах лимита.
+///
+/// * ссылка (`120000`) и подмодуль (`160000`) — не файл: ссылка у распаковавшего
+///   ведёт за пределы папки скилла, подмодуль тянет чужой репозиторий;
+/// * байт NUL — бинарь. Бинарю место в S3 по хешу, а не в git (решение §4):
+///   дерево каждого списка ещё и зеркалится, и бандлится;
+/// * число файлов и сумма байт — по всему дереву, а не по одному каталогу.
+///
+/// Тот же набор правил у шелльного близнеца в `pre-receive`.
+fn authored_violation(
+    repo: &Repository,
+    tree: &git2::Tree<'_>,
+) -> Result<Option<MainUpdateError>, git2::Error> {
+    let mut files = 0usize;
+    let mut bytes = 0u64;
+    for dir in AUTHORED_DIRS {
+        let Some(entry) = tree.get_name(dir) else { continue };
+        // Файл с именем каталога правило путей уже отверг; сюда доходят только каталоги.
+        let Ok(sub) = entry.to_object(repo).and_then(|o| o.peel_to_tree()) else { continue };
+        for e in sub.iter() {
+            let path = format!("{dir}/{}", e.name().unwrap_or("<non-utf8>"));
+            if !matches!(e.filemode(), 0o100644 | 0o100755) {
+                return Ok(Some(MainUpdateError::AuthoredNotFile(path)));
+            }
+            let blob = repo.find_blob(e.id())?;
+            if blob.content().contains(&0) {
+                return Ok(Some(MainUpdateError::AuthoredBinary(path)));
+            }
+            files += 1;
+            bytes += blob.size() as u64;
+        }
+    }
+    if files > AUTHORED_MAX_FILES {
+        return Ok(Some(MainUpdateError::AuthoredTooMany(files)));
+    }
+    if bytes > AUTHORED_MAX_BYTES {
+        return Ok(Some(MainUpdateError::AuthoredTooLarge(bytes)));
+    }
+    Ok(None)
+}
+
 /// Почему main не сдвинулся. Каждый вариант — то же правило, что у pre-receive.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MainUpdateError {
@@ -56,6 +100,14 @@ pub enum MainUpdateError {
     /// то, что обязано пережить clone и вернуться через push (ADR-0014).
     /// Несёт сам путь — отказ обязан называть причину, а не только факт.
     ForeignPath(String),
+    /// В `scripts/` или `references/` лежит не обычный файл (ссылка, подмодуль).
+    AuthoredNotFile(String),
+    /// В `scripts/` или `references/` лежит бинарь: ему место в S3, а не в git.
+    AuthoredBinary(String),
+    /// Авторских файлов больше `AUTHORED_MAX_FILES`.
+    AuthoredTooMany(usize),
+    /// Авторские файлы вместе больше `AUTHORED_MAX_BYTES`.
+    AuthoredTooLarge(u64),
     /// Новый tip не потомок старого — переписывание истории main запрещено.
     NonFastForward,
     /// main уже не там, где ожидал вызывающий (CAS не сошёлся) — конкурентная запись.
@@ -70,8 +122,20 @@ impl std::fmt::Display for MainUpdateError {
             MainUpdateError::MissingListJson => write!(f, "list.json is required at the repo root"),
             MainUpdateError::ForeignPath(p) => write!(
                 f,
-                "only README.md, list.json and .gitattributes are allowed in a list tree; foreign path: {p}"
+                "only README.md, list.json, .gitattributes, scripts/<file> and references/<file> are allowed in a list tree; foreign path: {p}"
             ),
+            MainUpdateError::AuthoredNotFile(p) => {
+                write!(f, "{p} must be a regular file (no symlinks or submodules)")
+            }
+            MainUpdateError::AuthoredBinary(p) => {
+                write!(f, "{p} is binary; scripts/ and references/ hold text only")
+            }
+            MainUpdateError::AuthoredTooMany(n) => {
+                write!(f, "scripts/ and references/ hold {n} files; the limit is {AUTHORED_MAX_FILES}")
+            }
+            MainUpdateError::AuthoredTooLarge(b) => {
+                write!(f, "scripts/ and references/ hold {b} bytes; the limit is {AUTHORED_MAX_BYTES}")
+            }
             MainUpdateError::NonFastForward => write!(f, "non-fast-forward update of main is forbidden"),
             MainUpdateError::Stale => write!(f, "main moved concurrently (stale expected tip)"),
             MainUpdateError::Git(e) => write!(f, "git2: {e}"),
@@ -110,6 +174,10 @@ pub fn update_main(
     // причине, что и первое: git2-запись проходит мимо pre-receive.
     if let Some(path) = first_foreign_path(&tree)? {
         return Err(MainUpdateError::ForeignPath(path));
+    }
+    // Авторские файлы — третье правило хука, по той же причине продублированное здесь.
+    if let Some(violation) = authored_violation(repo, &tree)? {
+        return Err(violation);
     }
 
     // CAS-проверка до записи — чтобы отличить Stale от NonFastForward в ошибке.

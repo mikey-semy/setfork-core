@@ -58,8 +58,8 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
     },
     HookMessage {
         key: "tree_allowlist",
-        en: "SetFork: only README.md, list.json and .gitattributes are allowed in a list tree.",
-        ru: "SetFork: в дереве списка разрешены только README.md, list.json и .gitattributes.",
+        en: "SetFork: a list tree may hold only README.md, list.json, .gitattributes, scripts/<file> and references/<file>.",
+        ru: "SetFork: в дереве списка разрешены только README.md, list.json, .gitattributes, scripts/<файл> и references/<файл>.",
     },
     HookMessage {
         key: "tree_foreign_header",
@@ -73,6 +73,28 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         // тест `texts_are_safe_for_shell_and_printf`.
         en: "Remove them from the commit: list content lives in list.json.",
         ru: "Уберите их из коммита: содержимое списка живёт в list.json.",
+    },
+    // Авторские файлы скилла (scripts/, references/) — решение §4 исследования
+    // Agent Skills: текст живёт в дереве, бинарь — в S3 по хешу.
+    HookMessage {
+        key: "authored_not_file",
+        en: "SetFork: %s must be a regular file (no symlinks or submodules)",
+        ru: "SetFork: %s обязан быть обычным файлом (без ссылок и подмодулей)",
+    },
+    HookMessage {
+        key: "authored_binary",
+        en: "SetFork: %s is binary; scripts/ and references/ hold text only (attach binaries as file blocks)",
+        ru: "SetFork: %s — бинарный файл; в scripts/ и references/ только текст (бинарь — блоком «Файл»)",
+    },
+    HookMessage {
+        key: "authored_too_many",
+        en: "SetFork: scripts/ and references/ hold %s files; the limit is %s",
+        ru: "SetFork: в scripts/ и references/ %s файлов; предел %s",
+    },
+    HookMessage {
+        key: "authored_too_large",
+        en: "SetFork: scripts/ and references/ hold %s bytes; the limit is %s",
+        ru: "SetFork: scripts/ и references/ занимают %s байт; предел %s",
     },
     HookMessage {
         key: "magic_needs_actor",
