@@ -188,6 +188,9 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     "core=\"${SETFORK_CORE_BIN:-}\"",
     "owner=\"${SETFORK_OWNER:-}\"",
     "slug=\"${SETFORK_SLUG:-}\"",
+    // Хеши уже проверенных авторских блобов — на весь пуш (см. проверку бинарности).
+    "seen_blobs=$(mktemp)",
+    "trap 'rm -f \"$seen_blobs\"' EXIT",
     "while read old new ref; do",
     // ЧТО МОЖЕТ ПОСТОРОННИЙ (Ф5): предъявить правку — и ничего больше.
     //
@@ -300,7 +303,14 @@ const PRE_RECEIVE_BODY: &[&str] = &[
     // Бинарь — есть байт NUL: без него размер после `tr -d '\000'` совпадает с
     // исходным. `</dev/null` у git обязателен: stdin внутреннего цикла — это
     // перечень файлов, и cat-file не должен его подъедать.
-    r#"      binary=$(printf '%s\n' "$authored" | while IFS="$(printf '\t')" read -r meta path; do set -- $meta; n=$(git cat-file blob "$3" </dev/null | tr -d '\000' | wc -c | tr -d ' '); [ "$n" = "$4" ] || { printf '%s\n' "$path"; break; }; done)"#,
+    // ⚠️ Каждый блоб — ОДИН РАЗ за пуш, по хешу. Замер линзы 06 «ресурсы»: 200 коммитов
+    // при 50 файлах давали 58 секунд хука (линейно, ~0,3 с на коммит), потому что каждый
+    // коммит заново читал ВСЕ файлы, хотя меняется обычно один. Импорт скилла вместе с
+    // историей — ровно сотни коммитов. Уже проверенные хеши лежат в `$seen_blobs`.
+    // Читаются в BEGIN, а не приёмом `NR == FNR`: тот ломается на ПУСТОМ первом файле —
+    // ровно на первом коммите пуша, — и молча считал «виденными» все блобы.
+    r#"      fresh=$(printf '%s\n' "$authored" | awk -F '\t' -v seen_file="$seen_blobs" 'BEGIN { while ((getline h < seen_file) > 0) seen[h] = 1 } { split($1, f, " "); if (!(f[3] in seen)) print }')"#,
+    r#"      binary=$(printf '%s\n' "$fresh" | while IFS="$(printf '\t')" read -r meta path; do [ -n "$meta" ] || continue; set -- $meta; n=$(git cat-file blob "$3" </dev/null | tr -d '\000' | wc -c | tr -d ' '); [ "$n" = "$4" ] || { printf '%s\n' "$path"; break; }; printf '%s\n' "$3" >> "$seen_blobs"; done)"#,
     "      if [ -n \"$binary\" ]; then msg authored_binary \"$binary\" >&2; exit 1; fi",
     r#"      totals=$(printf '%s\n' "$authored" | awk -F '\t' '{ split($1, f, " "); n++; s += f[4] } END { print n + 0, s + 0 }')"#,
     "      files=${totals% *}; bytes=${totals#* }",

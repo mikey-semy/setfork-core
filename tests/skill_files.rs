@@ -412,3 +412,39 @@ fn realignment_recognises_a_version_whose_own_commit_added_scripts() {
     assert_eq!(git_ok(&bare, &["rev-parse", "main"]), tip, "выравнивание положило двойника вместо тега");
     assert_eq!(git_ok(&bare, &["rev-parse", "v2^{commit}"]), tip, "тег встал не на свой коммит");
 }
+
+// Линза 05 (граница доверия): имя файла задаёт пушащий, а хук разбирает вывод
+// `ls-tree` построчно и по табуляции. Имя с табуляцией или переводом строки не
+// имеет права ни пройти, ни расщепить разбор так, чтобы лимиты посчитались не по тем
+// строкам: git печатает такие имена в кавычках, и правило путей обязано их отвергнуть.
+#[cfg(unix)]
+#[test]
+fn a_name_with_control_characters_is_rejected_not_misparsed() {
+    for name in ["scripts/a\tb.sh", "scripts/a\nb.sh"] {
+        let root = tmp("skill-ctrl");
+        let (_bare, work) = repo_pair(&root.0);
+        write(&work, name, b"echo\n");
+        let (ok, err) = commit_push(&work, "управляющий символ в имени");
+        assert!(!ok, "имя {name:?} прошло хук: {err}");
+        // Отвергнуто ИМЕННО правилом путей, а не чем-то случайным по дороге.
+        assert!(err.contains("a list tree may hold only"), "отказ пришёл не от правила путей: {err}");
+    }
+}
+
+// Проверка бинарности читает каждый блоб один раз за пуш (замер линзы 06: 200 коммитов
+// давали 58 секунд хука). Обратная сторона дедупликации: блоб, появившийся ПОЗЖЕ, пока
+// остальные уже «виденные», обязан проверяться — иначе ускорение обернулось бы дырой.
+#[test]
+fn a_binary_in_a_later_commit_of_the_push_is_still_caught() {
+    let root = tmp("skill-late-bin");
+    let (_bare, work) = repo_pair(&root.0);
+    for i in 0..3 {
+        write(&work, &format!("scripts/f{i}.sh"), format!("echo {i}\n").as_bytes());
+        git_ok(&work, &["add", "-A"]);
+        git_ok(&work, &["commit", "-q", "-m", &format!("текст {i}")]);
+    }
+    write(&work, "assets/logo.png", &[0x89, b'P', b'N', b'G', 0, 0, 0, 13]);
+    let (ok, err) = commit_push(&work, "бинарь последним коммитом");
+    assert!(!ok, "бинарь в позднем коммите проскочил за «виденными» блобами: {err}");
+    assert!(err.contains("assets/logo.png"), "{err}");
+}
