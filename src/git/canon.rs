@@ -96,8 +96,18 @@ pub fn parse_canon(text: &str) -> Result<super::project::ListParts, Vec<CanonIss
         }
     };
 
-    let mut issues = schema_issues(&value);
-    issues.extend(silent_loss_issues(&value));
+    // Пустую ссылку ловят И схема (anyOf «адрес или подпись», #148), И смысловая
+    // проверка. Автору — одна понятная придирка ref_empty, а не две о том же: придирку
+    // схемы по адресу этой ссылки (и вглубь неё) убираем. Сравнение — по сегменту
+    // пути, иначе /refs/1 глушило бы и /refs/10.
+    let loss = silent_loss_issues(&value);
+    let covered = |p: &str| {
+        loss.iter()
+            .any(|l| l.code == IssueCode::RefEmpty && (p == l.path || p.starts_with(&format!("{}/", l.path))))
+    };
+    let mut issues: Vec<CanonIssue> =
+        schema_issues(&value).into_iter().filter(|s| !covered(&s.path)).collect();
+    issues.extend(loss);
     if !issues.is_empty() {
         return Err(issues);
     }
@@ -281,6 +291,31 @@ mod tests {
         };
         let it = issues.iter().find(|i| i.code == IssueCode::RefEmpty).expect("придирка");
         assert_eq!(it.path, "/steps/0/refs/0");
+        // Схема ловит ту же ссылку (anyOf), но автору — ОДНА понятная придирка.
+        assert_eq!(issues.len(), 1, "дубль придирки схемы: {issues:?}");
+    }
+
+    /// Опубликованная схема сама выражает правило keeps_ref (#148): сторонний валидатор
+    /// по ней отвергает то же, что ядро, и принимает то же.
+    #[test]
+    fn published_schema_matches_keeps_ref() {
+        let issues_for = |r: &str| {
+            let s = format!(
+                r#"{{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{r}]}}"#
+            );
+            let v: serde_json::Value = serde_json::from_str(&canon(&s)).unwrap();
+            schema_issues(&v)
+        };
+        for ok in [
+            r#"{"url":"https://example.com"}"#,
+            r#"{"label":"  ","url":"https://example.com"}"#,
+            r#"{"label":"док"}"#,
+        ] {
+            assert!(issues_for(ok).is_empty(), "схема отвергла законную ссылку {ok}: {:?}", issues_for(ok));
+        }
+        for bad in [r#"{}"#, r#"{"label":"   "}"#, r#"{"url":""}"#] {
+            assert!(!issues_for(bad).is_empty(), "схема приняла пустую ссылку {bad}");
+        }
     }
 
     #[test]
