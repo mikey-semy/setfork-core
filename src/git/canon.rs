@@ -42,8 +42,9 @@ pub enum IssueCode {
     Schema,
     /// Шаг без заголовка: проекция молча выбросила бы такой пункт.
     StepTitleRequired,
-    /// Ссылка без подписи: проекция молча выбросила бы саму ссылку.
-    RefLabelRequired,
+    /// Ссылка без адреса И без подписи: проекция молча выбросила бы её. Ссылка одним
+    /// адресом законна (#148) — придирки к ней нет.
+    RefEmpty,
 }
 
 impl IssueCode {
@@ -53,7 +54,7 @@ impl IssueCode {
             IssueCode::Syntax => "syntax",
             IssueCode::Schema => "schema",
             IssueCode::StepTitleRequired => "step_title_required",
-            IssueCode::RefLabelRequired => "ref_label_required",
+            IssueCode::RefEmpty => "ref_empty",
         }
     }
 }
@@ -74,6 +75,7 @@ struct LossProbe {
 #[derive(Deserialize)]
 struct RefProbe {
     label: Option<String>,
+    url: Option<String>,
 }
 
 /// Строгий разбор: либо содержимое, либо ВСЕ найденные придирки разом.
@@ -168,13 +170,14 @@ fn silent_loss_issues(value: &serde_json::Value) -> Vec<CanonIssue> {
                 column: 0,
             });
         }
-        // Ссылка без подписи — выбрасывается сама ссылка вместе с адресом.
+        // Ссылка без адреса И без подписи — выбрасывается целиком (#148). Одним адресом
+        // ссылка законна: интерфейс показывает её доменом, и разбор её сохраняет.
         for (k, r) in probe.refs.unwrap_or_default().iter().enumerate() {
-            if blank(&r.label) {
+            if !crate::git::serialize::keeps_ref(r.label.as_deref().unwrap_or(""), r.url.as_deref()) {
                 out.push(CanonIssue {
-                    path: format!("/steps/{i}/refs/{k}/label"),
-                    code: IssueCode::RefLabelRequired,
-                    message: "a reference requires a non-empty label".into(),
+                    path: format!("/steps/{i}/refs/{k}"),
+                    code: IssueCode::RefEmpty,
+                    message: "a reference requires a url or a label".into(),
                     line: 0,
                     column: 0,
                 });
@@ -252,16 +255,32 @@ mod tests {
         assert!(issues.iter().any(|i| i.code == IssueCode::StepTitleRequired), "шаг без заголовка");
     }
 
+    /// Ссылка одним адресом — законна (#148): интерфейс показывает её доменом, и фронт
+    /// хранит такие ссылки. Раньше разбор отвергал её, а мягкий парс выбрасывал молча.
     #[test]
-    fn ref_without_label_is_an_error_not_silent_loss() {
-        // Схема пропускает: пустая строка — законная строка. А мягкий парс
-        // выбрасывает ссылку целиком, вместе с адресом.
-        let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"   ","url":"https://example.com"}]}"#;
+    fn url_only_ref_is_kept_with_or_without_label_key() {
+        for r in [r#"{"label":"   ","url":"https://example.com"}"#, r#"{"url":"https://example.com"}"#] {
+            let s = format!(
+                r#"{{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{r}]}}"#
+            );
+            let parts = parse_canon(&canon(&s))
+                .unwrap_or_else(|e| panic!("ссылка одним адресом отвергнута: {r} → {e:?}"));
+            let refs = &parts.steps[0].refs;
+            assert_eq!(refs.len(), 1, "ссылка одним адресом пропала: {r}");
+            assert_eq!(refs[0].url.as_deref(), Some("https://example.com"));
+        }
+    }
+
+    /// Ссылка без адреса И без подписи — не ссылка. Мягкий парс её выбрасывает, значит
+    /// разбор обязан сказать об этом, а не промолчать.
+    #[test]
+    fn empty_ref_is_an_error_not_silent_loss() {
+        let s = r#"{"n":1,"title":"Ш","desc":"","command":"","level":"required","why":"","section":"","subtasks":[],"refs":[{"label":"   "}]}"#;
         let Err(issues) = parse_canon(&canon(s)) else {
-            panic!("ссылка без подписи обязана отвергнуться")
+            panic!("пустая ссылка обязана отвергнуться")
         };
-        let it = issues.iter().find(|i| i.code == IssueCode::RefLabelRequired).expect("придирка");
-        assert_eq!(it.path, "/steps/0/refs/0/label");
+        let it = issues.iter().find(|i| i.code == IssueCode::RefEmpty).expect("придирка");
+        assert_eq!(it.path, "/steps/0/refs/0");
     }
 
     #[test]

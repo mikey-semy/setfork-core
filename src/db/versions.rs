@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::{Level, loc};
 use crate::blocks::is_step_type;
 use crate::git::bundle::{SerStep, StepRef, VersionData};
+use crate::git::serialize::keeps_ref;
 
 /// Загрузка всей истории версий списка для материализации репо (порт bundle.ts loadVersions).
 /// title/desc/tags/ordered — с уровня списка (одинаковы для всех версий); шаги — по версии.
@@ -62,21 +63,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
                 .map(|a| a.iter().map(loc).filter(|s| !s.is_empty()).collect())
                 .unwrap_or_default();
             let refs_json: serde_json::Value = sr.get("refs");
-            let refs = refs_json
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|r| {
-                            let label = r.get("label").map(loc).unwrap_or_default();
-                            if label.is_empty() {
-                                return None;
-                            }
-                            let url = r.get("url").and_then(|u| u.as_str()).map(|s| s.to_string());
-                            Some(StepRef { label, url })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let refs = refs_from_json(&refs_json);
             // ЧТЕНИЕ СТРОГОЕ, и это осознанно. Раньше здесь стояло `.ok()`, которое
             // глушило ЛЮБУЮ беду декодирования и подставляло дефолт. От отсутствия
             // колонки оно не спасало вовсе — все колонки перечислены в SELECT выше,
@@ -198,23 +185,25 @@ pub fn ser_step_from_row(n: i32, r: &StepRow) -> SerStep {
             .as_array()
             .map(|a| a.iter().map(loc).filter(|s| !s.is_empty()).collect())
             .unwrap_or_default(),
-        refs: r
-            .refs
-            .as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| {
-                        let label = x.get("label").map(loc).unwrap_or_default();
-                        if label.is_empty() {
-                            return None;
-                        }
-                        let url = x.get("url").and_then(|u| u.as_str()).map(|s| s.to_string());
-                        Some(StepRef { label, url })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        refs: refs_from_json(&r.refs),
     }
+}
+
+/// Ссылки строки из базы. ОДНА функция на оба загрузчика: раньше это были две копии
+/// одного замыкания, и обе требовали подпись — ссылка одним адресом пропадала из
+/// канона (#148). Что живёт, решает `keeps_ref`.
+fn refs_from_json(refs: &serde_json::Value) -> Vec<StepRef> {
+    refs.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| {
+                    let label = x.get("label").map(loc).unwrap_or_default();
+                    let url = x.get("url").and_then(|u| u.as_str()).map(|s| s.to_string());
+                    keeps_ref(&label, url.as_deref()).then_some(StepRef { label, url })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -238,7 +227,10 @@ mod ser_step_tests {
             refs: serde_json::json!([
                 { "label": { "en": "docs" }, "url": "https://redis.io" },
                 { "label": { "en": "без ссылки" } },
-                { "label": { "en": "" }, "url": "https://dropped.example" },
+                // Ссылка одним адресом — законна (#148): интерфейс показывает домен.
+                { "label": {}, "url": "https://kept.example" },
+                // Ни адреса, ни подписи — не ссылка: выбрасывается.
+                { "label": { "en": "" } },
             ]),
             needs_human: true,
             needs_human_ask: serde_json::json!({}),
@@ -258,9 +250,11 @@ mod ser_step_tests {
         assert_eq!(s.title, "Install Redis", "канон берёт en");
         assert_eq!(s.level, "recommended");
         assert_eq!(s.subtasks, vec!["проверить версию".to_string()], "пустые подзадачи выброшены");
-        assert_eq!(s.refs.len(), 2, "ref без label выброшен");
+        assert_eq!(s.refs.len(), 3, "пустая ссылка выброшена, ссылка одним адресом — нет");
         assert_eq!(s.refs[0].url.as_deref(), Some("https://redis.io"));
         assert_eq!(s.refs[1].url, None, "отсутствующий url = None");
+        assert_eq!(s.refs[2].url.as_deref(), Some("https://kept.example"), "ссылка одним адресом живёт");
+        assert_eq!(s.refs[2].label, "", "подписи у неё нет");
     }
 
     /// Не-step блок: type/content уезжают в канон как есть.

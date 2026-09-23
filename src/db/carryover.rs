@@ -12,6 +12,7 @@ use uuid::Uuid;
 use super::{Level, StepRow, loc_val};
 use crate::blocks::is_step_type;
 use crate::git::project::ProjStep;
+use crate::git::serialize::keeps_ref;
 
 /// Что переносится в новую версию из ТЕКУЩЕЙ по идентичности блока: надстройки
 /// Postgres, которых нет в каноне list.json (ADR-0014) — push их не приносит,
@@ -56,10 +57,15 @@ pub(super) fn proj_step_row(s: &ProjStep, keep: &std::collections::HashMap<Uuid,
     let refs = serde_json::Value::Array(
         s.refs
             .iter()
-            .filter(|r| !r.label.trim().is_empty())
+            .filter(|r| keeps_ref(&r.label, r.url.as_deref()))
             .map(|r| {
                 let mut m = serde_json::Map::new();
-                m.insert("label".into(), serde_json::json!({ "en": r.label.trim() }));
+                // Пустая подпись — `{}`, как пишет её фронт (refsToStored): не `{"en": ""}`.
+                let label = r.label.trim();
+                m.insert(
+                    "label".into(),
+                    if label.is_empty() { serde_json::json!({}) } else { serde_json::json!({ "en": label }) },
+                );
                 if let Some(u) = r.url.as_ref().map(|u| u.trim()).filter(|u| !u.is_empty()) {
                     m.insert("url".into(), serde_json::Value::String(u.to_string()));
                 }
