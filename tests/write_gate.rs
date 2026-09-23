@@ -64,8 +64,7 @@ impl Stub {
                     return;
                 }
                 let Ok(mut s) = stream else { continue };
-                let body = serve_one(&mut s, reply);
-                seen_t.lock().expect("seen").push(body);
+                serve_one(&mut s, reply, &seen_t);
                 if stall {
                     // Держим соединение открытым дольше таймаута гейта: закрыть
                     // его значило бы проверить обрыв, а не залипание.
@@ -89,7 +88,13 @@ impl Drop for Stub {
 }
 
 /// Отвечает и ВОЗВРАЩАЕТ тело запроса — по нему сверяется форма вопроса.
-fn serve_one(s: &mut TcpStream, reply: &str) -> String {
+/// Дочитать запрос, ЗАПИСАТЬ его тело и только потом ответить.
+///
+/// ⚠️ Порядок — не вкус. Прежде тело записывалось ПОСЛЕ ответа: клиент получал ответ,
+/// тест сразу читал `asked()` — и если поток заглушки не успел, видел пустой список.
+/// Под нагрузкой раннера так упал master (`left: []`) на проверке, к которой правка
+/// перед этим не прикасалась. Записанный до ответа вопрос виден тесту всегда.
+fn serve_one(s: &mut TcpStream, reply: &str, seen: &Mutex<Vec<String>>) {
     // Дочитываем запрос до конца заголовков и тела (Content-Length), иначе
     // клиент увидит обрыв вместо ответа.
     let mut reader = BufReader::new(s.try_clone().expect("clone"));
@@ -98,7 +103,8 @@ fn serve_one(s: &mut TcpStream, reply: &str) -> String {
         let mut line = String::new();
         if reader.read_line(&mut line).unwrap_or(0) == 0 {
             // Соединение оборвалось до конца заголовков: вопроса не было.
-            return String::new();
+            seen.lock().expect("seen").push(String::new());
+            return;
         }
         if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
             len = v.trim().parse().unwrap_or(0);
@@ -112,9 +118,9 @@ fn serve_one(s: &mut TcpStream, reply: &str) -> String {
         use std::io::Read;
         let _ = reader.read_exact(&mut body);
     }
+    seen.lock().expect("seen").push(String::from_utf8_lossy(&body).to_string());
     let _ = s.write_all(reply.as_bytes());
     let _ = s.flush();
-    String::from_utf8_lossy(&body).to_string()
 }
 
 fn http(body: &str) -> String {
