@@ -45,7 +45,14 @@ pub fn authored_files(repo: &Repository, commit: Oid) -> Result<Vec<AuthoredFile
 }
 
 /// Коммит версии `version` (тег `vN`), а при `0` — вершина `main`. `None` — такого нет.
+///
+/// Отрицательная версия — «нет такой», а не main: иначе экспорт мог бы упаковать файлы
+/// вершины, не покрытые тегом ни одной версии (находка ревью диффа).
 pub fn version_commit(repo: &Repository, version: i32) -> Option<Oid> {
-    let refname = if version > 0 { format!("refs/tags/v{version}") } else { super::MAIN_REF.to_string() };
+    let refname = match version {
+        v if v > 0 => format!("refs/tags/v{v}"),
+        0 => super::MAIN_REF.to_string(),
+        _ => return None,
+    };
     repo.find_reference(&refname).ok()?.peel_to_commit().ok().map(|c| c.id())
 }

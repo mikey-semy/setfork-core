@@ -123,6 +123,7 @@ fn version_zero_is_main_and_a_missing_version_is_none() {
     let main = repo.refname_to_id("refs/heads/main").expect("main");
     assert_eq!(version_commit(&repo, 0), Some(main));
     assert_eq!(version_commit(&repo, 99), None, "несуществующая версия выдана за существующую");
+    assert_eq!(version_commit(&repo, -1), None, "отрицательная версия выдана за вершину main");
 }
 
 // Выдача описывает то же множество, что приём: ссылку правило путей не пускает, и
