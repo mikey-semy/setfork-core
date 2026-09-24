@@ -192,6 +192,26 @@ fn parse_verdict(body: &[u8]) -> Verdict {
 /// Файл коммита в вопросе о содержимом: путь (или `путь@коммит` для истории) и текст.
 pub type PushedText = (String, String);
 
+/// Тексты пуша ПОРЦИЯМИ не больше `max_bytes` — по одной на вопрос. Одним телом импорт
+/// скилла с сотней коммитов вёз бы десятки мегабайт и не укладывался в `TIMEOUT`: отказ
+/// «не ответила, повторите» повторялся бы вечно. Текст крупнее порции едет один.
+pub fn text_portions(texts: &[PushedText], max_bytes: usize) -> Vec<&[PushedText]> {
+    let mut out = Vec::new();
+    let (mut start, mut size) = (0, 0);
+    for (i, (path, text)) in texts.iter().enumerate() {
+        let n = path.len() + text.len();
+        if i > start && size + n > max_bytes {
+            out.push(&texts[start..i]);
+            (start, size) = (i, 0);
+        }
+        size += n;
+    }
+    if start < texts.len() {
+        out.push(&texts[start..]);
+    }
+    out
+}
+
 /// Тело вопроса. `blocks` и `files` кладутся ТОЛЬКО когда спрашивают о содержимом.
 ///
 /// ⚠️ Не «всегда, просто пустым»: приложение отличает «ядро не спрашивало» от
@@ -528,6 +548,19 @@ mod tests {
             r#"{"owner":"mike","slug":"list","blocks":[],"files":[{"path":"references/a.md","text":"text"}]}"#,
             "файлы коммита едут путём и текстом"
         );
+    }
+
+    /// Порции: ничего не теряется и не повторяется, порядок сохранён, порция не больше
+    /// предела — кроме текста, который крупнее предела сам по себе (он едет один).
+    #[test]
+    fn texts_go_in_portions_within_the_limit() {
+        let t = |p: &str, n: usize| (p.to_string(), "x".repeat(n));
+        let texts = vec![t("a", 4), t("b", 4), t("c", 20), t("d", 1)];
+        let parts = text_portions(&texts, 10);
+        let flat: Vec<&str> = parts.iter().flat_map(|p| p.iter().map(|(n, _)| n.as_str())).collect();
+        assert_eq!(flat, ["a", "b", "c", "d"]);
+        assert_eq!(parts.iter().map(|p| p.len()).collect::<Vec<_>>(), [2, 1, 1]);
+        assert!(text_portions(&[], 10).is_empty());
     }
 
     /// Ключ доступа — своё место: файл и строка, а не шаг. Неполное место — всё равно

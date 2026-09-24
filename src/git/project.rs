@@ -376,7 +376,7 @@ fn blob_text(oid: &str) -> Result<String, String> {
 }
 
 /// Всё, что пуш ВПЕРВЫЕ приносит в репозиторий: `list.json` и файлы автора КАЖДОГО
-/// нового коммита (`rev-list <commit> --not --all` — тот же перечень, что у хука),
+/// коммита, которого ещё нет в main (`rev-list <commit> --not main`),
 /// каждый блоб — один раз и только если его не было у родителя. Вход поиска ключей.
 ///
 /// # Почему история, а не вершина
@@ -389,12 +389,24 @@ fn blob_text(oid: &str) -> Result<String, String> {
 /// Путь блоба, которого нет в вершине, помечен `путь@коммит`: человек должен понять, что
 /// чинить надо историю, а не текущий файл — в текущем ключа может уже и не быть.
 pub fn pushed_texts(commit: &str) -> Result<Vec<(String, String)>, String> {
-    const SPECS: [&str; 4] = ["list.json", "scripts/", "references/", "assets/"];
+    // Всё, что дерево принимает текстом: канон, файлы автора, README и шаги-markdown.
+    const SPECS: [&str; 6] = ["list.json", "README.md", "steps/", "scripts/", "references/", "assets/"];
     if commit.is_empty() {
         return Ok(Vec::new());
     }
     let tip: std::collections::HashMap<String, String> = tree_blobs(commit, &SPECS)?.into_iter().collect();
-    let commits = String::from_utf8_lossy(&sh_git(&["rev-list", commit, "--not", "--all"])?).into_owned();
+    // Диапазон — от MAIN, а не от всех рефов (как у хука для путей): черновые ветки хук
+    // по содержимому не судит, и ключ, проведённый `push origin draft`, а затем
+    // `push origin draft:main`, был бы «уже известным» и в main прошёл бы непроверенным.
+    // В пустом репозитории main ещё нет, и имя уронило бы rev-list — тогда нового всё.
+    // ⚠️ Не `--glob=refs/heads/main`: без символов шаблона git молча дописывает `/*`, и
+    // исключение не исключало ничего (поймано тестом «старый ключ не судится заново»).
+    let has_main = sh_git(&["rev-parse", "--verify", "-q", "refs/heads/main"]).is_ok();
+    let mut range = vec!["rev-list", commit];
+    if has_main {
+        range.extend(["--not", "refs/heads/main"]);
+    }
+    let commits = String::from_utf8_lossy(&sh_git(&range)?).into_owned();
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for c in commits.lines().filter(|l| !l.is_empty()) {

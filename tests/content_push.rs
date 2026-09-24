@@ -611,3 +611,38 @@ fn a_key_already_on_the_server_is_not_judged_again() {
     let out = git(&work, &env, &["push", "origin", "main"]);
     assert!(out.status.success(), "судится только новое: {}", String::from_utf8_lossy(&out.stderr));
 }
+
+#[test]
+fn a_key_brought_through_a_draft_branch_is_judged_on_the_way_to_main() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("secret-draft");
+    let (bare, work) = repo_pair(&root.0, &env);
+    let before = tip(&bare, &env, "main");
+
+    add_script(&work, &env, "references/setup.md", &format!("token: {LEAK}\n"), "с ключом");
+    // Черновую ветку хук по содержимому не судит — это её законная свобода.
+    git_ok(&work, &env, &["push", "-q", "origin", "HEAD:refs/heads/draft"]);
+    // А вот в main тот же коммит уже «известен» репозиторию — и всё равно обязан быть судим.
+    let out = git(&work, &env, &["push", "origin", "HEAD:main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "ключ, проведённый через черновик, не должен попасть в main: {err}");
+    assert!(err.contains("references/setup.md"), "{err}");
+    assert_eq!(tip(&bare, &env, "main"), before);
+}
+
+#[test]
+fn a_key_in_readme_is_found_too() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("secret-readme");
+    let (_bare, work) = repo_pair(&root.0, &env);
+
+    std::fs::write(work.join("README.md"), format!("# t\n\nkey {LEAK}\n")).expect("README");
+    git_ok(&work, &env, &["add", "-A"]);
+    git_ok(&work, &env, &["commit", "-q", "-m", "readme"]);
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "README тоже клонируется: {err}");
+    assert!(err.contains("README.md, line 3"), "{err}");
+}

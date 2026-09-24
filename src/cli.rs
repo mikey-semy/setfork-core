@@ -315,8 +315,10 @@ pub async fn run_dbless() -> Option<i32> {
 /// является дырой:
 /// * list.json не разобрался → `project_pushed_commit` вернёт `Ok(None)`, версии
 ///   не будет, в канон ничего не попадёт;
-/// * ни одной команды → приложению нечего искать, а лишний сетевой вызов на
-///   рабочем пути записи — это лишний способ пуш уронить;
+/// * ни одной команды и ни одного нового текста → приложению нечего искать. Новый
+///   текст есть почти у каждого пуша (ключи ищутся и в list.json), так что вопрос
+///   задаётся почти всегда — и это не новая зависимость: `ensure_writable` спрашивает
+///   приложение перед КАЖДЫМ пушем и так;
 /// * адрес приложения не задан → это явный локальный dev (сервер без
 ///   `SETFORK_APP_URL` не стартует), и ровно так же ведёт себя `ensure_writable`.
 async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i32 {
@@ -360,7 +362,20 @@ async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i
     let Some(base) = setfork_core::gate::app_url() else {
         return 0;
     };
-    let Err(refusal) = ensure_content_allowed_at(base, owner, slug, &commands, &texts).await else {
+    // Порции — по пределу авторских файлов ОДНОГО коммита: такой объём приложение уже
+    // принимает одним вопросом, когда те же файлы приходят с сайта или через MCP.
+    let limit = git::serialize::AUTHORED_MAX_BYTES as usize;
+    let portions = setfork_core::gate::text_portions(&texts, limit);
+    let mut refused = None;
+    for (i, files) in portions.iter().copied().chain(portions.is_empty().then_some(&[][..])).enumerate() {
+        // Команды — только с первой порцией: номер шага в отказе считается по ним.
+        let cmds: &[Option<String>] = if i == 0 { &commands } else { &[] };
+        if let Err(r) = ensure_content_allowed_at(base, owner, slug, cmds, files).await {
+            refused = Some(r);
+            break;
+        }
+    }
+    let Some(refusal) = refused else {
         return 0;
     };
     // Природа отказа названа ВСЛУХ, потому что советы человеку тут
