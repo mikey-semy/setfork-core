@@ -334,34 +334,100 @@ pub fn block_commands(raw: &[u8]) -> Option<Vec<Option<String>>> {
 /// Ошибка — не «скриптов нет». Проверка содержимого закрыта по умолчанию, и
 /// недоставший файлы вызов обязан это сказать, а не пропустить пуш молча.
 pub fn authored_scripts(commit: &str) -> Result<Vec<(String, String)>, String> {
-    use std::process::{Command, Stdio};
     if commit.is_empty() {
         return Ok(Vec::new());
     }
-    let git = |args: &[&str]| -> Result<Vec<u8>, String> {
-        let out =
-            Command::new("git").args(args).stdin(Stdio::null()).output().map_err(|e| format!("git: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
-        }
-        Ok(out.stdout)
-    };
-    let listing = git(&["ls-tree", "-z", commit, "--", "scripts/"])?;
-    let mut files = Vec::new();
+    tree_blobs(commit, &["scripts/"])?.into_iter().map(|(path, oid)| Ok((path, blob_text(&oid)?))).collect()
+}
+
+/// Шелловый `git` с закрытым stdin — см. `authored_scripts`, почему не libgit2.
+fn sh_git(args: &[&str]) -> Result<Vec<u8>, String> {
+    use std::process::{Command, Stdio};
+    let out =
+        Command::new("git").args(args).stdin(Stdio::null()).output().map_err(|e| format!("git: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    Ok(out.stdout)
+}
+
+/// Блобы дерева `commit` под путями `specs` — (путь, объект), по порядку дерева.
+/// `<режим> <тип> <объект>\t<путь>`; не-блобы (подкаталог, ссылка) правило путей
+/// и лимиты хука уже отвергли раньше этой проверки.
+fn tree_blobs(commit: &str, specs: &[&str]) -> Result<Vec<(String, String)>, String> {
+    let mut args = vec!["ls-tree", "-z", commit, "--"];
+    args.extend_from_slice(specs);
+    let listing = sh_git(&args)?;
+    let mut out = Vec::new();
     for entry in listing.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-        // `<режим> <тип> <объект>\t<путь>`; не-блобы (подкаталог, ссылка) правило путей
-        // и лимиты хука уже отвергли раньше этой проверки.
         let entry = String::from_utf8_lossy(entry);
         let Some((meta, path)) = entry.split_once('\t') else { continue };
         let mut meta = meta.split(' ');
         let (Some(_mode), Some(kind), Some(oid)) = (meta.next(), meta.next(), meta.next()) else { continue };
-        if kind != "blob" {
-            continue;
+        if kind == "blob" {
+            out.push((path.to_string(), oid.to_string()));
         }
-        let text = String::from_utf8_lossy(&git(&["cat-file", "blob", oid])?).into_owned();
-        files.push((path.to_string(), text));
     }
-    Ok(files)
+    Ok(out)
+}
+
+fn blob_text(oid: &str) -> Result<String, String> {
+    Ok(String::from_utf8_lossy(&sh_git(&["cat-file", "blob", oid])?).into_owned())
+}
+
+/// Всё, что пуш ВПЕРВЫЕ приносит в репозиторий: `list.json` и файлы автора КАЖДОГО
+/// коммита, которого ещё нет в main (`rev-list <commit> --not main`),
+/// каждый блоб — один раз и только если его не было у родителя. Вход поиска ключей.
+///
+/// # Почему история, а не вершина
+///
+/// Команду из промежуточного коммита исполнить нельзя — в канон проецируется вершина,
+/// поэтому команды судятся по ней. Ключ — наоборот: `git clone` отдаёт историю целиком,
+/// и ключ, добавленный коммитом и убранный следующим, утекает всё равно. Так же судит
+/// push protection у GitHub — по каждому коммиту пуша.
+///
+/// Путь блоба, которого нет в вершине, помечен `путь@коммит`: человек должен понять, что
+/// чинить надо историю, а не текущий файл — в текущем ключа может уже и не быть.
+pub fn pushed_texts(commit: &str) -> Result<Vec<(String, String)>, String> {
+    // Всё, что дерево принимает текстом: канон, файлы автора, README и шаги-markdown.
+    const SPECS: [&str; 6] = ["list.json", "README.md", "steps/", "scripts/", "references/", "assets/"];
+    if commit.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tip: std::collections::HashMap<String, String> = tree_blobs(commit, &SPECS)?.into_iter().collect();
+    // Диапазон — от MAIN, а не от всех рефов (как у хука для путей): черновые ветки хук
+    // по содержимому не судит, и ключ, проведённый `push origin draft`, а затем
+    // `push origin draft:main`, был бы «уже известным» и в main прошёл бы непроверенным.
+    // В пустом репозитории main ещё нет, и имя уронило бы rev-list — тогда нового всё.
+    // ⚠️ Не `--glob=refs/heads/main`: без символов шаблона git молча дописывает `/*`, и
+    // исключение не исключало ничего (поймано тестом «старый ключ не судится заново»).
+    let has_main = sh_git(&["rev-parse", "--verify", "-q", "refs/heads/main"]).is_ok();
+    let mut range = vec!["rev-list", commit];
+    if has_main {
+        range.extend(["--not", "refs/heads/main"]);
+    }
+    let commits = String::from_utf8_lossy(&sh_git(&range)?).into_owned();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for c in commits.lines().filter(|l| !l.is_empty()) {
+        // Дерево коммита — это ВСЕ его файлы, а не изменённые. Блоб, лежавший у родителя,
+        // пуш не приносит: он уже в репозитории, и отказ за него стоил бы человеку работы,
+        // а утечку бы не отменил. У первого нового коммита родитель — прежняя вершина.
+        let parents = String::from_utf8_lossy(&sh_git(&["rev-parse", &format!("{c}^@")])?).into_owned();
+        let mut inherited = std::collections::HashSet::new();
+        for p in parents.lines().filter(|l| !l.is_empty()) {
+            inherited.extend(tree_blobs(p, &SPECS)?.into_iter().map(|(_, oid)| oid));
+        }
+        for (path, oid) in tree_blobs(c, &SPECS)? {
+            if inherited.contains(&oid) || !seen.insert(oid.clone()) {
+                continue;
+            }
+            let label =
+                if tip.get(&path) == Some(&oid) { path } else { format!("{path}@{}", &c[..c.len().min(8)]) };
+            out.push((label, blob_text(&oid)?));
+        }
+    }
+    Ok(out)
 }
 
 /// None — значение не объект манифеста (массив, число, строка).

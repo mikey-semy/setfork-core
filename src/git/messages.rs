@@ -132,12 +132,12 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
     },
     // ── H15-002: вопрос о СОДЕРЖИМОМ ────────────────────────────────────────
     //
-    // Пять строк отсюда печатает не шелл, а Rust — подкоманда `check-content`,
+    // Строки этого блока печатает не шелл, а Rust — подкоманда `check-content`,
     // которую хук зовёт вместо HTTP (шелл его не умеет, curl в runtime-образе
     // нет). Лежат они всё равно ЗДЕСЬ: поверхность одна и та же — stderr `git
     // push`, и оба языка обязаны быть видны рядом. В шелл-функцию они попадут
     // тоже (генератор берёт таблицу целиком), и это безвредно: этих ключей шелл
-    // не зовёт. Шестую, `content_check_missing`, печатает как раз шелл.
+    // не зовёт. Одну, `content_check_missing`, печатает как раз шелл.
     HookMessage {
         key: "content_destructive",
         en: "SetFork: step %s contains a command that is not allowed here: %s (rule %s)",
@@ -158,6 +158,23 @@ pub const HOOK_MESSAGES: &[HookMessage] = &[
         // Без апострофа намеренно: текст уезжает в одинарные кавычки шелла.
         en: "Remove or rewrite that command in list.json and push again.",
         ru: "Уберите или перепишите эту команду в list.json и повторите пуш.",
+    },
+    HookMessage {
+        key: "content_secret_file",
+        en: "SetFork: %s, line %s: this looks like a %s access key (%s, rule %s)",
+        ru: "SetFork: %s, строка %s: похоже на ключ доступа %s (%s, правило %s)",
+    },
+    HookMessage {
+        key: "content_secret_step",
+        en: "SetFork: step %s in list.json: this looks like a %s access key (%s, rule %s)",
+        ru: "SetFork: шаг %s в list.json: похоже на ключ доступа %s (%s, правило %s)",
+    },
+    HookMessage {
+        key: "content_secret_hint",
+        // Без апострофов намеренно: текст уезжает в одинарные кавычки шелла.
+        // `путь@коммит` — ключ в истории пуша: его надо убрать из того коммита, не из файла.
+        en: "Remove the key from every commit of the push (a path@commit means history) and push again. If it was ever shared, revoke it with the provider.",
+        ru: "Уберите ключ из всех коммитов пуша (путь@коммит значит историю) и повторите пуш. Если ключ уже где-то появлялся, отзовите его у провайдера.",
     },
     HookMessage {
         key: "content_denied",

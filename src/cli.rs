@@ -315,8 +315,10 @@ pub async fn run_dbless() -> Option<i32> {
 /// является дырой:
 /// * list.json не разобрался → `project_pushed_commit` вернёт `Ok(None)`, версии
 ///   не будет, в канон ничего не попадёт;
-/// * ни одной команды → приложению нечего искать, а лишний сетевой вызов на
-///   рабочем пути записи — это лишний способ пуш уронить;
+/// * ни одной команды и ни одного нового текста → приложению нечего искать. Новый
+///   текст есть почти у каждого пуша (ключи ищутся и в list.json), так что вопрос
+///   задаётся почти всегда — и это не новая зависимость: `ensure_writable` спрашивает
+///   приложение перед КАЖДЫМ пушем и так;
 /// * адрес приложения не задан → это явный локальный dev (сервер без
 ///   `SETFORK_APP_URL` не стартует), и ровно так же ведёт себя `ensure_writable`.
 async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i32 {
@@ -344,13 +346,36 @@ async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i
         }
     };
     commands.extend(scripts.iter().map(|(_, text)| Some(text.clone())));
-    if commands.iter().all(|c| c.as_deref().unwrap_or("").trim().is_empty()) {
+    // КЛЮЧИ ДОСТУПА ищутся по всему, что пуш приносит впервые, — по истории, а не по
+    // вершине (почему — у `pushed_texts`). Не прочиталось — отказ вслух, как у скриптов:
+    // проверка закрыта по умолчанию.
+    let texts = match git::project::pushed_texts(commit) {
+        Ok(t) => t,
+        Err(why) => {
+            eprintln!("{}", say("content_check_not_understood", &[&why]));
+            return 1;
+        }
+    };
+    if texts.is_empty() && commands.iter().all(|c| c.as_deref().unwrap_or("").trim().is_empty()) {
         return 0;
     }
     let Some(base) = setfork_core::gate::app_url() else {
         return 0;
     };
-    let Err(refusal) = ensure_content_allowed_at(base, owner, slug, &commands).await else {
+    // Порции — по пределу авторских файлов ОДНОГО коммита: такой объём приложение уже
+    // принимает одним вопросом, когда те же файлы приходят с сайта или через MCP.
+    let limit = git::serialize::AUTHORED_MAX_BYTES as usize;
+    let portions = setfork_core::gate::text_portions(&texts, limit);
+    let mut refused = None;
+    for (i, files) in portions.iter().copied().chain(portions.is_empty().then_some(&[][..])).enumerate() {
+        // Команды — только с первой порцией: номер шага в отказе считается по ним.
+        let cmds: &[Option<String>] = if i == 0 { &commands } else { &[] };
+        if let Err(r) = ensure_content_allowed_at(base, owner, slug, cmds, files).await {
+            refused = Some(r);
+            break;
+        }
+    }
+    let Some(refusal) = refused else {
         return 0;
     };
     // Природа отказа названа ВСЛУХ, потому что советы человеку тут
@@ -370,6 +395,25 @@ async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i
                     say("content_hint", &[]),
                 ],
             }
+        }
+        // Ключ называется МЕСТОМ: файл и строка. Пришёл в команде — это шаг либо
+        // скрипт за последним блоком (как у разрушительной команды). Сам ключ приложение
+        // не повторяет — печатается только начало.
+        ContentRefusal::Secret(d) => {
+            let line = d.line.to_string();
+            let script = (d.step as usize).checked_sub(blocks + 1).and_then(|i| scripts.get(i));
+            let first = match (d.path.is_empty(), script) {
+                (false, _) => {
+                    say("content_secret_file", &[&d.path, &line, &d.provider, &d.fragment, &d.rule])
+                }
+                (true, Some((path, _))) => {
+                    say("content_secret_file", &[path, &line, &d.provider, &d.fragment, &d.rule])
+                }
+                (true, None) => {
+                    say("content_secret_step", &[&d.step.to_string(), &d.provider, &d.fragment, &d.rule])
+                }
+            };
+            vec![first, say("content_secret_hint", &[])]
         }
         ContentRefusal::Denied(reason) => vec![say("content_denied", &[&reason])],
         ContentRefusal::Unavailable(why) => vec![say("content_check_unavailable", &[&why])],
