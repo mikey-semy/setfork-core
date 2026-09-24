@@ -485,6 +485,12 @@ impl ListWrite for ListWriteSvc {
             .ok_or_else(|| Status::not_found("list not found"))?;
         // Коммит + проекция — критическая секция, как у push/merge.
         let _guard = repo::repo_guard(&self.pool, tid).await.map_err(db_status)?;
+        // Порог размера репозитория — как на push: запись с набором файлов добавляет до
+        // мегабайта блобов на версию, и без порога цикл вызовов растил бы репозиторий без
+        // предела, пока его не остановил бы только следующий пуш.
+        if authored.is_some() {
+            super::git_core::ensure_repo_under_limit(&bare).await?;
+        }
         let edit = version::WebEdit::new(&note, author, rows, meta)
             .based_on(expected_version)
             .with_authored(authored);
@@ -525,12 +531,21 @@ impl ListWrite for ListWriteSvc {
             return Err(Status::invalid_argument("bad moderation"));
         }
 
+        // id списка — здесь, а не из базы: при рождении с файлами замок репозитория берётся ДО
+        // транзакции, в том же порядке, что у AddVersion и push (сначала замок, потом
+        // соединение основного пула). Обратный порядок (транзакция держит соединение и ждёт
+        // замка) при пачке одновременных записей заклинивал бы два пула друг о друга.
+        let new_id = Uuid::new_v4();
+        let _guard = match authored {
+            Some(_) => Some(repo::repo_guard(&self.pool, new_id).await.map_err(db_status)?),
+            None => None,
+        };
         let mut tx = self.pool.begin().await.map_err(db_status)?;
         // moderation возвращается ИЗ СТРОКИ, а не подставляется из запроса: по этому полю
         // вызывающий проверяет, что его решение доехало (сборки фронта и ядра выкатываются
         // порознь). Ответ, собранный из входа, на такой вопрос отвечает всегда «да».
         let row: (Uuid, String, i64, i64) = sqlx::query_as(
-            "insert into templates (owner_id, slug, title, \"desc\", tags, ordered, visibility, status,                                     origin, forked_from_id, moderation, current_version)              values ($1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::list_visibility, $8::list_status,                      $9::template_origin, $10, $11::moderation_status, 1)              returning id, moderation::text,                        floor(extract(epoch from created_at) * 1000)::bigint,                        floor(extract(epoch from updated_at) * 1000)::bigint",
+            "insert into templates (id, owner_id, slug, title, \"desc\", tags, ordered, visibility, status,                                     origin, forked_from_id, moderation, current_version)              values ($12, $1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::list_visibility, $8::list_status,                      $9::template_origin, $10, $11::moderation_status, 1)              returning id, moderation::text,                        floor(extract(epoch from created_at) * 1000)::bigint,                        floor(extract(epoch from updated_at) * 1000)::bigint",
         )
         .bind(owner)
         .bind(&r.slug)
@@ -543,6 +558,7 @@ impl ListWrite for ListWriteSvc {
         .bind(if r.origin.is_empty() { "authored" } else { &r.origin })
         .bind(forked_from)
         .bind(moderation)
+        .bind(new_id)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_status)?;
@@ -559,9 +575,11 @@ impl ListWrite for ListWriteSvc {
         // бы при первом же обращении, и скилл родился бы без них.
         //
         // Порядок как у веб-версии: git — ДО фиксации транзакции (у коммита тот же
-        // created_at, что у строки версии, — SHA воспроизводим бутстрапом); сбой git
-        // откатывает транзакцию и не оставляет ничего. Сбой фиксации после git оставляет
-        // бесхозный каталог, его подбирает orphan_repo_dirs — лишней версии нет.
+        // created_at, что у строки версии). Сбой git откатывает транзакцию и убирает свой
+        // свежий каталог. Сбой ФИКСАЦИИ каталог НЕ трогает: подтверждение могло потеряться
+        // при записанной строке, и снесённый каталог бутстрап восстановил бы из базы уже
+        // без файлов. Если строки всё-таки нет, каталог подберёт `gc-repos` — он сверяет
+        // каждый каталог с базой перед сносом.
         let born = if let Some(files) = authored {
             let vdata = VersionData {
                 version: 1,
@@ -574,14 +592,13 @@ impl ListWrite for ListWriteSvc {
                 kind: None,
                 steps: rows.iter().enumerate().map(|(i, s)| db::ser_step_from_row(i as i32 + 1, s)).collect(),
             };
-            let _guard = repo::repo_guard(&self.pool, tid).await.map_err(db_status)?;
             let bare = repo::repo_path(tid);
             let bare2 = bare.clone();
             let made = tokio::task::spawn_blocking(move || {
                 bundle::init_with_version(&bare2, &vdata, bundle::Authored::Replace(&files))
             })
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .unwrap_or_else(|e| Err(crate::git::update::MainUpdateError::Git(e.to_string())));
             if let Err(e) = made {
                 let _ = std::fs::remove_dir_all(&bare);
                 return Err(match e {
@@ -596,10 +613,9 @@ impl ListWrite for ListWriteSvc {
             None
         };
         if let Err(e) = tx.commit().await {
-            if let Some(bare) = &born {
+            if born.is_some() {
                 metrics::counter!("projection_failures_total", "op" => "create").increment(1);
-                tracing::error!(%tid, error = %e, "create with files: git written, db commit failed; the repo dir is orphaned");
-                let _ = std::fs::remove_dir_all(bare);
+                tracing::error!(%tid, error = %e, "create with files: git written, db commit failed; the repo dir is kept for gc-repos");
             }
             return Err(db_status(e));
         }

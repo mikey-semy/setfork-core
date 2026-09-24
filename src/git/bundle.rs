@@ -520,8 +520,9 @@ pub fn bootstrap_bare(versions: &[VersionData], bare: &Path) -> io::Result<()> {
 /// `versions` — только те, что добавить (version > have). Без worktree.
 /// Возвращает hex-sha нового tip main (None — дописывать было нечего).
 ///
-/// Это НЕ «ленивая досыпка» (её больше нет): функцию зовут единый путь записи
-/// версии (git::version::commit_web_version) и одноразовый догон sync-repos.
+/// Это НЕ «ленивая досыпка» (её больше нет) и НЕ путь веб-записи: веб-версия идёт через
+/// `append_version_with` (с набором файлов автора или переносом). Здесь — перенос всегда;
+/// зовут одноразовый догон sync-repos и тесты модуля.
 pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<Option<String>> {
     if versions.is_empty() {
         return Ok(None);
@@ -544,6 +545,13 @@ pub fn append_version_with(
     v: &VersionData,
     authored: Authored<'_>,
 ) -> Result<Option<String>, MainUpdateError> {
+    // Правило набора — здесь, а не только у вызывающего: treebuilder молча оставил бы
+    // последний из двух одинаковых путей, и update_main повтор уже не увидел бы.
+    if let Authored::Replace(files) = authored
+        && let Some(e) = super::update::authored_input_violation(files)
+    {
+        return Err(e);
+    }
     let repo = Repository::open_bare(bare)?;
     let parent = repo.refname_to_id(MAIN_REF).ok();
     let tip = build_history(&repo, std::slice::from_ref(v), parent, authored)?;
@@ -558,6 +566,11 @@ pub fn init_with_version(
     v: &VersionData,
     authored: Authored<'_>,
 ) -> Result<(), MainUpdateError> {
+    if let Authored::Replace(files) = authored
+        && let Some(e) = super::update::authored_input_violation(files)
+    {
+        return Err(e);
+    }
     if let Some(parent) = bare.parent() {
         fs::create_dir_all(parent).map_err(|e| MainUpdateError::Git(e.to_string()))?;
     }

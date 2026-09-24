@@ -97,7 +97,12 @@ impl AuthoredTally {
             return Some(MainUpdateError::AuthoredBinary(path));
         }
         self.files += 1;
-        self.bytes += content.len() as u64;
+        // Имя — тоже байты дерева: без него лимит обходился бы именем в мегабайты.
+        self.bytes += (content.len() + path.len()) as u64;
+        // Отказ сразу на лишнем файле: остаток набора (до 32 МБ сообщения) незачем читать.
+        if self.files > AUTHORED_MAX_FILES {
+            return Some(MainUpdateError::AuthoredTooMany(self.files));
+        }
         None
     }
 
@@ -121,6 +126,28 @@ pub struct AuthoredInput {
     pub executable: bool,
 }
 
+/// Имя файла С ЗАПИСИ — строже, чем в дереве с push, по трём причинам, которые пушем не
+/// достать так дёшево:
+/// * длина — не больше `AUTHORED_NAME_MAX_BYTES` (поле имени ustar): длиннее — файл лёг бы
+///   в дерево, но не в архив скилла (`skill.tar.gz` такие отбрасывает);
+/// * `.`-имена (`.git`, `.gitmodules`…) — libgit2 отвергает часть из них в treebuilder, и
+///   отказ приходил бы сбоем git, а не отказом ввода;
+/// * управляющие символы, `\` и символы направления текста — подмена отображения имени в
+///   перечне SKILL.md (`run\u{202e}hs.sh`) и сюрприз при распаковке на Windows.
+fn input_name_ok(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or("");
+    name.len() <= AUTHORED_NAME_MAX_BYTES
+        && !name.starts_with('.')
+        && !name.chars().any(|c| {
+            c.is_control()
+                || c == '\\'
+                || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+}
+
+/// Предел имени файла — поле `name` заголовка ustar, которым пишется архив скилла.
+pub const AUTHORED_NAME_MAX_BYTES: usize = 100;
+
 /// Набор файлов с записи — по тому же правилу, что дерево на push: путь, повтор, двоичное,
 /// число, размер. Проверяется ДО замка и git, чтобы отказ не стоил записи; `update_main`
 /// всё равно перепроверит готовое дерево — страховка на случай расхождения.
@@ -128,8 +155,13 @@ pub fn authored_input_violation(files: &[AuthoredInput]) -> Option<MainUpdateErr
     let mut seen = std::collections::HashSet::new();
     let mut tally = AuthoredTally::default();
     for f in files {
-        if !super::serialize::authored_path(&f.path) {
+        if !super::serialize::authored_path(&f.path) || !input_name_ok(&f.path) {
             return Some(MainUpdateError::ForeignPath(f.path.clone()));
+        }
+        // Исполняемый файл — только в scripts/: проверку на разрушительное проходят только
+        // они, и «assets/setup.sh с правом запуска» обходил бы её одним флагом.
+        if f.executable && !f.path.starts_with("scripts/") {
+            return Some(MainUpdateError::AuthoredExecutable(f.path.clone()));
         }
         if !seen.insert(f.path.as_str()) {
             return Some(MainUpdateError::AuthoredDuplicate(f.path.clone()));
@@ -160,6 +192,8 @@ pub enum MainUpdateError {
     AuthoredTooLarge(u64),
     /// В наборе с записи один путь дважды (в дереве такого не бывает — только на входе).
     AuthoredDuplicate(String),
+    /// Исполняемый файл вне `scripts/` — только на входе записи.
+    AuthoredExecutable(String),
     /// Новый tip не потомок старого — переписывание истории main запрещено.
     NonFastForward,
     /// main уже не там, где ожидал вызывающий (CAS не сошёлся) — конкурентная запись.
@@ -174,7 +208,7 @@ impl std::fmt::Display for MainUpdateError {
             MainUpdateError::MissingListJson => write!(f, "list.json is required at the repo root"),
             MainUpdateError::ForeignPath(p) => write!(
                 f,
-                "only README.md, list.json, .gitattributes and scripts/, references/, assets/ files are allowed in a list tree; foreign path: {p}"
+                "only README.md, list.json, .gitattributes and scripts/, references/, assets/ files are allowed in a list tree (one level, a name up to {AUTHORED_NAME_MAX_BYTES} bytes, not starting with a dot, no control or direction characters); foreign path: {p}"
             ),
             MainUpdateError::AuthoredNotFile(p) => {
                 write!(f, "{p} must be a regular file (no symlinks or submodules)")
@@ -195,6 +229,9 @@ impl std::fmt::Display for MainUpdateError {
                 )
             }
             MainUpdateError::AuthoredDuplicate(p) => write!(f, "{p} is listed twice in the file set"),
+            MainUpdateError::AuthoredExecutable(p) => {
+                write!(f, "{p} is marked executable; only files in scripts/ may be executable")
+            }
             MainUpdateError::NonFastForward => write!(f, "non-fast-forward update of main is forbidden"),
             MainUpdateError::Stale => write!(f, "main moved concurrently (stale expected tip)"),
             MainUpdateError::Git(e) => write!(f, "git2: {e}"),

@@ -389,7 +389,7 @@ impl<'a> WebEdit<'a> {
 }
 
 /// Создаёт версию git-first: коммит vN на main (через единую точку обновления,
-/// внутри `bundle::append_versions`) + проекция строк в Postgres — одна операция
+/// внутри `bundle::append_version_with`) + проекция строк в Postgres — одна операция
 /// под уже взятым репо-локом. Этим путём идёт ЛЮБАЯ веб-правка (сайт, MCP,
 /// агент); push проецируется зеркально (git уже записан пушем).
 ///
@@ -502,10 +502,11 @@ pub async fn commit_web_version(
         steps: rows.iter().enumerate().map(|(i, r)| db::ser_step_from_row(i as i32 + 1, r)).collect(),
     };
 
-    // Git — первым. append_versions идёт через единую точку обновления main
+    // Git — первым. append_version_with идёт через единую точку обновления main
     // (валидация как у pre-receive) и ставит тег vN.
     let bare2 = bare.to_path_buf();
     let authored = edit_authored;
+    let sent_files = authored.is_some();
     let sha = match tokio::task::spawn_blocking(move || {
         let mode = authored.as_deref().map_or(bundle::Authored::Carry, bundle::Authored::Replace);
         bundle::append_version_with(&bare2, &vdata, mode)
@@ -513,7 +514,7 @@ pub async fn commit_web_version(
     .await
     {
         Ok(Ok(Some(sha))) => sha,
-        Ok(Ok(None)) => return Err(WebVersionError::Git("append_versions: nothing to commit".into())),
+        Ok(Ok(None)) => return Err(WebVersionError::Git("append_version_with: nothing to commit".into())),
         // Дерево не прошло правило авторских файлов (страховка update_main) — это ввод.
         Ok(Err(
             e @ (MainUpdateError::ForeignPath(_)
@@ -521,8 +522,9 @@ pub async fn commit_web_version(
             | MainUpdateError::AuthoredBinary(_)
             | MainUpdateError::AuthoredTooMany(_)
             | MainUpdateError::AuthoredTooLarge(_)
-            | MainUpdateError::AuthoredDuplicate(_)),
-        )) => return Err(WebVersionError::Authored(e)),
+            | MainUpdateError::AuthoredDuplicate(_)
+            | MainUpdateError::AuthoredExecutable(_)),
+        )) if sent_files => return Err(WebVersionError::Authored(e)),
         Ok(Err(e)) => return Err(WebVersionError::Git(e.to_string())),
         Err(e) => return Err(WebVersionError::Git(e.to_string())),
     };

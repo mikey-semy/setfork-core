@@ -104,6 +104,32 @@ where
 /// MissingListJson — единственный «пользовательский» случай (дерево слияния без
 /// канона); Stale — конкурентная запись (под репо-локом почти невозможна, но
 /// CAS честный); NonFastForward под локом означает сломанный инвариант кода.
+/// Порог размера репозитория (`SETFORK_REPO_LIMIT_MB`) — один на push и на запись с
+/// файлами автора (`ListWrite`): второй копии проверки быть не должно.
+pub(crate) async fn ensure_repo_under_limit(bare: &std::path::Path) -> Result<(), Status> {
+    let limit = crate::config::repo_limit_bytes();
+    if limit == 0 {
+        return Ok(());
+    }
+    let bare_size = bare.to_path_buf();
+    let size =
+        tokio::task::spawn_blocking(move || bundle::repo_size_bytes(&bare_size)).await.map_err(internal)?;
+    metrics::gauge!("repo_bytes").set(size as f64);
+    if size > limit {
+        // По-английски — как все Status в ядре (перевод за фронтом).
+        return Err(reason::status(
+            Code::ResourceExhausted,
+            Reason::RepoTooLarge,
+            format!(
+                "list repository is {} MB, over the {} MB limit; writes are stopped",
+                size / (1024 * 1024),
+                limit / (1024 * 1024)
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn main_status(e: MainUpdateError) -> Status {
     match e {
         MainUpdateError::MissingListJson => reason::status(
@@ -130,7 +156,8 @@ fn main_status(e: MainUpdateError) -> Status {
         | MainUpdateError::AuthoredBinary(_)
         | MainUpdateError::AuthoredTooMany(_)
         | MainUpdateError::AuthoredTooLarge(_)
-        | MainUpdateError::AuthoredDuplicate(_)) => {
+        | MainUpdateError::AuthoredDuplicate(_)
+        | MainUpdateError::AuthoredExecutable(_)) => {
             reason::status(Code::FailedPrecondition, Reason::ForeignPath, e.to_string())
         }
         MainUpdateError::Stale => reason::status(Code::Aborted, Reason::Stale, "main moved concurrently"),
@@ -284,26 +311,7 @@ impl GitCore for GitCoreSvc {
         // настройка приложения, пуш при превышении отклоняется). Проверяем ДО приёма:
         // принять и отказать потом значило бы оставить объекты на диске ровно в том
         // случае, ради которого порог и вводился.
-        let limit = crate::config::repo_limit_bytes();
-        if limit > 0 {
-            let bare_size = bare.clone();
-            let size = tokio::task::spawn_blocking(move || bundle::repo_size_bytes(&bare_size))
-                .await
-                .map_err(internal)?;
-            metrics::gauge!("repo_bytes").set(size as f64);
-            if size > limit {
-                // По-английски — как все Status в ядре (перевод за фронтом).
-                return Err(reason::status(
-                    Code::ResourceExhausted,
-                    Reason::RepoTooLarge,
-                    format!(
-                        "list repository is {} MB, over the {} MB limit; pushes are stopped",
-                        size / (1024 * 1024),
-                        limit / (1024 * 1024)
-                    ),
-                ));
-            }
-        }
+        ensure_repo_under_limit(&bare).await?;
         let bare_recv = bare.clone();
         // Внутри одного spawn_blocking: oid main до и после приёма пака — чтобы
         // проецировать версию ТОЛЬКО когда push реально сдвинул main. Пуш в

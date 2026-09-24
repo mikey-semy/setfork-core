@@ -72,10 +72,41 @@ fn input_set_is_judged_by_the_tree_rule() {
     );
     let many: Vec<_> = (0..51).map(|i| input(&format!("references/{i}.md"), b"x")).collect();
     assert_eq!(authored_input_violation(&many), Some(MainUpdateError::AuthoredTooMany(51)));
+    // Имя — тоже строго: длина по полю ustar архива, без `.`-имён, управляющих символов,
+    // обратного слеша и символов направления текста.
+    let long = format!("references/{}.md", "я".repeat(49)); // 98 + 3 = 101 байт имени
+    assert!(matches!(authored_input_violation(&[input(&long, b"x")]), Some(MainUpdateError::ForeignPath(_))));
+    let fits = format!("references/{}.md", "я".repeat(48)); // 99 байт — проходит
+    assert_eq!(authored_input_violation(&[input(&fits, b"x")]), None);
+    for bad in [
+        "scripts/.git",
+        "references/.hidden.md",
+        "scripts/run\u{202e}hs.sh",
+        "scripts/a\\b.sh",
+        "scripts/a\nb.sh",
+    ] {
+        assert!(
+            matches!(authored_input_violation(&[input(bad, b"x")]), Some(MainUpdateError::ForeignPath(_))),
+            "имя {bad:?} принято"
+        );
+    }
+    // Исполняемый — только в scripts/: проверку на опасное проходят только они.
+    let exec = |p: &str| AuthoredInput { path: p.into(), content: b"rm -rf ~".to_vec(), executable: true };
+    assert_eq!(
+        authored_input_violation(&[exec("assets/setup.sh")]),
+        Some(MainUpdateError::AuthoredExecutable("assets/setup.sh".into()))
+    );
+    assert_eq!(authored_input_violation(&[exec("scripts/setup.sh")]), None);
+    // Байты имени входят в предел: иначе предел обходился бы именем.
+    let near = vec![b'x'; 1024 * 1024 - 5];
+    assert!(matches!(
+        authored_input_violation(&[input("references/a.md", &near)]),
+        Some(MainUpdateError::AuthoredTooLarge(_))
+    ));
     let big = vec![b'x'; 1024 * 1024 + 1];
     assert_eq!(
         authored_input_violation(&[input("references/big.md", &big)]),
-        Some(MainUpdateError::AuthoredTooLarge(1024 * 1024 + 1))
+        Some(MainUpdateError::AuthoredTooLarge(1024 * 1024 + 1 + "references/big.md".len() as u64))
     );
 }
 
@@ -243,6 +274,14 @@ async fn bad_set_is_refused_as_input_and_writes_nothing() {
         .await
         .expect("current");
     assert_eq!(current, 1, "отказ записал версию");
+
+    // `.git` — отказ ВВОДА, а не сбой git: libgit2 отвергает такое имя в treebuilder, и
+    // без правила имени агент получал бы INTERNAL «git commit failed».
+    let dot = svc
+        .add_version(Request::new(add_req(&list.id, wire(&[("scripts/.git", "x", false)]))))
+        .await
+        .expect_err(".git принят");
+    assert_eq!(dot.metadata().get("sf-reason").and_then(|v| v.to_str().ok()), Some("AUTHORED_INVALID"));
 
     let born = svc
         .create(Request::new(create_req(
