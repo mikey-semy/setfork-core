@@ -113,6 +113,20 @@ pub struct DenyDetail {
     pub fragment: String,
 }
 
+/// МЕСТО ключа доступа в пушнутом коммите: файл (либо шаг, если ключ пришёл в команде),
+/// строка, вид ключа и его НАЧАЛО — сам ключ приложение не повторяет, чтобы он не
+/// напечатался ещё раз в выводе `git push` и в логах.
+#[derive(Debug, PartialEq, Eq)]
+pub struct SecretDetail {
+    /// Путь файла; пустой — ключ в команде шага `step`.
+    pub path: String,
+    pub step: u32,
+    pub line: u32,
+    pub rule: String,
+    pub provider: String,
+    pub fragment: String,
+}
+
 /// Вердикт приложения. `Allow` — можно писать; всё остальное — причина отказа.
 #[derive(Debug, PartialEq, Eq)]
 enum Verdict {
@@ -120,6 +134,8 @@ enum Verdict {
     /// Продуктовый запрет с кодом причины ('frozen' | 'archived' | 'not-found' |
     /// 'destructive'). Второе поле — место находки, есть только у 'destructive'.
     Deny(String, Option<DenyDetail>),
+    /// Ключ доступа в содержимом — со своим местом (файл и строка), не как у команды.
+    Secret(SecretDetail),
     /// Спросить не удалось ПО СВЯЗИ: приложение не отвечает, оборвалось тело,
     /// пришёл 5xx, вышел таймаут. Ответ всё равно «нет», но беда ПРЕХОДЯЩАЯ —
     /// клиенту честно сказать «повтори», и код для этого один: `Unavailable`.
@@ -145,6 +161,20 @@ fn parse_verdict(body: &[u8]) -> Verdict {
         Some(true) => Verdict::Allow,
         Some(false) => {
             let reason = v.get("reason").and_then(|r| r.as_str()).unwrap_or("denied").to_string();
+            if reason == "secret" {
+                // Место читаем так же МЯГКО, как у команды: отказ с неполным местом —
+                // всё равно отказ, и превращать его в «ответ непонятен» нельзя.
+                let text = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+                let num = |k: &str| v.get(k).and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
+                return Verdict::Secret(SecretDetail {
+                    path: text("path"),
+                    step: num("step"),
+                    line: num("line"),
+                    rule: text("rule"),
+                    provider: text("provider"),
+                    fragment: text("fragment"),
+                });
+            }
             // Место читаем МЯГКО и только у 'destructive': поля появились вместе
             // с этой причиной, и требовать их у 'frozen' значило бы превратить
             // обычный отказ в «ответ непонятен».
@@ -159,23 +189,36 @@ fn parse_verdict(body: &[u8]) -> Verdict {
     }
 }
 
-/// Тело вопроса. `blocks` кладётся ТОЛЬКО когда спрашивают о содержимом.
+/// Файл коммита в вопросе о содержимом: путь (или `путь@коммит` для истории) и текст.
+pub type PushedText = (String, String);
+
+/// Тело вопроса. `blocks` и `files` кладутся ТОЛЬКО когда спрашивают о содержимом.
 ///
 /// ⚠️ Не «всегда, просто пустым»: приложение отличает «ядро не спрашивало» от
 /// «спросило про пустой список», и лишнее поле у обычного предусловия записи
 /// заставило бы его считать команды там, где их взять неоткуда.
-fn ask_payload(owner: &str, slug: &str, commands: Option<&[Option<String>]>) -> String {
+fn ask_payload(owner: &str, slug: &str, content: Option<(&[Option<String>], &[PushedText])>) -> String {
     let mut body = serde_json::json!({ "owner": owner, "slug": slug });
-    if let Some(cmds) = commands {
+    if let Some((cmds, files)) = content {
         let blocks: Vec<serde_json::Value> =
             cmds.iter().map(|c| serde_json::json!({ "command": c })).collect();
         body["blocks"] = serde_json::Value::Array(blocks);
+        // Тексты коммита — для поиска ключей доступа. Старое приложение поле не знает и
+        // игнорирует: пуш проходит ровно как раньше, судятся только команды.
+        let files: Vec<serde_json::Value> =
+            files.iter().map(|(path, text)| serde_json::json!({ "path": path, "text": text })).collect();
+        body["files"] = serde_json::Value::Array(files);
     }
     body.to_string()
 }
 
-async fn ask(base: &str, owner: &str, slug: &str, commands: Option<&[Option<String>]>) -> Verdict {
-    let payload = ask_payload(owner, slug, commands);
+async fn ask(
+    base: &str,
+    owner: &str,
+    slug: &str,
+    content: Option<(&[Option<String>], &[PushedText])>,
+) -> Verdict {
+    let payload = ask_payload(owner, slug, content);
     let mut builder = Request::builder()
         .method("POST")
         .uri(format!("{base}/api/internal/write-allowed"))
@@ -252,6 +295,9 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
     // спрашивает `ensure_content_allowed_at` из pre-receive.
     match ask(base, owner, slug, None).await {
         Verdict::Allow => Ok(()),
+        // Про ключ спрашивают только о содержимом, а здесь его нет; ответ «secret» на
+        // предусловие — расхождение контракта, и открывать на нём запись нельзя.
+        Verdict::Secret(_) => Err(Status::failed_precondition("secret")),
         Verdict::Deny(reason, _) => {
             metrics::counter!("write_gate_denied_total", "reason" => reason.clone()).increment(1);
             // Вердикт приложения — уже машиночитаемый код; переводим его в
@@ -323,6 +369,8 @@ pub async fn ensure_writable_at(base: &str, owner: &str, slug: &str) -> Result<(
 pub enum ContentRefusal {
     /// Запрещённая команда + МЕСТО: шаг (с единицы), код правила, фрагмент.
     Destructive(DenyDetail),
+    /// Ключ доступа + МЕСТО: файл и строка (или шаг), вид ключа, его начало.
+    Secret(SecretDetail),
     /// Продуктовый отказ без места: список успели заморозить или убрать в архив,
     /// пока шёл пак. Редко, но возможно — и тогда честнее назвать эту причину.
     Denied(String),
@@ -369,12 +417,14 @@ pub async fn ensure_content_allowed_at(
     owner: &str,
     slug: &str,
     commands: &[Option<String>],
+    files: &[PushedText],
 ) -> Result<(), ContentRefusal> {
     // Метрик тут нет СОЗНАТЕЛЬНО: код исполняется в короткоживущем процессе
     // подкоманды, где prometheus-рекордер не поднят, и счётчик утёк бы в пустоту.
     // Видимость даёт сам отказ — он уезжает человеку в вывод `git push`.
-    match ask(base, owner, slug, Some(commands)).await {
+    match ask(base, owner, slug, Some((commands, files))).await {
         Verdict::Allow => Ok(()),
+        Verdict::Secret(detail) => Err(ContentRefusal::Secret(detail)),
         Verdict::Deny(reason, Some(detail)) if reason == "destructive" => {
             Err(ContentRefusal::Destructive(detail))
         }
@@ -464,15 +514,40 @@ mod tests {
     fn only_the_content_question_carries_blocks() {
         assert_eq!(ask_payload("mike", "list", None), r#"{"owner":"mike","slug":"list"}"#);
         assert_eq!(
-            ask_payload("mike", "list", Some(&[Some("echo hi".into()), None])),
-            r#"{"owner":"mike","slug":"list","blocks":[{"command":"echo hi"},{"command":null}]}"#,
+            ask_payload("mike", "list", Some((&[Some("echo hi".into()), None], &[]))),
+            r#"{"owner":"mike","slug":"list","blocks":[{"command":"echo hi"},{"command":null}],"files":[]}"#,
             "блок без команды едет как null и занимает СВОЁ место: по индексу считается номер шага"
         );
         assert_eq!(
-            ask_payload("mike", "list", Some(&[])),
-            r#"{"owner":"mike","slug":"list","blocks":[]}"#,
+            ask_payload("mike", "list", Some((&[], &[]))),
+            r#"{"owner":"mike","slug":"list","blocks":[],"files":[]}"#,
             "пустой список — это спрошенный вопрос, а не отсутствие вопроса"
         );
+        assert_eq!(
+            ask_payload("mike", "list", Some((&[], &[("references/a.md".into(), "text".into())]))),
+            r#"{"owner":"mike","slug":"list","blocks":[],"files":[{"path":"references/a.md","text":"text"}]}"#,
+            "файлы коммита едут путём и текстом"
+        );
+    }
+
+    /// Ключ доступа — своё место: файл и строка, а не шаг. Неполное место — всё равно
+    /// отказ: пропустить ключ из-за неполного ответа хуже, чем сказать без строки.
+    #[test]
+    fn secret_verdict_carries_the_file_and_line() {
+        assert_eq!(
+            parse_verdict(
+                br#"{"allow":false,"reason":"secret","path":"scripts/a.sh","step":0,"line":7,"rule":"github-pat","provider":"GitHub","fragment":"ghp_ab\u2026"}"#
+            ),
+            Verdict::Secret(SecretDetail {
+                path: "scripts/a.sh".into(),
+                step: 0,
+                line: 7,
+                rule: "github-pat".into(),
+                provider: "GitHub".into(),
+                fragment: "ghp_ab\u{2026}".into(),
+            })
+        );
+        assert!(matches!(parse_verdict(br#"{"allow":false,"reason":"secret"}"#), Verdict::Secret(_)));
     }
 
     /// Регрессия инцидента .com 01.08: в проде стояло имя контейнера без схемы и

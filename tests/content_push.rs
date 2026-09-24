@@ -136,8 +136,31 @@ fn verdict_for(body: &[u8], kind: AppKind) -> String {
             .to_string();
         }
     }
+    // Ключ доступа — миниатюра `secret-scan.ts`: метка вместо шаблона провайдера, место —
+    // файл из присланных и строка, посчитанная тут же. Так тест проверяет, что ядро шлёт
+    // тексты коммитов, а не то, что заглушка умеет отвечать.
+    let files = v.get("files").and_then(|f| f.as_array()).cloned().unwrap_or_default();
+    for f in &files {
+        let text = f.get("text").and_then(|t| t.as_str()).unwrap_or("");
+        if let Some(at) = text.find(LEAK) {
+            return serde_json::json!({
+                "allow": false,
+                "reason": "secret",
+                "path": f.get("path").and_then(|p| p.as_str()).unwrap_or(""),
+                "step": 0,
+                "line": text[..at].matches('\n').count() + 1,
+                "rule": "test-key",
+                "provider": "Test",
+                "fragment": "LEAKED…",
+            })
+            .to_string();
+        }
+    }
     r#"{"allow":true}"#.to_string()
 }
+
+/// Метка «ключа» для заглушки: настоящий шаблон провайдера тут не нужен — его судит приложение.
+const LEAK: &str = "LEAKED-KEY";
 
 // ── Git от лица владельца ────────────────────────────────────────────────────
 
@@ -508,4 +531,83 @@ fn a_script_is_judged_even_when_the_manifest_does_not_parse() {
     assert!(!out.status.success(), "непроверенный скрипт проехал за неразборчивым манифестом: {err}");
     assert!(err.contains("scripts/cleanup.sh"), "{err}");
     assert_eq!(tip(&bare, &env, "main"), before);
+}
+
+// ── Ключи доступа: по истории пуша, а не по вершине ──────────────────────────
+//
+// `git clone` отдаёт историю целиком, поэтому ключ, добавленный коммитом и убранный
+// следующим, утекает всё равно. Судится всё, что пуш приносит ВПЕРВЫЕ, — и только оно.
+
+#[test]
+fn a_key_in_a_reference_is_refused_by_file_and_line() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("secret-ref");
+    let (bare, work) = repo_pair(&root.0, &env);
+    let before = tip(&bare, &env, "main");
+
+    add_script(&work, &env, "references/setup.md", &format!("# Setup\n\ntoken: {LEAK}\n"), "справка");
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success(), "ключ в справке обязан остановить пуш: {err}");
+    assert!(err.contains("references/setup.md, line 3"), "отказ называет файл и строку: {err}");
+    assert!(!err.contains("references/setup.md@"), "файл вершины — без пометки истории: {err}");
+    assert_eq!(tip(&bare, &env, "main"), before);
+}
+
+#[test]
+fn a_key_removed_by_a_later_commit_is_still_refused() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("secret-history");
+    let (bare, work) = repo_pair(&root.0, &env);
+    let before = tip(&bare, &env, "main");
+
+    add_script(&work, &env, "references/setup.md", &format!("token: {LEAK}\n"), "с ключом");
+    add_script(&work, &env, "references/setup.md", "token: <ваш ключ>\n", "ключ убран");
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+
+    assert!(!out.status.success(), "ключ в истории пуша утекает с clone: {err}");
+    assert!(err.contains("references/setup.md@"), "отказ говорит, что чинить историю: {err}");
+    assert_eq!(tip(&bare, &env, "main"), before);
+}
+
+#[test]
+fn a_key_in_a_step_description_is_found_in_list_json() {
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    let root = tmp("secret-canon");
+    let (_bare, work) = repo_pair(&root.0, &env);
+
+    // Не команда — описание шага: команды приложение судит отдельно, а ключ утекает отовсюду.
+    let canon =
+        serde_json::json!({ "title": "t", "steps": [{ "title": "Вход", "desc": format!("пароль {LEAK}") }] });
+    std::fs::write(work.join("list.json"), canon.to_string()).expect("list.json");
+    git_ok(&work, &env, &["add", "-A"]);
+    git_ok(&work, &env, &["commit", "-q", "-m", "описание"]);
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "ключ в описании шага: {err}");
+    assert!(err.contains("list.json, line 1"), "назван list.json: {err}");
+}
+
+#[test]
+fn a_key_already_on_the_server_is_not_judged_again() {
+    let root = tmp("secret-old");
+    // Ключ лёг в репозиторий, когда приложение ещё не искало ключей.
+    let old = App::start(AppKind::Old);
+    let env_old = Env::new(&old.addr);
+    let (_bare, work) = repo_pair(&root.0, &env_old);
+    add_script(&work, &env_old, "references/setup.md", &format!("token: {LEAK}\n"), "старое");
+    git_ok(&work, &env_old, &["push", "-q", "origin", "main"]);
+
+    // Новая правка его не трогает: отказ за то, что давно лежит в репозитории, стоил бы
+    // человеку работы, а утечку не отменил бы.
+    let app = App::start(AppKind::New);
+    let env = Env::new(&app.addr);
+    add_script(&work, &env, "scripts/run.sh", "#!/bin/sh\nmake\n", "новое");
+    let out = git(&work, &env, &["push", "origin", "main"]);
+    assert!(out.status.success(), "судится только новое: {}", String::from_utf8_lossy(&out.stderr));
 }

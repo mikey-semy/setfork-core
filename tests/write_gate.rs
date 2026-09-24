@@ -13,7 +13,9 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use setfork_core::gate::{ContentRefusal, DenyDetail, ensure_content_allowed_at, ensure_writable_at};
+use setfork_core::gate::{
+    ContentRefusal, DenyDetail, SecretDetail, ensure_content_allowed_at, ensure_writable_at,
+};
 use setfork_core::reason::REASON_KEY;
 
 /// Причина отказа из трейлера — то, по чему клиент различает случаи (И1).
@@ -256,7 +258,7 @@ async fn a_destructive_command_names_the_step_and_the_command() {
         http(r#"{"allow":false,"reason":"destructive","step":3,"rule":"rm_rf","fragment":"rm -rf /"}"#)
             .into_boxed_str(),
     ));
-    let err = ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("rm -rf /".into())])
+    let err = ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("rm -rf /".into())], &[])
         .await
         .expect_err("разрушительная команда не проходит");
     assert_eq!(
@@ -276,7 +278,7 @@ async fn a_destructive_command_names_the_step_and_the_command() {
 async fn an_app_that_ignores_blocks_lets_the_push_through() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":true}"#).into_boxed_str()));
     assert!(
-        ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("rm -rf /".into())]).await.is_ok(),
+        ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("rm -rf /".into())], &[]).await.is_ok(),
         "старое приложение = сегодняшнее поведение, а не отказ"
     );
 }
@@ -286,7 +288,7 @@ async fn an_app_that_ignores_blocks_lets_the_push_through() {
 #[tokio::test]
 async fn a_product_refusal_without_a_place_keeps_its_own_reason() {
     let stub = Stub::start(Box::leak(http(r#"{"allow":false,"reason":"frozen"}"#).into_boxed_str()));
-    let err = ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("make".into())])
+    let err = ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("make".into())], &[])
         .await
         .expect_err("отказ");
     assert_eq!(err, ContentRefusal::Denied("frozen".into()));
@@ -299,19 +301,19 @@ async fn a_product_refusal_without_a_place_keeps_its_own_reason() {
 async fn transport_and_contract_failures_stay_apart() {
     let five = Stub::start("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
     assert!(matches!(
-        ensure_content_allowed_at(&five.addr, "mike", "list", &[Some("make".into())]).await,
+        ensure_content_allowed_at(&five.addr, "mike", "list", &[Some("make".into())], &[]).await,
         Err(ContentRefusal::Unavailable(_))
     ));
 
     let four = Stub::start("HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n");
     assert!(matches!(
-        ensure_content_allowed_at(&four.addr, "mike", "list", &[Some("make".into())]).await,
+        ensure_content_allowed_at(&four.addr, "mike", "list", &[Some("make".into())], &[]).await,
         Err(ContentRefusal::NotUnderstood(_))
     ));
 
     let garbage = Stub::start(Box::leak(http("<html>не json</html>").into_boxed_str()));
     assert!(matches!(
-        ensure_content_allowed_at(&garbage.addr, "mike", "list", &[Some("make".into())]).await,
+        ensure_content_allowed_at(&garbage.addr, "mike", "list", &[Some("make".into())], &[]).await,
         Err(ContentRefusal::NotUnderstood(_))
     ));
 }
@@ -325,7 +327,7 @@ async fn an_unreachable_app_stops_the_content_too() {
         format!("http://{}", l.local_addr().expect("addr"))
     };
     assert!(matches!(
-        ensure_content_allowed_at(&addr, "mike", "list", &[Some("rm -rf /".into())]).await,
+        ensure_content_allowed_at(&addr, "mike", "list", &[Some("rm -rf /".into())], &[]).await,
         Err(ContentRefusal::Unavailable(_))
     ));
 }
@@ -343,12 +345,58 @@ async fn the_write_precondition_asks_exactly_as_it_did_before() {
     assert_eq!(stub.asked(), vec![r#"{"owner":"mike","slug":"list"}"#.to_string()]);
 
     let content = Stub::start(Box::leak(http(r#"{"allow":true}"#).into_boxed_str()));
-    ensure_content_allowed_at(&content.addr, "mike", "list", &[Some("make".into()), None])
+    ensure_content_allowed_at(&content.addr, "mike", "list", &[Some("make".into()), None], &[])
         .await
         .expect("allow");
     assert_eq!(
         content.asked(),
-        vec![r#"{"owner":"mike","slug":"list","blocks":[{"command":"make"},{"command":null}]}"#.to_string()],
+        vec![
+            r#"{"owner":"mike","slug":"list","blocks":[{"command":"make"},{"command":null}],"files":[]}"#
+                .to_string()
+        ],
         "вопрос о содержимом обязан нести блоки, и каждый на своём месте"
+    );
+}
+
+/// Ключ доступа: место — файл и строка, вид ключа и НАЧАЛО. Доезжает целиком, чтобы
+/// `check-content` напечатал человеку, где чинить, а не «нельзя».
+#[tokio::test]
+async fn a_secret_names_the_file_and_line() {
+    let stub = Stub::start(Box::leak(
+        http(r#"{"allow":false,"reason":"secret","path":"references/setup.md@1a2b3c4d","step":0,"line":3,"rule":"github-pat","provider":"GitHub","fragment":"ghp_Ab12"}"#)
+            .into_boxed_str(),
+    ));
+    let files = [("references/setup.md@1a2b3c4d".to_string(), "…".to_string())];
+    let err = ensure_content_allowed_at(&stub.addr, "mike", "list", &[], &files)
+        .await
+        .expect_err("ключ не проходит");
+    assert_eq!(
+        err,
+        ContentRefusal::Secret(SecretDetail {
+            path: "references/setup.md@1a2b3c4d".into(),
+            step: 0,
+            line: 3,
+            rule: "github-pat".into(),
+            provider: "GitHub".into(),
+            fragment: "ghp_Ab12".into(),
+        })
+    );
+}
+
+/// Тексты коммита уходят приложению ПО ПРОВОДУ — путём и текстом, рядом с командами.
+/// Без этого поиск ключей на пуше молча судил бы пустоту.
+#[tokio::test]
+async fn the_content_question_carries_the_pushed_texts() {
+    let stub = Stub::start(Box::leak(http(r#"{"allow":true}"#).into_boxed_str()));
+    let files = [
+        ("list.json".to_string(), "{}".to_string()),
+        ("scripts/run.sh@abcd1234".to_string(), "echo".to_string()),
+    ];
+    ensure_content_allowed_at(&stub.addr, "mike", "list", &[Some("make".into())], &files)
+        .await
+        .expect("allow");
+    assert_eq!(
+        stub.asked(),
+        vec![r#"{"owner":"mike","slug":"list","blocks":[{"command":"make"}],"files":[{"path":"list.json","text":"{}"},{"path":"scripts/run.sh@abcd1234","text":"echo"}]}"#.to_string()]
     );
 }
