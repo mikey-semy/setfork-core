@@ -52,6 +52,7 @@ async fn concurrent_issue_creation_on_the_prod_schema() {
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "issue-race".into(),
             title: lt("Probe"),
@@ -132,6 +133,7 @@ async fn concurrent_suggestion_creation_on_the_prod_schema() {
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "sug-race".into(),
             title: lt("Probe"),

@@ -129,7 +129,8 @@ fn main_status(e: MainUpdateError) -> Status {
         e @ (MainUpdateError::AuthoredNotFile(_)
         | MainUpdateError::AuthoredBinary(_)
         | MainUpdateError::AuthoredTooMany(_)
-        | MainUpdateError::AuthoredTooLarge(_)) => {
+        | MainUpdateError::AuthoredTooLarge(_)
+        | MainUpdateError::AuthoredDuplicate(_)) => {
             reason::status(Code::FailedPrecondition, Reason::ForeignPath, e.to_string())
         }
         MainUpdateError::Stale => reason::status(Code::Aborted, Reason::Stale, "main moved concurrently"),
@@ -207,7 +208,7 @@ impl GitCore for GitCoreSvc {
         &self,
         _req: Request<CapabilitiesRequest>,
     ) -> Result<Response<CapabilitiesResponse>, Status> {
-        Ok(Response::new(CapabilitiesResponse { enforces_push_roles: true }))
+        Ok(Response::new(CapabilitiesResponse { enforces_push_roles: true, accepts_authored_files: true }))
     }
 
     async fn info_refs_upload_pack(

@@ -78,6 +78,7 @@ async fn seed(pool: &sqlx::PgPool, handle: &str, slug: &str, steps: Vec<NewStep>
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: slug.into(),
             title: lt("Probe"),

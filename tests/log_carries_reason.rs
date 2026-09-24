@@ -16,6 +16,7 @@ use setfork_core::services::list::ListWriteSvc;
 
 fn req(owner: &str, slug: &str) -> CreateListRequest {
     CreateListRequest {
+        authored: None,
         owner_id: owner.into(),
         slug: slug.into(),
         title: Some(LocaleText { v: [("en".to_string(), "T".to_string())].into() }),
@@ -77,6 +78,7 @@ async fn rpc_error_line_names_the_reason() {
     let made = client.create(req(&owner, "editable")).await.expect("создан").into_inner();
     let e2 = client
         .add_version(AddVersionRequest {
+            authored: None,
             list_id: made.id.clone(),
             note: "n".into(),
             steps: vec![],

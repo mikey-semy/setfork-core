@@ -69,6 +69,7 @@ async fn create_leaves_no_canon_until_first_touch() {
     let bid = Uuid::new_v4().to_string();
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "born-without-canon".into(),
             title: lt(&[("en", "Born without canon")]),

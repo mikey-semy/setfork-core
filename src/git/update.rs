@@ -63,8 +63,7 @@ fn authored_violation(
     repo: &Repository,
     tree: &git2::Tree<'_>,
 ) -> Result<Option<MainUpdateError>, git2::Error> {
-    let mut files = 0usize;
-    let mut bytes = 0u64;
+    let mut tally = AuthoredTally::default();
     for dir in AUTHORED_DIRS {
         let Some(entry) = tree.get_name(dir) else { continue };
         // Файл с именем каталога правило путей уже отверг; сюда доходят только каталоги.
@@ -75,20 +74,71 @@ fn authored_violation(
                 return Ok(Some(MainUpdateError::AuthoredNotFile(path)));
             }
             let blob = repo.find_blob(e.id())?;
-            if blob.content().contains(&0) {
-                return Ok(Some(MainUpdateError::AuthoredBinary(path)));
+            if let Some(v) = tally.add(path, blob.content()) {
+                return Ok(Some(v));
             }
-            files += 1;
-            bytes += blob.size() as u64;
         }
     }
-    if files > AUTHORED_MAX_FILES {
-        return Ok(Some(MainUpdateError::AuthoredTooMany(files)));
+    Ok(tally.finish())
+}
+
+/// Подсчёт авторских файлов — ОДИН на два входа: дерево коммита (push и страховка любого
+/// сдвига main) и набор, пришедший записью с сайта или от агента (`authored_input_violation`).
+/// Две копии счётчика однажды разошлись бы в пределе или в признаке двоичного.
+#[derive(Default)]
+struct AuthoredTally {
+    files: usize,
+    bytes: u64,
+}
+
+impl AuthoredTally {
+    fn add(&mut self, path: String, content: &[u8]) -> Option<MainUpdateError> {
+        if content.contains(&0) {
+            return Some(MainUpdateError::AuthoredBinary(path));
+        }
+        self.files += 1;
+        self.bytes += content.len() as u64;
+        None
     }
-    if bytes > AUTHORED_MAX_BYTES {
-        return Ok(Some(MainUpdateError::AuthoredTooLarge(bytes)));
+
+    fn finish(self) -> Option<MainUpdateError> {
+        if self.files > AUTHORED_MAX_FILES {
+            return Some(MainUpdateError::AuthoredTooMany(self.files));
+        }
+        if self.bytes > AUTHORED_MAX_BYTES {
+            return Some(MainUpdateError::AuthoredTooLarge(self.bytes));
+        }
+        None
     }
-    Ok(None)
+}
+
+/// Файл автора на ВХОДЕ записи (ListWrite.AddVersion/Create). Режим — флагом: других
+/// режимов, кроме 100644/100755, в дереве скилла не бывает.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredInput {
+    pub path: String,
+    pub content: Vec<u8>,
+    pub executable: bool,
+}
+
+/// Набор файлов с записи — по тому же правилу, что дерево на push: путь, повтор, двоичное,
+/// число, размер. Проверяется ДО замка и git, чтобы отказ не стоил записи; `update_main`
+/// всё равно перепроверит готовое дерево — страховка на случай расхождения.
+pub fn authored_input_violation(files: &[AuthoredInput]) -> Option<MainUpdateError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut tally = AuthoredTally::default();
+    for f in files {
+        if !super::serialize::authored_path(&f.path) {
+            return Some(MainUpdateError::ForeignPath(f.path.clone()));
+        }
+        if !seen.insert(f.path.as_str()) {
+            return Some(MainUpdateError::AuthoredDuplicate(f.path.clone()));
+        }
+        if let Some(v) = tally.add(f.path.clone(), &f.content) {
+            return Some(v);
+        }
+    }
+    tally.finish()
 }
 
 /// Почему main не сдвинулся. Каждый вариант — то же правило, что у pre-receive.
@@ -108,6 +158,8 @@ pub enum MainUpdateError {
     AuthoredTooMany(usize),
     /// Авторские файлы вместе больше `AUTHORED_MAX_BYTES`.
     AuthoredTooLarge(u64),
+    /// В наборе с записи один путь дважды (в дереве такого не бывает — только на входе).
+    AuthoredDuplicate(String),
     /// Новый tip не потомок старого — переписывание истории main запрещено.
     NonFastForward,
     /// main уже не там, где ожидал вызывающий (CAS не сошёлся) — конкурентная запись.
@@ -142,6 +194,7 @@ impl std::fmt::Display for MainUpdateError {
                     "scripts/, references/ and assets/ hold {b} bytes; the limit is {AUTHORED_MAX_BYTES}"
                 )
             }
+            MainUpdateError::AuthoredDuplicate(p) => write!(f, "{p} is listed twice in the file set"),
             MainUpdateError::NonFastForward => write!(f, "non-fast-forward update of main is forbidden"),
             MainUpdateError::Stale => write!(f, "main moved concurrently (stale expected tip)"),
             MainUpdateError::Git(e) => write!(f, "git2: {e}"),

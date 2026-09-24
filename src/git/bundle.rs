@@ -13,7 +13,7 @@ use git2::{ObjectType, Oid, Repository, Signature, Time};
 use super::MAIN_REF;
 use super::serialize::commit_message;
 pub use super::serialize::{SerStep, StepRef, VersionData, version_files};
-use super::update::{MainUpdateError, update_main};
+use super::update::{AuthoredInput, MainUpdateError, update_main};
 
 // Идентичность коммитов — ОДИНАКОВО с TS (store.ts/bundle.ts) для детерминированных SHA.
 // Переиспользуются merge-коммитами в services::git_core.
@@ -48,15 +48,46 @@ fn upd_io(e: MainUpdateError) -> io::Error {
 //
 // У списка без авторских файлов дерево прежнее до байта — SHA версий, собранных
 // раньше, и сверка с фронтом не сдвигаются.
+/// Откуда в новом коммите авторские каталоги.
+///
+/// `Carry` — перенос из родителя: так работает любая запись, которая про файлы не знает
+/// (правка шагов на сайте, досыпка, выравнивание). `Replace` — набор пришёл вместе с
+/// записью (ADR-0028, `publish_skill`): каталоги собираются из него, а родительские
+/// отбрасываются целиком — пустой набор убирает все файлы.
+#[derive(Clone, Copy)]
+pub enum Authored<'a> {
+    Carry,
+    Replace(&'a [AuthoredInput]),
+}
+
 fn build_tree(
     repo: &Repository,
     v: &VersionData,
     parent_tree: Option<&git2::Tree<'_>>,
+    authored: Authored<'_>,
 ) -> Result<Oid, git2::Error> {
     let mut root = repo.treebuilder(None)?;
     for (path, content) in version_files(v) {
         let blob = repo.blob(content.as_bytes())?;
         root.insert(path.as_str(), blob, 0o100644)?;
+    }
+    if let Authored::Replace(files) = authored {
+        for dir in super::serialize::AUTHORED_DIRS {
+            let prefix = format!("{dir}/");
+            let mut sub = repo.treebuilder(None)?;
+            let mut any = false;
+            for f in files.iter().filter(|f| f.path.starts_with(&prefix)) {
+                let blob = repo.blob(&f.content)?;
+                let mode = if f.executable { 0o100755 } else { 0o100644 };
+                sub.insert(&f.path[prefix.len()..], blob, mode)?;
+                any = true;
+            }
+            // Пустого каталога в git не бывает: без файлов его нет и в дереве.
+            if any {
+                root.insert(dir, sub.write()?, 0o040000)?;
+            }
+        }
+        return root.write();
     }
     if let Some(parent) = parent_tree {
         for dir in super::serialize::AUTHORED_DIRS {
@@ -76,8 +107,13 @@ fn parent_tree(repo: &Repository, parent: Option<Oid>) -> Result<Option<git2::Tr
 }
 
 // Один коммит версии с фиксированной идентичностью/датой (SHA-идентично `git commit`).
-fn commit_version(repo: &Repository, parent: Option<Oid>, v: &VersionData) -> Result<Oid, git2::Error> {
-    let tree = repo.find_tree(build_tree(repo, v, parent_tree(repo, parent)?.as_ref())?)?;
+fn commit_version(
+    repo: &Repository,
+    parent: Option<Oid>,
+    v: &VersionData,
+    authored: Authored<'_>,
+) -> Result<Oid, git2::Error> {
+    let tree = repo.find_tree(build_tree(repo, v, parent_tree(repo, parent)?.as_ref(), authored)?)?;
     let sig = Signature::new(AUTHOR_NAME, AUTHOR_EMAIL, &Time::new(v.ts, 0))?; // offset 0 → +0000
     let msg = commit_message(v);
     let parents: Vec<git2::Commit> = match parent {
@@ -98,11 +134,12 @@ fn build_history(
     repo: &Repository,
     versions: &[VersionData],
     mut parent: Option<Oid>,
+    authored: Authored<'_>,
 ) -> Result<Option<Oid>, MainUpdateError> {
     let expected_old = parent;
     let mut tagged: Vec<(i32, Oid)> = Vec::with_capacity(versions.len());
     for v in versions {
-        let oid = commit_version(repo, parent, v)?;
+        let oid = commit_version(repo, parent, v, authored)?;
         tagged.push((v.version, oid));
         parent = Some(oid);
     }
@@ -128,7 +165,7 @@ pub fn materialize_repo(versions: &[VersionData]) -> io::Result<PathBuf> {
     let work = std::env::temp_dir().join(format!("setfork-git-{}", uuid::Uuid::new_v4()));
     let build = (|| -> Result<(), MainUpdateError> {
         let repo = Repository::init_bare(&work)?;
-        build_history(&repo, versions, None)?;
+        build_history(&repo, versions, None, Authored::Carry)?;
         Ok(())
     })();
     match build {
@@ -470,7 +507,7 @@ pub fn bootstrap_bare(versions: &[VersionData], bare: &Path) -> io::Result<()> {
     }
     (|| -> Result<(), MainUpdateError> {
         let repo = Repository::init_bare(bare)?;
-        build_history(&repo, versions, None)?;
+        build_history(&repo, versions, None, Authored::Carry)?;
         Ok(())
     })()
     .map_err(upd_io)?;
@@ -492,11 +529,43 @@ pub fn append_versions(bare: &Path, versions: &[VersionData]) -> io::Result<Opti
     let tip = (|| -> Result<Option<Oid>, MainUpdateError> {
         let repo = Repository::open_bare(bare)?;
         let parent = repo.refname_to_id(MAIN_REF).ok();
-        build_history(&repo, versions, parent)
+        build_history(&repo, versions, parent, Authored::Carry)
     })()
     .map_err(upd_io)?;
     gc_auto(bare); // loose-объекты дозаписанных версий → упаковка при пороге
     Ok(tip.map(|o| o.to_string()))
+}
+
+/// Одна версия поверх main с НАБОРОМ файлов автора (ADR-0028): блоки и файлы одним
+/// коммитом. Отказ по набору или по дереву возвращается ТИПОМ, а не текстом: вызывающему
+/// надо отличить «файлы не по правилу» (ошибка ввода) от сбоя git.
+pub fn append_version_with(
+    bare: &Path,
+    v: &VersionData,
+    authored: Authored<'_>,
+) -> Result<Option<String>, MainUpdateError> {
+    let repo = Repository::open_bare(bare)?;
+    let parent = repo.refname_to_id(MAIN_REF).ok();
+    let tip = build_history(&repo, std::slice::from_ref(v), parent, authored)?;
+    gc_auto(bare);
+    Ok(tip.map(|o| o.to_string()))
+}
+
+/// Рождение репозитория ОДНОЙ версией с набором файлов (Create git-first): тег v1 сразу
+/// на вершине, файлы в дереве. Хук ставится так же, как у бутстрапа из БД.
+pub fn init_with_version(
+    bare: &Path,
+    v: &VersionData,
+    authored: Authored<'_>,
+) -> Result<(), MainUpdateError> {
+    if let Some(parent) = bare.parent() {
+        fs::create_dir_all(parent).map_err(|e| MainUpdateError::Git(e.to_string()))?;
+    }
+    let repo = Repository::init_bare(bare)?;
+    build_history(&repo, std::slice::from_ref(v), None, authored)?;
+    install_hook(bare).map_err(|e| MainUpdateError::Git(e.to_string()))?;
+    gc_auto(bare);
+    Ok(())
 }
 
 /// Лежат ли ВСЕ версии `versions` уже коммитами в хвосте main (сверху вниз,
@@ -514,7 +583,7 @@ fn tail_commits(
         // Авторские каталоги берём У САМОГО КОММИТА: их не генерируют, сравнивать надо
         // сгенерированную часть. Сверка с родительскими не узнавала версию, чей коммит
         // САМ добавил `scripts/` (пуш), — и выравнивание клало рядом пустого двойника.
-        let expected = build_tree(repo, v, Some(&commit.tree()?))?;
+        let expected = build_tree(repo, v, Some(&commit.tree()?), Authored::Carry)?;
         if commit.tree_id() != expected {
             return Ok(None);
         }
@@ -555,7 +624,7 @@ pub fn append_missing_versions(bare: &Path, versions: &[VersionData]) -> io::Res
             }
             return Ok(Some(tip));
         }
-        build_history(&repo, versions, parent)
+        build_history(&repo, versions, parent, Authored::Carry)
     })()
     .map_err(upd_io)?;
     gc_auto(bare);

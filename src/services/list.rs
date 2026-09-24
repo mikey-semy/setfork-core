@@ -21,6 +21,7 @@ use uuid::Uuid;
 use super::util::{db_status, loc_json, loc_map, parse_id, refs_json};
 use crate::blocks::{content_value, storage_type, wire_type};
 use crate::db;
+use crate::git::bundle::{self, VersionData};
 use crate::git::{repo, version};
 use crate::pb_domain::list_read_server::ListRead;
 use crate::pb_domain::list_write_server::ListWrite;
@@ -87,6 +88,7 @@ impl ListRead for ListReadSvc {
             repository_id: id.to_string(),
             created_at_ms: r.get("created_at_ms"),
             updated_at_ms: r.get("updated_at_ms"),
+            authored_applied: false, // эхо только у записи
         };
         Ok(Response::new(GetListResponse { found: true, list: Some(list) }))
     }
@@ -114,6 +116,7 @@ impl ListRead for ListReadSvc {
                 commit_sha: shas.get(&r.get::<i32, _>("version")).cloned().unwrap_or_default(),
                 created_at_ms: r.get("created_at_ms"),
                 author_id: r.get::<Option<String>, _>("author_id").unwrap_or_default(),
+                authored_applied: false, // эхо только у записи
             })
             .collect();
         Ok(Response::new(VersionsResponse { versions }))
@@ -148,6 +151,7 @@ impl ListRead for ListReadSvc {
             commit_sha: sha,
             created_at_ms: v.get("created_at_ms"),
             author_id: v.get::<Option<String>, _>("author_id").unwrap_or_default(),
+            authored_applied: false, // эхо только у записи
         };
 
         let srows = sqlx::query(
@@ -412,6 +416,7 @@ fn web_version_status(e: version::WebVersionError) -> Status {
             crate::reason::Reason::OutOfSync,
             format!("repo out of sync (git v{have}, db v{current}) - see runbook git-projection-catchup"),
         ),
+        version::WebVersionError::Authored(e) => authored_status(&e),
         version::WebVersionError::Db(e) => db_status(e),
         version::WebVersionError::Git(e) => Status::internal(format!("git commit failed: {e}")),
         // Канон записан, проекция отстала: повтор сохранения сам долечит
@@ -422,14 +427,43 @@ fn web_version_status(e: version::WebVersionError) -> Status {
     }
 }
 
+/// Отказ по набору файлов автора — вводом, с причиной: текст называет файл и предел.
+fn authored_status(e: &crate::git::update::MainUpdateError) -> Status {
+    crate::reason::status(Code::InvalidArgument, crate::reason::Reason::AuthoredInvalid, e.to_string())
+}
+
+/// Набор с провода → в память, с проверкой ДО замка и git: отказ не стоит записи.
+/// `None` — поля не было (перенести из родителя); `Some(пусто)` — убрать все файлы.
+fn authored_input(
+    set: Option<crate::pb_domain::AuthoredFileSet>,
+) -> Result<Option<Vec<crate::git::update::AuthoredInput>>, Status> {
+    let Some(set) = set else { return Ok(None) };
+    let files: Vec<_> = set
+        .files
+        .into_iter()
+        .map(|f| crate::git::update::AuthoredInput {
+            path: f.path,
+            content: f.content,
+            executable: f.executable,
+        })
+        .collect();
+    if let Some(e) = crate::git::update::authored_input_violation(&files) {
+        return Err(authored_status(&e));
+    }
+    Ok(Some(files))
+}
+
 #[tonic::async_trait]
 impl ListWrite for ListWriteSvc {
     /// Новая версия — GIT-FIRST (Ф1): сначала коммит vN на main (через единую
     /// точку обновления с валидацией), затем строки БД как проекция — одна
     /// операция под репо-локом. БД здесь read-model: git не откатывается.
     async fn add_version(&self, req: Request<AddVersionRequest>) -> Result<Response<Version>, Status> {
-        let AddVersionRequest { list_id, note, steps, author_id, meta, expected_version } = req.into_inner();
+        let AddVersionRequest { list_id, note, steps, author_id, meta, expected_version, authored } =
+            req.into_inner();
         let tid = parse_id(&list_id)?;
+        let authored = authored_input(authored)?;
+        let authored_applied = authored.is_some();
         // author_id: '' = null (фоновые/git-пути автора не знают).
         let author = if author_id.is_empty() { None } else { Some(parse_id(&author_id)?) };
         let rows: Vec<db::StepRow> = steps.iter().map(step_row).collect();
@@ -451,7 +485,9 @@ impl ListWrite for ListWriteSvc {
             .ok_or_else(|| Status::not_found("list not found"))?;
         // Коммит + проекция — критическая секция, как у push/merge.
         let _guard = repo::repo_guard(&self.pool, tid).await.map_err(db_status)?;
-        let edit = version::WebEdit::new(&note, author, rows, meta).based_on(expected_version);
+        let edit = version::WebEdit::new(&note, author, rows, meta)
+            .based_on(expected_version)
+            .with_authored(authored);
         let out =
             version::commit_web_version(&self.pool, tid, &bare, edit).await.map_err(web_version_status)?;
         // Ф3: зеркало догоняет истину после каждой версии (фоново).
@@ -465,11 +501,15 @@ impl ListWrite for ListWriteSvc {
             commit_sha: out.commit_sha,
             created_at_ms: out.created_at_ms,
             author_id,
+            // Эхо: набор пришёл и лёг тем же коммитом. Старое ядро поле не знало бы и эха
+            // не дало — по нему фронт отличает «положил» от «потерял молча».
+            authored_applied,
         }))
     }
     async fn create(&self, req: Request<CreateListRequest>) -> Result<Response<List>, Status> {
-        let r = req.into_inner();
+        let mut r = req.into_inner();
         let owner = Uuid::parse_str(&r.owner_id).map_err(|_| Status::invalid_argument("bad owner uuid"))?;
+        let authored = authored_input(r.authored.take())?;
         let forked_from: Option<Uuid> = if r.forked_from_id.is_empty() {
             None
         } else {
@@ -508,18 +548,65 @@ impl ListWrite for ListWriteSvc {
         .map_err(db_status)?;
         let (tid, stored_moderation, created_ms, updated_ms) = row;
 
-        let ver_id: Uuid = sqlx::query_scalar(
-            "insert into template_versions (template_id, version, note, author_id) values ($1, 1, $2, $3) returning id",
-        )
-        .bind(tid)
-        .bind(&r.note)
-        .bind(owner)
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(db_status)?;
+        let (ver_id, created_s, _) =
+            db::insert_version_row(&mut tx, tid, 1, &r.note, Some(owner)).await.map_err(db_status)?;
         let rows: Vec<db::StepRow> = r.steps.iter().map(step_row).collect();
         db::insert_step_rows(&mut tx, ver_id, &rows).await.map_err(db_status)?;
-        tx.commit().await.map_err(db_status)?;
+
+        // С ФАЙЛАМИ АВТОРА список рождается git-first: репозиторий и тег v1 сразу, файлы в
+        // дереве той же версии. Без файлов — как раньше: только база, репозиторий лениво.
+        // Ленивый бутстрап собирает историю ИЗ БАЗЫ, а файлов в базе нет — они потерялись
+        // бы при первом же обращении, и скилл родился бы без них.
+        //
+        // Порядок как у веб-версии: git — ДО фиксации транзакции (у коммита тот же
+        // created_at, что у строки версии, — SHA воспроизводим бутстрапом); сбой git
+        // откатывает транзакцию и не оставляет ничего. Сбой фиксации после git оставляет
+        // бесхозный каталог, его подбирает orphan_repo_dirs — лишней версии нет.
+        let born = if let Some(files) = authored {
+            let vdata = VersionData {
+                version: 1,
+                note: r.note.clone(),
+                ts: created_s,
+                title: db::loc(&loc_json(&r.title)),
+                desc: db::loc(&loc_json(&r.desc)),
+                tags: r.tags.clone(),
+                ordered: r.ordered,
+                kind: None,
+                steps: rows.iter().enumerate().map(|(i, s)| db::ser_step_from_row(i as i32 + 1, s)).collect(),
+            };
+            let _guard = repo::repo_guard(&self.pool, tid).await.map_err(db_status)?;
+            let bare = repo::repo_path(tid);
+            let bare2 = bare.clone();
+            let made = tokio::task::spawn_blocking(move || {
+                bundle::init_with_version(&bare2, &vdata, bundle::Authored::Replace(&files))
+            })
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+            if let Err(e) = made {
+                let _ = std::fs::remove_dir_all(&bare);
+                return Err(match e {
+                    crate::git::update::MainUpdateError::Git(g) => {
+                        Status::internal(format!("git init failed: {g}"))
+                    }
+                    other => authored_status(&other),
+                });
+            }
+            Some(bare)
+        } else {
+            None
+        };
+        if let Err(e) = tx.commit().await {
+            if let Some(bare) = &born {
+                metrics::counter!("projection_failures_total", "op" => "create").increment(1);
+                tracing::error!(%tid, error = %e, "create with files: git written, db commit failed; the repo dir is orphaned");
+                let _ = std::fs::remove_dir_all(bare);
+            }
+            return Err(db_status(e));
+        }
+        let authored_applied = born.is_some();
+        if let Some(bare) = born {
+            super::git_core::spawn_mirror(self.pool.clone(), tid, bare);
+        }
 
         Ok(Response::new(List {
             id: tid.to_string(),
@@ -544,6 +631,7 @@ impl ListWrite for ListWriteSvc {
             repository_id: tid.to_string(), // synthetic solo-repo, как в TS toList
             created_at_ms: created_ms,
             updated_at_ms: updated_ms,
+            authored_applied,
         }))
     }
 }

@@ -93,6 +93,7 @@ async fn the_base_matches_real_git_merge_base() {
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "ms-probe".into(),
             title: lt("Probe"),
