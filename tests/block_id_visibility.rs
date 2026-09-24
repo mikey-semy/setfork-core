@@ -50,6 +50,7 @@ async fn broken_block_id_drops_identity_but_leaves_a_trace() {
     let good = Uuid::new_v4().to_string();
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "mixed-identities".into(),
             title: Some(LocaleText { v: [("en".to_string(), "T".to_string())].into() }),

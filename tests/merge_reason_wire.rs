@@ -93,6 +93,7 @@ async fn merge_conflict_reason_survives_the_wire() {
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "merge-wire".into(),
             title: lt("Probe"),

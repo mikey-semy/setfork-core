@@ -54,6 +54,7 @@ async fn version_sha_comes_from_the_tag_and_matches_the_write() {
 
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "sha-on-display".into(),
             title: lt("T"),
@@ -87,6 +88,7 @@ async fn version_sha_comes_from_the_tag_and_matches_the_write() {
     // 2. Запись идёт git-first: она и создаёт репозиторий, и возвращает SHA.
     let written = write
         .add_version(Request::new(AddVersionRequest {
+            authored: None,
             list_id: created.id.clone(),
             note: "v2".into(),
             steps: vec![step("Configure")],
@@ -145,6 +147,7 @@ async fn release_tags_shaped_like_versions_do_not_hijack_version_two() {
 
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "vv-collision".into(),
             title: lt("T"),
@@ -164,6 +167,7 @@ async fn release_tags_shaped_like_versions_do_not_hijack_version_two() {
         .into_inner();
     let written = write
         .add_version(Request::new(AddVersionRequest {
+            authored: None,
             list_id: created.id.clone(),
             note: "v2".into(),
             steps: vec![step("Configure")],
@@ -229,6 +233,7 @@ async fn reading_versions_without_a_volume_yields_empty_not_panic() {
     let read = ListReadSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "no-volume".into(),
             title: lt("T"),

@@ -75,6 +75,7 @@ async fn concurrent_merges_do_not_clobber_each_other() {
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "lock-probe".into(),
             title: lt("Probe"),

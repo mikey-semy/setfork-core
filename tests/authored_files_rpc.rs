@@ -27,6 +27,7 @@ async fn found_means_the_version_exists_and_files_may_be_empty() {
     let owner = support::seed_user(&pool, "authored").await;
     ListWriteSvc { pool: pool.clone() }
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "skill".into(),
             title: lt("Skill"),

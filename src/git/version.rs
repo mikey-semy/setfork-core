@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 use crate::db::{self, StepRow};
 use crate::git::bundle::{self, VersionData};
+use crate::git::update::{AuthoredInput, MainUpdateError};
 use crate::git::{MAIN_REF, project, repo::join_err};
 
 /// Чем закончилось выравнивание репо с БД (sync-repos / предусловие записи).
@@ -336,6 +337,8 @@ pub enum WebVersionError {
     Db(sqlx::Error),
     /// Сбой git-коммита — транзакция БД откачена, ничего не записано.
     Git(String),
+    /// Файлы автора не прошли правило дерева — ошибка ВВОДА, не сбой: ничего не записано.
+    Authored(MainUpdateError),
     /// Git-коммит vN записан, а транзакция БД не зафиксировалась: канон впереди
     /// проекции. Данные НЕ потеряны — восстановление: `reproject <owner> <slug>`.
     ProjectionLost { version: i32, sha: String, source: sqlx::Error },
@@ -362,12 +365,21 @@ pub struct WebEdit<'a> {
     /// транзакции, где строка уже взята `for update`; расхождение = отказ, ничего
     /// не записано. None — прежнее поведение (последняя запись побеждает).
     pub expected_version: Option<i32>,
+    /// Файлы автора (ADR-0028). None — перенести из родителя (любая правка, которая про
+    /// файлы не знает); Some — заменить набор тем же коммитом, что и блоки; Some(пусто) —
+    /// убрать все.
+    pub authored: Option<Vec<AuthoredInput>>,
 }
 
 impl<'a> WebEdit<'a> {
     /// Правка без предусловия по версии — как писали до появления сверки.
     pub fn new(note: &'a str, author_id: Option<Uuid>, rows: Vec<StepRow>, meta: MetaPatch) -> Self {
-        WebEdit { note, author_id, rows, meta, expected_version: None }
+        WebEdit { note, author_id, rows, meta, expected_version: None, authored: None }
+    }
+    /// Та же правка, но с набором файлов автора.
+    pub fn with_authored(mut self, authored: Option<Vec<AuthoredInput>>) -> Self {
+        self.authored = authored;
+        self
     }
     /// То же, но основанное на конкретной версии (оптимистичная блокировка).
     pub fn based_on(mut self, expected_version: Option<i32>) -> Self {
@@ -377,7 +389,7 @@ impl<'a> WebEdit<'a> {
 }
 
 /// Создаёт версию git-first: коммит vN на main (через единую точку обновления,
-/// внутри `bundle::append_versions`) + проекция строк в Postgres — одна операция
+/// внутри `bundle::append_version_with`) + проекция строк в Postgres — одна операция
 /// под уже взятым репо-локом. Этим путём идёт ЛЮБАЯ веб-правка (сайт, MCP,
 /// агент); push проецируется зеркально (git уже записан пушем).
 ///
@@ -389,7 +401,7 @@ pub async fn commit_web_version(
     bare: &Path,
     edit: WebEdit<'_>,
 ) -> Result<WebVersion, WebVersionError> {
-    let WebEdit { note, author_id, rows, meta, expected_version } = edit;
+    let WebEdit { note, author_id, rows, meta, expected_version, authored: edit_authored } = edit;
     // Предусловие: git-tip соответствует current_version. Отставшие репо догоняются
     // здесь же (иначе новый коммит оставил бы дыру в истории), убежавшие — лечатся
     // проекцией tip; глубокое расхождение — отказ, а не тихая порча.
@@ -490,12 +502,29 @@ pub async fn commit_web_version(
         steps: rows.iter().enumerate().map(|(i, r)| db::ser_step_from_row(i as i32 + 1, r)).collect(),
     };
 
-    // Git — первым. append_versions идёт через единую точку обновления main
+    // Git — первым. append_version_with идёт через единую точку обновления main
     // (валидация как у pre-receive) и ставит тег vN.
     let bare2 = bare.to_path_buf();
-    let sha = match tokio::task::spawn_blocking(move || bundle::append_versions(&bare2, &[vdata])).await {
+    let authored = edit_authored;
+    let sent_files = authored.is_some();
+    let sha = match tokio::task::spawn_blocking(move || {
+        let mode = authored.as_deref().map_or(bundle::Authored::Carry, bundle::Authored::Replace);
+        bundle::append_version_with(&bare2, &vdata, mode)
+    })
+    .await
+    {
         Ok(Ok(Some(sha))) => sha,
-        Ok(Ok(None)) => return Err(WebVersionError::Git("append_versions: nothing to commit".into())),
+        Ok(Ok(None)) => return Err(WebVersionError::Git("append_version_with: nothing to commit".into())),
+        // Дерево не прошло правило авторских файлов (страховка update_main) — это ввод.
+        Ok(Err(
+            e @ (MainUpdateError::ForeignPath(_)
+            | MainUpdateError::AuthoredNotFile(_)
+            | MainUpdateError::AuthoredBinary(_)
+            | MainUpdateError::AuthoredTooMany(_)
+            | MainUpdateError::AuthoredTooLarge(_)
+            | MainUpdateError::AuthoredDuplicate(_)
+            | MainUpdateError::AuthoredExecutable(_)),
+        )) if sent_files => return Err(WebVersionError::Authored(e)),
         Ok(Err(e)) => return Err(WebVersionError::Git(e.to_string())),
         Err(e) => return Err(WebVersionError::Git(e.to_string())),
     };

@@ -96,6 +96,7 @@ async fn merging_main_into_a_branch_keeps_both_sides() {
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "upd-probe".into(),
             title: lt("Probe"),
@@ -289,6 +290,7 @@ async fn a_repeat_update_without_changes_is_rejected() {
     let write = ListWriteSvc { pool: pool.clone() };
     let created = write
         .create(Request::new(CreateListRequest {
+            authored: None,
             owner_id: owner.to_string(),
             slug: "upd-noop".into(),
             title: lt("Probe"),
@@ -354,6 +356,7 @@ async fn which_main_changes_break_the_merge() {
         let slug = format!("b{}", &uuid::Uuid::new_v4().to_string()[..8]);
         let created = write
             .create(Request::new(CreateListRequest {
+                authored: None,
                 owner_id: owner.to_string(),
                 slug: slug.clone(),
                 title: lt("P"),
