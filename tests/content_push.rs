@@ -136,6 +136,23 @@ fn verdict_for(body: &[u8], kind: AppKind) -> String {
             .to_string();
         }
     }
+    // Скрипты — из `files`, по пути (как `findDestructiveInScript` приложения): место — файл.
+    let files = v.get("files").and_then(|f| f.as_array()).cloned().unwrap_or_default();
+    for f in &files {
+        let path = f.get("path").and_then(|p| p.as_str()).unwrap_or("");
+        let text = f.get("text").and_then(|t| t.as_str()).unwrap_or("");
+        if path.starts_with("scripts/") && text.contains("rm -rf") {
+            return serde_json::json!({
+                "allow": false,
+                "reason": "destructive",
+                "step": 0,
+                "rule": "rm_rf",
+                "fragment": "rm -rf",
+                "path": path,
+            })
+            .to_string();
+        }
+    }
     // Ключ доступа — миниатюра `secret-scan.ts`: метка вместо шаблона провайдера, место —
     // файл из присланных и строка, посчитанная тут же. Так тест проверяет, что ядро шлёт
     // тексты коммитов, а не то, что заглушка умеет отвечать.

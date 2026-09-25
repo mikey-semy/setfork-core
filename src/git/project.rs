@@ -328,23 +328,9 @@ pub fn block_commands(raw: &[u8]) -> Option<Vec<Option<String>>> {
     Some(parsed.steps.unwrap_or_default().into_iter().map(|s| s.command).collect())
 }
 
-/// Файлы `scripts/` из дерева коммита `commit` — (путь, текст), по порядку дерева.
-///
-/// Через ШЕЛЛОВЫЙ `git`, а не libgit2: вызывается из `pre-receive`, где объекты пуша
-/// лежат в карантине receive-pack, и добраться до них умеет только процесс, унаследовавший
-/// переменные `GIT_*` хука (см. `run_dbless`). Пустой `commit` — хук старше ADR-0028,
-/// скриптов он не передаёт: судить нечего.
-///
-/// Ошибка — не «скриптов нет». Проверка содержимого закрыта по умолчанию, и
-/// недоставший файлы вызов обязан это сказать, а не пропустить пуш молча.
-pub fn authored_scripts(commit: &str) -> Result<Vec<(String, String)>, String> {
-    if commit.is_empty() {
-        return Ok(Vec::new());
-    }
-    tree_blobs(commit, &["scripts/"])?.into_iter().map(|(path, oid)| Ok((path, blob_text(&oid)?))).collect()
-}
-
-/// Шелловый `git` с закрытым stdin — см. `authored_scripts`, почему не libgit2.
+/// Шелловый `git` с закрытым stdin, а не libgit2: зовётся из `pre-receive`, где объекты
+/// пуша лежат в карантине receive-pack, и добраться до них умеет только процесс,
+/// унаследовавший переменные `GIT_*` хука (см. `run_dbless`).
 fn sh_git(args: &[&str]) -> Result<Vec<u8>, String> {
     use std::process::{Command, Stdio};
     let out =

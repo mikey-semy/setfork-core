@@ -266,7 +266,8 @@ async fn a_destructive_command_names_the_step_and_the_command() {
         ContentRefusal::Destructive(DenyDetail {
             step: 3,
             rule: "rm_rf".into(),
-            fragment: "rm -rf /".into()
+            fragment: "rm -rf /".into(),
+            path: None,
         })
     );
 }

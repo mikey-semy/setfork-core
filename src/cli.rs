@@ -328,27 +328,15 @@ async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i
     if owner.is_empty() || slug.is_empty() {
         return 0;
     }
-    // Неразборчивый манифест — не повод не судить скрипты: версии из него не выйдет,
-    // но `scripts/` следующая правка с сайта перенесёт в настоящую версию (авторские
-    // каталоги берутся из родителя). Шагов тогда просто нет — пустой список.
-    let mut commands = git::project::block_commands(canon).unwrap_or_default();
-    // СКРИПТЫ ИДУТ НА ТУ ЖЕ ПРОВЕРКУ, ЧТО И КОМАНДЫ ШАГОВ. Иначе `rm -rf /`, который
-    // форма не пропустила бы в шаг, спокойно въезжал бы в `scripts/run.sh` пушем — и
-    // уходил дальше в каждый поставленный скилл. Файл подаётся приложению ещё одной
-    // «командой» ПОСЛЕ блоков: так приложение не меняется, а номер, указывающий за
-    // последний блок, однозначно называет файл.
-    let blocks = commands.len();
-    let scripts = match git::project::authored_scripts(commit) {
-        Ok(files) => files,
-        Err(why) => {
-            eprintln!("{}", say("content_check_not_understood", &[&why]));
-            return 1;
-        }
-    };
-    commands.extend(scripts.iter().map(|(_, text)| Some(text.clone())));
-    // КЛЮЧИ ДОСТУПА ищутся по всему, что пуш приносит впервые, — по истории, а не по
-    // вершине (почему — у `pushed_texts`). Не прочиталось — отказ вслух, как у скриптов:
-    // проверка закрыта по умолчанию.
+    // Неразборчивый манифест — шагов нет, пустой список: файлы судятся и без них.
+    let commands = git::project::block_commands(canon).unwrap_or_default();
+    // СКРИПТЫ судятся ФАЙЛАМИ (`files` ниже), а не «командами за последним блоком», как
+    // раньше: приложение знает, что это `scripts/clean.py`, и судит его по языку — Python
+    // по командам, отданным на исполнение, а не весь текст шелловым правилом. Иначе пуш был
+    // бы строже формы: `print("не запускайте rm -rf /")` отклонялся бы только здесь.
+    // Тексты всего, что пуш приносит впервые, — по истории, а не по вершине (почему — у
+    // `pushed_texts`): ключи доступа и скрипты. Не прочиталось — отказ вслух: проверка
+    // закрыта по умолчанию.
     let texts = match git::project::pushed_texts(commit) {
         Ok(t) => t,
         Err(why) => {
@@ -382,36 +370,25 @@ async fn check_content(owner: &str, slug: &str, canon: &[u8], commit: &str) -> i
     // противоположные: своё содержимое он чинит сам, а на недоступную проверку
     // может только повторить пуш.
     let lines = match refusal {
-        // Номер за последним блоком — это файл из `scripts/`, и назвать надо ЕГО: «шаг 14»
-        // у списка из двенадцати шагов человек не нашёл бы нигде.
-        ContentRefusal::Destructive(d) => {
-            match (d.step as usize).checked_sub(blocks + 1).and_then(|i| scripts.get(i)) {
-                Some((path, _)) => vec![
-                    say("content_destructive_file", &[path, &d.fragment, &d.rule]),
-                    say("content_hint_file", &[]),
-                ],
-                None => vec![
-                    say("content_destructive", &[&d.step.to_string(), &d.fragment, &d.rule]),
-                    say("content_hint", &[]),
-                ],
-            }
-        }
-        // Ключ называется МЕСТОМ: файл и строка. Пришёл в команде — это шаг либо
-        // скрипт за последним блоком (как у разрушительной команды). Сам ключ приложение
-        // не повторяет — печатается только начало.
+        // Место — файл (скрипт из `files`) или шаг list.json.
+        ContentRefusal::Destructive(d) => match d.path.as_deref().filter(|p| !p.is_empty()) {
+            Some(path) => vec![
+                say("content_destructive_file", &[path, &d.fragment, &d.rule]),
+                say("content_hint_file", &[]),
+            ],
+            None => vec![
+                say("content_destructive", &[&d.step.to_string(), &d.fragment, &d.rule]),
+                say("content_hint", &[]),
+            ],
+        },
+        // Ключ называется МЕСТОМ: файл и строка, а пришёл в команде — шаг. Сам ключ
+        // приложение не повторяет — печатается только начало.
         ContentRefusal::Secret(d) => {
             let line = d.line.to_string();
-            let script = (d.step as usize).checked_sub(blocks + 1).and_then(|i| scripts.get(i));
-            let first = match (d.path.is_empty(), script) {
-                (false, _) => {
-                    say("content_secret_file", &[&d.path, &line, &d.provider, &d.fragment, &d.rule])
-                }
-                (true, Some((path, _))) => {
-                    say("content_secret_file", &[path, &line, &d.provider, &d.fragment, &d.rule])
-                }
-                (true, None) => {
-                    say("content_secret_step", &[&d.step.to_string(), &d.provider, &d.fragment, &d.rule])
-                }
+            let first = if d.path.is_empty() {
+                say("content_secret_step", &[&d.step.to_string(), &d.provider, &d.fragment, &d.rule])
+            } else {
+                say("content_secret_file", &[&d.path, &line, &d.provider, &d.fragment, &d.rule])
             };
             vec![first, say("content_secret_hint", &[])]
         }
