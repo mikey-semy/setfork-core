@@ -108,6 +108,7 @@ async fn merging_main_into_a_branch_keeps_both_sides() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый"), step("Второй"), step("Третий"), step("Четвёртый")],
         }))
@@ -302,6 +303,7 @@ async fn a_repeat_update_without_changes_is_rejected() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый")],
         }))
@@ -368,6 +370,7 @@ async fn which_main_changes_break_the_merge() {
                 origin: String::new(),
                 forked_from_id: String::new(),
                 moderation: String::new(),
+                skill_header_json: String::new(),
                 note: "v1".into(),
                 steps: vec![step("Первый"), step("Второй"), step("Третий"), step("Четвёртый")],
             }))

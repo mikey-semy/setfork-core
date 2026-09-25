@@ -65,6 +65,7 @@ async fn broken_block_id_drops_identity_but_leaves_a_trace() {
             // Три шага: годная идентичность, пустая (законно) и мусор.
             steps: vec![step_with_bid(&good), step_with_bid(""), step_with_bid("не-uuid-вовсе")],
             moderation: String::new(),
+            skill_header_json: String::new(),
         }))
         .await
         .expect("запрос с негодным block_id по-прежнему ПРОХОДИТ — контракт не ужесточаем")

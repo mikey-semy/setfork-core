@@ -64,6 +64,7 @@ fn ver(n: i32) -> VersionData {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps: vec![ser_step(1, "First")],
     }
 }

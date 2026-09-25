@@ -415,15 +415,25 @@ pub async fn commit_web_version(
     }
 
     let mut tx = pool.begin().await?;
-    let row =
-        sqlx::query_as::<_, (i32, serde_json::Value, serde_json::Value, Vec<String>, bool, Option<String>)>(
-            "select current_version, title, \"desc\", tags, ordered, list_kind \
+    let row = sqlx::query_as::<
+        _,
+        (
+            i32,
+            serde_json::Value,
+            serde_json::Value,
+            Vec<String>,
+            bool,
+            Option<String>,
+            Option<serde_json::Value>,
+        ),
+    >(
+        "select current_version, title, \"desc\", tags, ordered, list_kind, skill_header \
              from templates where id = $1 for update",
-        )
-        .bind(id)
-        .fetch_optional(&mut *tx)
-        .await?;
-    let Some((current, title, desc, tags, ordered, kind)) = row else {
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((current, title, desc, tags, ordered, kind, skill_header)) = row else {
         return Err(WebVersionError::NotFound);
     };
     // Сверка «правка основана на текущей версии» — ЗДЕСЬ, а не у вызывающего:
@@ -499,6 +509,7 @@ pub async fn commit_web_version(
         ordered,
         // kind — из той же строки templates (Ф2a): мусор не публикуем.
         kind: kind.filter(|k| crate::git::serialize::is_valid_kind(k)),
+        skill_header: skill_header.as_ref().and_then(crate::git::serialize::skill_header_valid),
         steps: rows.iter().enumerate().map(|(i, r)| db::ser_step_from_row(i as i32 + 1, r)).collect(),
     };
 

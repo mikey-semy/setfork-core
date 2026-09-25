@@ -70,6 +70,10 @@ pub struct VersionData {
     /// None — не определён (старые списки): поле в канон не пишется вовсе, чтобы
     /// их байты не менялись без нужды (тот же приём, что blockId).
     pub kind: Option<String>,
+    /// Шапка исходного SKILL.md (license, compatibility, allowed-tools, metadata) —
+    /// свойство списка, как `kind`. None — нет: поля в каноне нет вовсе, байты старых
+    /// списков не меняются. Форму держит `skill_header_valid`.
+    pub skill_header: Option<serde_json::Value>,
     pub steps: Vec<SerStep>,
 }
 
@@ -77,6 +81,31 @@ pub struct VersionData {
 /// (LIST_KINDS). Меняться обязаны парой: значение, которого нет здесь, проекция
 /// молча отбросит (санитизация чужого git-входа), и тип потеряется.
 pub const LIST_KINDS: [&str; 6] = ["procedure", "inventory", "checklist", "criteria", "options", "recipe"];
+
+/// Шапка скилла в допустимой форме — или None. Та же дисциплина, что у `kind`: чужой
+/// git-вход санитизируется, мусор публичным контрактом файла не становится. Форма — из
+/// спецификации Agent Skills: три строки и `metadata` «строка → строка»; неизвестные
+/// ключи отбрасываются, пустая шапка — это отсутствие шапки.
+pub fn skill_header_valid(v: &serde_json::Value) -> Option<serde_json::Value> {
+    let obj = v.as_object()?;
+    let mut out = serde_json::Map::new();
+    for key in ["license", "compatibility", "allowed-tools"] {
+        if let Some(s) = obj.get(key).and_then(|x| x.as_str()).filter(|s| !s.trim().is_empty()) {
+            out.insert(key.into(), serde_json::json!(s));
+        }
+    }
+    if let Some(meta) = obj.get("metadata").and_then(|m| m.as_object()) {
+        let clean: serde_json::Map<_, _> = meta
+            .iter()
+            .filter(|(k, _)| !k.starts_with("setfork-"))
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), serde_json::json!(s))))
+            .collect();
+        if !clean.is_empty() {
+            out.insert("metadata".into(), serde_json::Value::Object(clean));
+        }
+    }
+    (!out.is_empty()).then_some(serde_json::Value::Object(out))
+}
 
 /// Валидное значение kind? (для санитизации проекции и валидации записи)
 pub fn is_valid_kind(s: &str) -> bool {
@@ -174,6 +203,10 @@ pub fn list_json(v: &VersionData) -> String {
     root.insert("ordered".into(), serde_json::json!(v.ordered));
     if let Some(k) = &v.kind {
         root.insert("kind".into(), serde_json::json!(k));
+    }
+    // Шапка скилла — там же, свойство списка, и тоже только при наличии.
+    if let Some(h) = v.skill_header.as_ref().and_then(skill_header_valid) {
+        root.insert("skillHeader".into(), h);
     }
     root.insert("version".into(), serde_json::json!(v.version));
     root.insert("steps".into(), serde_json::Value::Array(steps));
@@ -479,6 +512,7 @@ mod tests {
             tags: vec!["redis".into()],
             ordered: true,
             kind: None,
+            skill_header: None,
             steps,
         }
     }

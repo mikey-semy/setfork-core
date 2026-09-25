@@ -21,7 +21,8 @@ pub use carryover::current_marks;
 pub use mirror::{load_mirror, record_mirror_result};
 pub use versions::{StepRow, load_bundle_data, ser_step_from_row};
 pub use write::{
-    add_version, add_version_rows, bump_current_version, insert_step_rows, insert_version_row, update_meta,
+    PushedMeta, add_version, add_version_rows, bump_current_version, insert_step_rows, insert_version_row,
+    update_meta,
 };
 
 // step_level enum БД — прямой bind (без text→enum каста).
@@ -119,14 +120,22 @@ pub async fn resolve_list(
     Ok(row)
 }
 
-/// list_kind списка (валидное значение или None) — для канона веточных записей
-/// (Ф2a): провод kind не несёт, тип — свойство templates.
-pub async fn load_list_kind(pool: &PgPool, id: Uuid) -> Result<Option<String>, sqlx::Error> {
-    let k: Option<Option<String>> = sqlx::query_scalar("select list_kind from templates where id = $1")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-    Ok(k.flatten().filter(|k| crate::git::serialize::is_valid_kind(k)))
+/// Свойства списка, которые канон несёт, а провод — нет (Ф2a): тип (валидный или None)
+/// и шапка скилла (валидная форма или None). Для канона веточных записей.
+pub async fn load_list_props(
+    pool: &PgPool,
+    id: Uuid,
+) -> Result<(Option<String>, Option<serde_json::Value>), sqlx::Error> {
+    let row: Option<(Option<String>, Option<serde_json::Value>)> =
+        sqlx::query_as("select list_kind, skill_header from templates where id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?;
+    let (kind, header) = row.unwrap_or_default();
+    Ok((
+        kind.filter(|k| crate::git::serialize::is_valid_kind(k)),
+        header.as_ref().and_then(crate::git::serialize::skill_header_valid),
+    ))
 }
 
 /// Число опубликованных публичных списков — быстрый self-check связи с БД.

@@ -60,6 +60,7 @@ fn ver(kind: Option<&str>) -> VersionData {
         tags: vec!["t".into()],
         ordered: true,
         kind: kind.map(str::to_string),
+        skill_header: None,
         steps: vec![
             ser_step(1, "First"),
             SerStep {
@@ -450,6 +451,146 @@ async fn meta_travels_with_the_version_and_lands_in_the_canon() {
         .await
         .expect("title");
     assert_eq!(title["en"], "Renamed", "пустой title не затёр название");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+// ── Шапка скилла (skillHeader): тот же цикл, что у kind ──────────────────
+
+/// С шапкой канон валиден по схеме; без неё байты прежние; мусор в шапке — не контракт.
+#[test]
+fn the_skill_header_is_written_only_when_present_and_sanitized() {
+    let schema = schema();
+    let mut v = ver(Some("recipe"));
+    assert!(!list_json(&v).contains("skillHeader"), "без шапки поля нет — байты старых списков не меняются");
+    v.skill_header = Some(serde_json::json!({
+        "license": "Apache-2.0",
+        "metadata": { "author": "Ann", "setfork-ref": "a/b", "n": 1 },
+        "junk": true
+    }));
+    let canon: serde_json::Value = serde_json::from_str(&list_json(&v)).expect("json");
+    assert_eq!(
+        canon["skillHeader"],
+        serde_json::json!({ "license": "Apache-2.0", "metadata": { "author": "Ann" } })
+    );
+    if let Err(e) = jsonschema::draft7::validate(&schema, &canon) {
+        panic!("канон с шапкой обязан быть валиден: {e}");
+    }
+    let text = list_json(&v);
+    let (k, h, ver_at) = (
+        text.find("\"kind\"").unwrap(),
+        text.find("\"skillHeader\"").unwrap(),
+        text.find("\"version\"").unwrap(),
+    );
+    assert!(k < h && h < ver_at, "порядок ключей: kind < skillHeader < version");
+    // Пустая после санитизации шапка — это отсутствие шапки.
+    v.skill_header = Some(serde_json::json!({ "metadata": { "setfork-ref": "a/b" } }));
+    assert!(!list_json(&v).contains("skillHeader"));
+}
+
+/// БД → канон веб-версии → push на другой список → БД; мусор отбрасывается, отсутствие
+/// поля (старый клон) шапку не стирает.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn the_skill_header_survives_a_full_cycle() {
+    let pool = support::pool_with_schema().await;
+    let a_id = seed_list(&pool, "hdr-a", "hdr", None).await;
+    let b_id = seed_list(&pool, "hdr-b", "hdr", None).await;
+    sqlx::query("update templates set skill_header = $1::json where id = $2")
+        .bind(serde_json::json!({ "license": "MIT", "compatibility": "Needs git" }))
+        .bind(a_id)
+        .execute(&pool)
+        .await
+        .expect("seed header");
+
+    let tmp = std::env::temp_dir().join(format!("setfork-hdr-{}", Uuid::new_v4()));
+    let (bare_a, bare_b) = (tmp.join("a.git"), tmp.join("b.git"));
+    let history_a = setfork_core::db::load_bundle_data(&pool, a_id).await.expect("history A");
+    assert_eq!(
+        history_a[0].skill_header,
+        Some(serde_json::json!({ "license": "MIT", "compatibility": "Needs git" }))
+    );
+    bundle::bootstrap_bare(&history_a, &bare_a).expect("bootstrap A");
+    bundle::bootstrap_bare(
+        &setfork_core::db::load_bundle_data(&pool, b_id).await.expect("history B"),
+        &bare_b,
+    )
+    .expect("bootstrap B");
+
+    commit_web_version(
+        &pool,
+        a_id,
+        &bare_a,
+        WebEdit::new("web", None, vec![step_row("Second")], Default::default()),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("веб-версия: {e:?}"));
+    let canon = tip_list_json(&bare_a);
+    let parsed: serde_json::Value = serde_json::from_slice(&canon).expect("json");
+    assert_eq!(parsed["skillHeader"]["license"], serde_json::json!("MIT"), "шапка в каноне веб-версии");
+
+    push_canon(&bare_b, &canon);
+    setfork_core::git::project::project_pushed_commit(&pool, b_id, &bare_b)
+        .await
+        .expect("проекция")
+        .expect("проецируемо");
+    let got: Option<serde_json::Value> =
+        sqlx::query_scalar("select skill_header from templates where id = $1")
+            .bind(b_id)
+            .fetch_one(&pool)
+            .await
+            .expect("B");
+    assert_eq!(
+        got,
+        Some(serde_json::json!({ "license": "MIT", "compatibility": "Needs git" })),
+        "push принёс шапку"
+    );
+
+    // Мусор — не пишется; отсутствие — не стирает.
+    let mut junk = parsed.clone();
+    junk["skillHeader"] = serde_json::json!("MIT");
+    junk["version"] = serde_json::json!(3);
+    push_canon(&bare_b, serde_json::to_string_pretty(&junk).unwrap().as_bytes());
+    setfork_core::git::project::project_pushed_commit(&pool, b_id, &bare_b)
+        .await
+        .expect("проекция")
+        .expect("проецируемо");
+    let mut none = parsed;
+    none.as_object_mut().unwrap().remove("skillHeader");
+    none["version"] = serde_json::json!(4);
+    push_canon(&bare_b, serde_json::to_string_pretty(&none).unwrap().as_bytes());
+    setfork_core::git::project::project_pushed_commit(&pool, b_id, &bare_b)
+        .await
+        .expect("проекция")
+        .expect("проецируемо");
+    let got: Option<serde_json::Value> =
+        sqlx::query_scalar("select skill_header from templates where id = $1")
+            .bind(b_id)
+            .fetch_one(&pool)
+            .await
+            .expect("B");
+    assert_eq!(
+        got,
+        Some(serde_json::json!({ "license": "MIT", "compatibility": "Needs git" })),
+        "мусор и старый клон шапку не трогают"
+    );
+
+    // Убрать шапку можно явно — пустым объектом.
+    let mut cleared: serde_json::Value = serde_json::from_slice(&tip_list_json(&bare_b)).expect("json");
+    cleared["skillHeader"] = serde_json::json!({});
+    cleared["version"] = serde_json::json!(5);
+    push_canon(&bare_b, serde_json::to_string_pretty(&cleared).unwrap().as_bytes());
+    setfork_core::git::project::project_pushed_commit(&pool, b_id, &bare_b)
+        .await
+        .expect("проекция")
+        .expect("проецируемо");
+    let got: Option<serde_json::Value> =
+        sqlx::query_scalar("select skill_header from templates where id = $1")
+            .bind(b_id)
+            .fetch_one(&pool)
+            .await
+            .expect("B");
+    assert_eq!(got, None, "пустой объект — явное «убрать шапку»");
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

@@ -17,10 +17,12 @@ use crate::git::serialize::keeps_ref;
 /// Загрузка всей истории версий списка для материализации репо (порт bundle.ts loadVersions).
 /// title/desc/tags/ordered — с уровня списка (одинаковы для всех версий); шаги — по версии.
 pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<VersionData>, sqlx::Error> {
-    let trow = sqlx::query("select title, \"desc\", tags, ordered, list_kind from templates where id = $1")
-        .bind(list_id)
-        .fetch_one(pool)
-        .await?;
+    let trow = sqlx::query(
+        "select title, \"desc\", tags, ordered, list_kind, skill_header from templates where id = $1",
+    )
+    .bind(list_id)
+    .fetch_one(pool)
+    .await?;
     let title = loc(&trow.get::<serde_json::Value, _>("title"));
     let desc = loc(&trow.get::<serde_json::Value, _>("desc"));
     let tags: Vec<String> = trow.get("tags");
@@ -32,6 +34,13 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
         .ok()
         .flatten()
         .filter(|k| crate::git::serialize::is_valid_kind(k));
+    // Шапка скилла — свойство списка, как kind: одна на все версии истории.
+    let skill_header: Option<serde_json::Value> = trow
+        .try_get::<Option<serde_json::Value>, _>("skill_header")
+        .ok()
+        .flatten()
+        .as_ref()
+        .and_then(crate::git::serialize::skill_header_valid);
 
     let vrows = sqlx::query(
         // floor, не round: git усекает дробные секунды ISO-даты (TS передаёт .toISOString()).
@@ -120,6 +129,7 @@ pub async fn load_bundle_data(pool: &PgPool, list_id: Uuid) -> Result<Vec<Versio
             tags: tags.clone(),
             ordered,
             kind: kind.clone(),
+            skill_header: skill_header.clone(),
             steps: steps_by_ver.remove(&vid).unwrap_or_default(),
         });
     }
@@ -286,6 +296,7 @@ mod ser_step_tests {
             tags: vec![],
             ordered: true,
             kind: None,
+            skill_header: None,
             steps: vec![s],
         });
         assert!(json.contains("\"imageKey\": \"steps/x.png\""), "картинка в каноне: {json}");
@@ -305,6 +316,7 @@ mod ser_step_tests {
             tags: vec![],
             ordered: true,
             kind: None,
+            skill_header: None,
             steps: vec![s],
         });
         assert!(!json.contains("imageKey"), "нет картинки — нет поля: {json}");

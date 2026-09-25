@@ -51,6 +51,7 @@ fn ver(version: i32) -> VersionData {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps: vec![step(1, &format!("шаг v{version}"))],
     }
 }

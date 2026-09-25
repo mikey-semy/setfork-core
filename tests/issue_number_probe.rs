@@ -64,6 +64,7 @@ async fn concurrent_issue_creation_on_the_prod_schema() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Шаг")],
         }))
@@ -145,6 +146,7 @@ async fn concurrent_suggestion_creation_on_the_prod_schema() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Шаг")],
         }))

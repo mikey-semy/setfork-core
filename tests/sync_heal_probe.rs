@@ -24,6 +24,7 @@ fn vdata(version: i32, title: &str) -> VersionData {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps: vec![SerStep {
             n: 1,
             block_type: None,

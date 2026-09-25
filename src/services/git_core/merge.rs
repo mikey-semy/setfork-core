@@ -344,6 +344,7 @@ mod squash_tests {
             tags: vec![],
             ordered: true,
             kind: None,
+            skill_header: None,
             steps: vec![],
         });
         let sha = commit_resolved(&repo, "pr-1", canon.as_bytes(), true, "x").expect("резолв");

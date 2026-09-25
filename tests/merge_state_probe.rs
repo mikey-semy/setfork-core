@@ -105,6 +105,7 @@ async fn the_base_matches_real_git_merge_base() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый"), step("Второй")],
         }))

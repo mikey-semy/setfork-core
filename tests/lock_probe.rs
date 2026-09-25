@@ -87,6 +87,7 @@ async fn concurrent_merges_do_not_clobber_each_other() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Первый"), step("Второй"), step("Третий"), step("Четвёртый")],
         }))

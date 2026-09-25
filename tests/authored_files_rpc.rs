@@ -39,6 +39,7 @@ async fn found_means_the_version_exists_and_files_may_be_empty() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![NewStep { title: lt("Шаг"), ..Default::default() }],
         }))

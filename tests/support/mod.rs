@@ -63,6 +63,7 @@ create table templates (
   mirror_attempts integer not null default 0,
   -- Тип списка (ADR-0010); во фронт-схеме text nullable, БЕЗ enum (Ф2a).
   list_kind text,
+  skill_header json,
   current_version integer not null default 1,
   stars_count integer not null default 0,
   forks_count integer not null default 0,

@@ -83,6 +83,7 @@ async fn create_leaves_no_canon_until_first_touch() {
             note: "initial".into(),
             steps: vec![marked_step("Install", &bid)],
             moderation: String::new(),
+            skill_header_json: String::new(),
         }))
         .await
         .expect("создание проходит")
