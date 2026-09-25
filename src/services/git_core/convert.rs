@@ -96,6 +96,7 @@ pub(super) fn from_list_content(c: ListContent) -> VersionData {
         // его из БД (canon_list_json), иначе каждая веточная запись стирала бы
         // kind из дерева (ловушка №1 разведки Ф2a).
         kind: None,
+        skill_header: None,
         steps: c
             .steps
             .into_iter()
@@ -143,12 +144,13 @@ pub(super) fn from_list_content(c: ListContent) -> VersionData {
 /// правила формата, а значит держать вторую его реализацию.
 pub(super) fn canon_list_json(
     content: Option<ListContent>,
-    kind: Option<String>,
+    (kind, skill_header): (Option<String>, Option<serde_json::Value>),
     carry: &std::collections::HashMap<Uuid, db::CarryOver>,
 ) -> Result<Vec<u8>, Status> {
     let c = content.ok_or_else(|| Status::invalid_argument("content required"))?;
     let mut v = from_list_content(c);
     v.kind = kind.filter(|k| serialize::is_valid_kind(k));
+    v.skill_header = skill_header;
     // Ф2a-довесок: провод не несёт картинку/пометку — обогащаем из текущей версии
     // по идентичности блока, иначе веточная запись стирала бы их из канона
     // (та же ловушка, что была с kind).
@@ -208,7 +210,7 @@ mod canon_tests {
     fn structured_content_matches_materialized_list_json() {
         let c = content(vec![step(1), SnapshotStep { n: 2, title: "Configure".into(), ..step(2) }]);
         let from_wire =
-            canon_list_json(Some(c.clone()), None, &Default::default()).expect("канон из структуры");
+            canon_list_json(Some(c.clone()), (None, None), &Default::default()).expect("канон из структуры");
         let materialized = version_files(&from_list_content(c))
             .into_iter()
             .find(|(p, _)| p == "list.json")
@@ -227,7 +229,8 @@ mod canon_tests {
             block_id: String::new(),
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![block])), None, &Default::default()).expect("канон");
+        let out =
+            canon_list_json(Some(content(vec![block])), (None, None), &Default::default()).expect("канон");
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("\"type\": \"text\""), "тип блока в каноне: {s}");
         assert!(s.contains("\"md\": \"Вступление\""), "payload блока в каноне: {s}");
@@ -241,7 +244,7 @@ mod canon_tests {
             refs: vec![SnapshotRef { label: "без ссылки".into(), url: String::new() }],
             ..step(1)
         };
-        let out = canon_list_json(Some(content(vec![s])), None, &Default::default()).expect("канон");
+        let out = canon_list_json(Some(content(vec![s])), (None, None), &Default::default()).expect("канон");
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("\"label\": \"без ссылки\""));
         assert!(!text.contains("\"url\""), "пустой url не должен попадать в канон: {text}");
@@ -250,7 +253,8 @@ mod canon_tests {
     /// Прислать готовый файл больше нельзя: без структуры запрос бессмыслен.
     #[test]
     fn a_request_without_content_is_rejected() {
-        let err = canon_list_json(None, None, &Default::default()).expect_err("канон не из чего собрать");
+        let err =
+            canon_list_json(None, (None, None), &Default::default()).expect_err("канон не из чего собрать");
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
         assert_eq!(err.message(), "content required");
     }

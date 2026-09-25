@@ -66,6 +66,7 @@ async fn version_sha_comes_from_the_tag_and_matches_the_write() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Install")],
         }))
@@ -159,6 +160,7 @@ async fn release_tags_shaped_like_versions_do_not_hijack_version_two() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Install")],
         }))
@@ -245,6 +247,7 @@ async fn reading_versions_without_a_volume_yields_empty_not_panic() {
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps: vec![step("Install")],
         }))

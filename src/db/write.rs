@@ -135,22 +135,26 @@ pub async fn add_version(
     }
 }
 
-/// Мета списка из запушенного канона (title/desc/tags/ordered/kind) — порт project.ts patch.
-/// `None` в поле = его не было в list.json, значит не трогаем.
+/// Мета списка из запушенного канона. `None` в поле = его не было в list.json, значит не
+/// трогаем: push старого клона не стирает то, чего в его файле ещё не было.
+#[derive(Debug, Default)]
+pub struct PushedMeta {
+    pub title: Option<String>,
+    pub desc: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub ordered: Option<bool>,
+    pub kind: Option<String>,
+    pub skill_header: Option<serde_json::Value>,
+}
+
+/// Мета списка из запушенного канона — порт project.ts patch.
 ///
 /// ОДНОЙ транзакцией: полей пять, и сбой на третьем оставлял бы мету наполовину применённой — то есть базу в состоянии,
 /// которого нет ни в одном коммите (линза проверки 04 §7). Восстановилось бы это
 /// только следующим пушем, а до тех пор список показывал бы новый заголовок со
 /// старыми тегами.
-pub async fn update_meta(
-    pool: &PgPool,
-    template_id: Uuid,
-    title: Option<String>,
-    desc: Option<String>,
-    tags: Option<Vec<String>>,
-    ordered: Option<bool>,
-    kind: Option<String>,
-) -> Result<(), sqlx::Error> {
+pub async fn update_meta(pool: &PgPool, template_id: Uuid, meta: PushedMeta) -> Result<(), sqlx::Error> {
+    let PushedMeta { title, desc, tags, ordered, kind, skill_header } = meta;
     let mut tx = pool.begin().await?;
     if let Some(t) = title
         && !t.trim().is_empty()
@@ -192,6 +196,28 @@ pub async fn update_meta(
             .bind(template_id)
             .execute(&mut *tx)
             .await?;
+    }
+    // Шапка скилла — так же: только валидная форма, отсутствие не стирает (push старого
+    // клона). Убрать шапку можно ЯВНО — пустым объектом `"skillHeader": {}`: иначе автор
+    // не смог бы снять лицензию через git вовсе. json, не jsonb: порядок ключей metadata
+    // автора — часть того, что экспорт обязан вернуть.
+    match skill_header {
+        Some(serde_json::Value::Object(o)) if o.is_empty() => {
+            sqlx::query("update templates set skill_header = null where id = $1")
+                .bind(template_id)
+                .execute(&mut *tx)
+                .await?;
+        }
+        Some(h) => {
+            if let Some(h) = crate::git::serialize::skill_header_valid(&h) {
+                sqlx::query("update templates set skill_header = $1::json where id = $2")
+                    .bind(h)
+                    .bind(template_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        None => {}
     }
     tx.commit().await
 }

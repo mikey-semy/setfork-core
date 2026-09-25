@@ -64,6 +64,7 @@ async fn pushed_commit_projects_new_version_and_tag() {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps: vec![SerStep {
             n: 1,
             block_type: None,
@@ -211,6 +212,7 @@ async fn push_preserves_block_identity() {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps: vec![SerStep {
             n: 1,
             block_type: None,

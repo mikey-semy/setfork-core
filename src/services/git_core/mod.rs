@@ -689,9 +689,9 @@ impl GitCore for GitCoreSvc {
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Канон собирает ядро: содержимое — из запроса, kind и надстройки блоков
         // (картинка/пометка, по идентичности) — из БД (Ф2a).
-        let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
+        let props = db::load_list_props(&self.pool, id).await.map_err(db_status)?;
         let carry = db::current_marks(&self.pool, id).await.map_err(db_status)?;
-        let list_json = canon_list_json(content, kind, &carry)?;
+        let list_json = canon_list_json(content, props, &carry)?;
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
         let tip = with_repo(bare.clone(), move |repo| {
             commit_resolved(repo, &branch, &list_json, mode == "squash", &message)
@@ -872,9 +872,9 @@ impl GitCore for GitCoreSvc {
         let (bare, id) = self.ensure(&repo.owner, &repo.slug).await?;
         // Канон собирает ядро: содержимое — из запроса, kind и надстройки блоков
         // (картинка/пометка, по идентичности) — из БД (Ф2a).
-        let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
+        let props = db::load_list_props(&self.pool, id).await.map_err(db_status)?;
         let carry = db::current_marks(&self.pool, id).await.map_err(db_status)?;
-        let list_json = canon_list_json(content, kind, &carry)?;
+        let list_json = canon_list_json(content, props, &carry)?;
         // Тот же лок, что у merge/push: tip читаем ПОСЛЕ захвата, иначе
         // конкурентный пуш в ветку потерялся бы.
         let _guard = repo::repo_guard(&self.pool, id).await.map_err(db_status)?;
@@ -909,9 +909,9 @@ impl GitCore for GitCoreSvc {
     ) -> Result<Response<RenderCanonResponse>, Status> {
         let RenderCanonRequest { repo, content } = req.into_inner();
         let id = self.list_id(repo).await?;
-        let kind = db::load_list_kind(&self.pool, id).await.map_err(db_status)?;
+        let props = db::load_list_props(&self.pool, id).await.map_err(db_status)?;
         let carry = db::current_marks(&self.pool, id).await.map_err(db_status)?;
-        let canon = canon_list_json(content, kind, &carry)?;
+        let canon = canon_list_json(content, props, &carry)?;
         let canon = String::from_utf8(canon).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(RenderCanonResponse { canon }))
     }

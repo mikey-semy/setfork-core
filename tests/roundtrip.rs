@@ -55,6 +55,7 @@ fn ver(version: i32, note: &str, steps: Vec<SerStep>) -> VersionData {
         tags: vec!["redis".into()],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps,
     }
 }

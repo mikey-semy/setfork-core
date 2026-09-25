@@ -126,6 +126,7 @@ fn create_req(owner: &str, slug: &str, authored: Option<AuthoredFileSet>) -> Cre
         origin: String::new(),
         forked_from_id: String::new(),
         moderation: String::new(),
+        skill_header_json: String::new(),
         note: "v1".into(),
         steps: vec![NewStep { title: lt("Шаг"), ..Default::default() }],
     }
@@ -208,6 +209,56 @@ async fn create_with_files_is_born_with_them_in_v1() {
         .into_inner();
     assert!(!plain.authored_applied);
     assert!(files_of(&git, "skiller", "plain", 1).await.is_empty());
+}
+
+/// Шапка исходного SKILL.md едет в СОЗДАНИЕ: v1 — уже коммит, и шапка, поставленная после,
+/// в его list.json не попала бы (находка ревью). Мусорная шапка — её нет.
+#[tokio::test]
+#[ignore = "нужен TEST_DATABASE_URL (Postgres)"]
+async fn create_carries_the_skill_header_into_v1() {
+    let _dir = support::own_git_data_dir("authored-header").await;
+    let pool = support::pool_with_schema().await;
+    let owner = support::seed_user(&pool, "headed").await;
+    let svc = ListWriteSvc { pool: pool.clone() };
+
+    let mut req = create_req(&owner.to_string(), "hdr", wire(&[("scripts/run.sh", "echo hi\n", true)]));
+    req.skill_header_json = r#"{"license":"Apache-2.0","metadata":{"b":"2","a":"1"}}"#.into();
+    let list = svc.create(Request::new(req)).await.expect("create").into_inner();
+    let id = uuid::Uuid::parse_str(&list.id).expect("uuid");
+    let stored: Option<serde_json::Value> =
+        sqlx::query_scalar("select skill_header from templates where id = $1")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("row");
+    assert_eq!(
+        stored,
+        Some(serde_json::json!({ "license": "Apache-2.0", "metadata": { "b": "2", "a": "1" } }))
+    );
+
+    let bare = setfork_core::git::repo::repo_path(id);
+    let repo = git2::Repository::open_bare(&bare).expect("repo");
+    let tip = repo.find_commit(repo.refname_to_id("refs/heads/main").expect("main")).expect("tip");
+    let blob = repo
+        .find_blob(
+            tip.tree().expect("tree").get_path(std::path::Path::new("list.json")).expect("list.json").id(),
+        )
+        .expect("blob");
+    let text = String::from_utf8(blob.content().to_vec()).expect("utf8");
+    assert!(text.contains(r#""license": "Apache-2.0""#), "шапки нет в каноне v1: {text}");
+    // Порядок ключей metadata автора — как пришёл (json, а не jsonb).
+    assert!(text.find(r#""b": "2""#) < text.find(r#""a": "1""#), "порядок metadata потерян: {text}");
+
+    let mut junk = create_req(&owner.to_string(), "junk", None);
+    junk.skill_header_json = "не json".into();
+    let j = svc.create(Request::new(junk)).await.expect("create junk").into_inner();
+    let stored: Option<serde_json::Value> =
+        sqlx::query_scalar("select skill_header from templates where id = $1")
+            .bind(uuid::Uuid::parse_str(&j.id).expect("uuid"))
+            .fetch_one(&pool)
+            .await
+            .expect("row");
+    assert_eq!(stored, None);
 }
 
 #[tokio::test]

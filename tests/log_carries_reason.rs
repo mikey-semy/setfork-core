@@ -30,6 +30,7 @@ fn req(owner: &str, slug: &str) -> CreateListRequest {
         note: "n".into(),
         steps: vec![],
         moderation: String::new(),
+        skill_header_json: String::new(),
     }
 }
 

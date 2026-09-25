@@ -90,6 +90,7 @@ async fn seed(pool: &sqlx::PgPool, handle: &str, slug: &str, steps: Vec<NewStep>
             origin: String::new(),
             forked_from_id: String::new(),
             moderation: String::new(),
+            skill_header_json: String::new(),
             note: "v1".into(),
             steps,
         }))

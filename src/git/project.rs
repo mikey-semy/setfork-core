@@ -86,6 +86,9 @@ struct RawList {
     ordered: Option<bool>,
     // Тип списка (Ф2a): до этого терялся на push — проекция его не читала.
     kind: Option<String>,
+    // Шапка скилла: без неё push клона сохранял бы список, но терял бы license автора.
+    #[serde(rename = "skillHeader")]
+    skill_header: Option<serde_json::Value>,
     version: Option<i32>,
     steps: Option<Vec<RawStep>>,
 }
@@ -171,6 +174,7 @@ pub fn readme_from_canon(raw: &[u8]) -> Option<String> {
         tags: parsed.tags.clone().unwrap_or_default(),
         ordered: parsed.ordered.unwrap_or(true),
         kind: parsed.kind.clone(),
+        skill_header: parsed.skill_header.clone(),
         steps,
     };
     crate::git::serialize::version_files(&v).into_iter().find(|(p, _)| p == "README.md").map(|(_, c)| c)
@@ -490,11 +494,14 @@ pub async fn project_pushed_commit(
     if let Err(e) = db::update_meta(
         pool,
         template_id,
-        parsed.title.clone(),
-        parsed.desc.clone(),
-        parsed.tags.clone(),
-        parsed.ordered,
-        parsed.kind.clone(),
+        db::PushedMeta {
+            title: parsed.title.clone(),
+            desc: parsed.desc.clone(),
+            tags: parsed.tags.clone(),
+            ordered: parsed.ordered,
+            kind: parsed.kind.clone(),
+            skill_header: parsed.skill_header.clone(),
+        },
     )
     .await
     {
@@ -608,6 +615,7 @@ mod tests {
             tags: vec!["t".into()],
             ordered: true,
             kind: None,
+            skill_header: None,
             steps,
         }
     }

@@ -291,6 +291,7 @@ fn ver(version: i32, steps: Vec<SerStep>) -> VersionData {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps,
     }
 }

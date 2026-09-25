@@ -526,6 +526,12 @@ impl ListWrite for ListWriteSvc {
         // окно, в котором список уже виден всем: между коммитом транзакции и апдейтом (и
         // навсегда, если апдейт не случился). Пустое значение = active — сборка фронта,
         // которая поля ещё не шлёт, пишет как раньше.
+        // Шапка исходного SKILL.md — в строку списка и в канон v1. Непонятная или пустая —
+        // её нет: чужой вход санитизируется так же, как на push.
+        let skill_header: Option<serde_json::Value> = serde_json::from_str(&r.skill_header_json)
+            .ok()
+            .as_ref()
+            .and_then(crate::git::serialize::skill_header_valid);
         let moderation = if r.moderation.is_empty() { "active" } else { r.moderation.as_str() };
         if !matches!(moderation, "active" | "pending" | "flagged" | "hidden") {
             return Err(Status::invalid_argument("bad moderation"));
@@ -545,7 +551,7 @@ impl ListWrite for ListWriteSvc {
         // вызывающий проверяет, что его решение доехало (сборки фронта и ядра выкатываются
         // порознь). Ответ, собранный из входа, на такой вопрос отвечает всегда «да».
         let row: (Uuid, String, i64, i64) = sqlx::query_as(
-            "insert into templates (id, owner_id, slug, title, \"desc\", tags, ordered, visibility, status,                                     origin, forked_from_id, moderation, current_version)              values ($12, $1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::list_visibility, $8::list_status,                      $9::template_origin, $10, $11::moderation_status, 1)              returning id, moderation::text,                        floor(extract(epoch from created_at) * 1000)::bigint,                        floor(extract(epoch from updated_at) * 1000)::bigint",
+            "insert into templates (id, owner_id, slug, title, \"desc\", tags, ordered, visibility, status,                                     origin, forked_from_id, moderation, current_version, skill_header)              values ($12, $1, $2, $3::jsonb, $4::jsonb, $5, $6, $7::list_visibility, $8::list_status,                      $9::template_origin, $10, $11::moderation_status, 1, $13::json)              returning id, moderation::text,                        floor(extract(epoch from created_at) * 1000)::bigint,                        floor(extract(epoch from updated_at) * 1000)::bigint",
         )
         .bind(owner)
         .bind(&r.slug)
@@ -559,6 +565,7 @@ impl ListWrite for ListWriteSvc {
         .bind(forked_from)
         .bind(moderation)
         .bind(new_id)
+        .bind(&skill_header)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_status)?;
@@ -590,6 +597,7 @@ impl ListWrite for ListWriteSvc {
                 tags: r.tags.clone(),
                 ordered: r.ordered,
                 kind: None,
+                skill_header: skill_header.clone(),
                 steps: rows.iter().enumerate().map(|(i, s)| db::ser_step_from_row(i as i32 + 1, s)).collect(),
             };
             let bare = repo::repo_path(tid);

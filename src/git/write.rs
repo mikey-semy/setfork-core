@@ -300,6 +300,7 @@ mod tests {
             tags: vec![],
             ordered: true,
             kind: None,
+            skill_header: None,
             steps: vec![],
         });
         let out = commit_list_json(&repo, "pr-1", canon.as_bytes(), "", "", None).expect("write");

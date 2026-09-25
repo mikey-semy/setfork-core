@@ -113,6 +113,7 @@ async fn v1_data(pool: &PgPool, list_id: Uuid, title: &str) -> VersionData {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps: vec![ser_step(1, "First")],
     }
 }
@@ -354,6 +355,7 @@ async fn a_git_that_ran_ahead_is_healed_by_projection() {
         tags: vec![],
         ordered: true,
         kind: None,
+        skill_header: None,
         steps: vec![ser_step(1, "First"), ser_step(2, "Orphan")],
     };
     bundle::append_versions(&bare, &[orphan]).expect("append orphan v2");

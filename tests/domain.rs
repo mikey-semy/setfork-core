@@ -68,6 +68,7 @@ fn create_req(owner_id: &str, slug: &str) -> CreateListRequest {
         note: "initial".into(),
         steps: vec![step("Install"), text_block("intro **md**"), step("Configure")],
         moderation: String::new(), // дефолт active
+        skill_header_json: String::new(),
     }
 }
 
