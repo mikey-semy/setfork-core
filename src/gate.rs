@@ -111,6 +111,8 @@ pub struct DenyDetail {
     pub step: u32,
     pub rule: String,
     pub fragment: String,
+    /// Файл, если опасное нашлось в скрипте из `files`, а не в команде шага.
+    pub path: Option<String>,
 }
 
 /// МЕСТО ключа доступа в пушнутом коммите: файл (либо шаг, если ключ пришёл в команде),
@@ -182,6 +184,7 @@ fn parse_verdict(body: &[u8]) -> Verdict {
                 step: v.get("step").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32,
                 rule: v.get("rule").and_then(|r| r.as_str()).unwrap_or("").to_string(),
                 fragment: v.get("fragment").and_then(|f| f.as_str()).unwrap_or("").to_string(),
+                path: v.get("path").and_then(|p| p.as_str()).filter(|p| !p.is_empty()).map(str::to_string),
             });
             Verdict::Deny(reason, detail)
         }
@@ -506,7 +509,7 @@ mod tests {
             ),
             Verdict::Deny(
                 "destructive".into(),
-                Some(DenyDetail { step: 3, rule: "rm_rf".into(), fragment: "rm -rf /".into() })
+                Some(DenyDetail { step: 3, rule: "rm_rf".into(), fragment: "rm -rf /".into(), path: None })
             )
         );
         // Место у ОСТАЛЬНЫХ причин не ищем: полей там нет и не было.
@@ -521,7 +524,7 @@ mod tests {
             parse_verdict(br#"{"allow":false,"reason":"destructive"}"#),
             Verdict::Deny(
                 "destructive".into(),
-                Some(DenyDetail { step: 0, rule: String::new(), fragment: String::new() })
+                Some(DenyDetail { step: 0, rule: String::new(), fragment: String::new(), path: None })
             )
         );
     }
