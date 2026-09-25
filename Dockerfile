@@ -2,7 +2,8 @@
 # protoc не нужен вовсе — protobuf компилирует protox (чистый Rust) в build.rs.
 # Базовые образы: trixie (bookworm тянул известные CVE) и запинены на digest
 # (supply chain, воспроизводимость). Обновление пинов — осознанное:
-#   docker buildx imagetools inspect rust:1-trixie / debian:trixie-slim
+#   docker buildx imagetools inspect rust:1-trixie / debian:trixie-slim /
+#   ghcr.io/grpc-ecosystem/grpc-health-probe:<версия>
 
 FROM rust:1-trixie@sha256:9a2cd304a852f05d3352f75bc2775242371c0169a72dbb40d5d881379d571989 AS builder
 WORKDIR /app
@@ -25,16 +26,13 @@ RUN mkdir src \
 COPY src ./src
 RUN find src -type f -exec touch {} + && cargo build --release
 
-# grpc_health_probe качаем в builder (тут есть curl) — в runtime только COPY.
 # Настоящая gRPC-проба (grpc.health.v1): во время graceful-дренажа сервис отдаёт
 # NOT_SERVING, и оркестратор уводит трафик (TCP-проба nc -z этого не увидела бы).
-# Бинарь проверяется по sha256 (supply chain). Цель деплоя — linux/amd64 (VPS).
-ARG GRPC_HEALTH_PROBE_VERSION=v0.4.34
-ARG GRPC_HEALTH_PROBE_SHA256=3ddaf85583613c97693e9b8aaa251dac07e73e366e159a7ccadbcf553117fcef
-RUN curl -fsSL -o /grpc_health_probe \
-      https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64 \
-  && echo "${GRPC_HEALTH_PROBE_SHA256}  /grpc_health_probe" | sha256sum -c - \
-  && chmod +x /grpc_health_probe
+# Бинарь — из образа релиза проекта (так советует его README), запиненного на digest,
+# как и базовые образы: digest держит целостность вместо sha256 файла. Раньше качали
+# curl'ом с github.com — сборка падала, когда провайдер резал узлы github.com
+# (25.09.2026), а ghcr.io на других адресах. Обновление — тем же imagetools inspect.
+FROM ghcr.io/grpc-ecosystem/grpc-health-probe:v0.4.57@sha256:f77f1257805ecb57f1f0c36c5825d3c2e47aa81cce87128675e768463ed6487a AS grpc-health-probe
 
 FROM debian:trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd AS runtime
 # git — материализация/receive-pack через шелл; ca-certificates для TLS.
@@ -47,7 +45,7 @@ RUN apt-get update \
   && mkdir -p /data/git && chown -R setfork:setfork /data
 WORKDIR /app
 COPY --from=builder /app/target/release/setfork-core /usr/local/bin/setfork-core
-COPY --from=builder /grpc_health_probe /usr/local/bin/grpc_health_probe
+COPY --from=grpc-health-probe /ko-app/grpc-health-probe /usr/local/bin/grpc_health_probe
 # слушать снаружи контейнера; том git-объектов по умолчанию; метрики Prometheus
 ENV SETFORK_CORE_ADDR=0.0.0.0:50051 GIT_DATA_DIR=/data/git SETFORK_METRICS_ADDR=0.0.0.0:9464
 USER setfork
