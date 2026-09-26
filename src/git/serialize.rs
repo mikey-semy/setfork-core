@@ -70,7 +70,7 @@ pub struct VersionData {
     /// None — не определён (старые списки): поле в канон не пишется вовсе, чтобы
     /// их байты не менялись без нужды (тот же приём, что blockId).
     pub kind: Option<String>,
-    /// Шапка исходного SKILL.md (license, compatibility, allowed-tools, metadata) —
+    /// Шапка исходного SKILL.md (license, compatibility, allowed-tools, metadata, heading) —
     /// свойство списка, как `kind`. None — нет: поля в каноне нет вовсе, байты старых
     /// списков не меняются. Форму держит `skill_header_valid`.
     pub skill_header: Option<serde_json::Value>,
@@ -85,11 +85,14 @@ pub const LIST_KINDS: [&str; 6] = ["procedure", "inventory", "checklist", "crite
 /// Шапка скилла в допустимой форме — или None. Та же дисциплина, что у `kind`: чужой
 /// git-вход санитизируется, мусор публичным контрактом файла не становится. Форма — из
 /// спецификации Agent Skills: три строки и `metadata` «строка → строка»; неизвестные
-/// ключи отбрасываются, пустая шапка — это отсутствие шапки.
+/// ключи отбрасываются, пустая шапка — это отсутствие шапки. Плюс `heading` — заголовок
+/// `# …` тела исходника, когда он не совпал с названием (название скилла — его `name`,
+/// решение владельца 26.09.2026): экспорт ставит его на место. Зеркало фронта —
+/// `src/core/domain/skill-header.ts`.
 pub fn skill_header_valid(v: &serde_json::Value) -> Option<serde_json::Value> {
     let obj = v.as_object()?;
     let mut out = serde_json::Map::new();
-    for key in ["license", "compatibility", "allowed-tools"] {
+    for key in ["license", "compatibility", "allowed-tools", "heading"] {
         if let Some(s) = obj.get(key).and_then(|x| x.as_str()).filter(|s| !s.trim().is_empty()) {
             out.insert(key.into(), serde_json::json!(s));
         }
