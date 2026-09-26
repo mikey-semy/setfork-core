@@ -465,13 +465,14 @@ fn the_skill_header_is_written_only_when_present_and_sanitized() {
     assert!(!list_json(&v).contains("skillHeader"), "без шапки поля нет — байты старых списков не меняются");
     v.skill_header = Some(serde_json::json!({
         "license": "Apache-2.0",
+        "heading": "Whole-repository review",
         "metadata": { "author": "Ann", "setfork-ref": "a/b", "n": 1 },
         "junk": true
     }));
     let canon: serde_json::Value = serde_json::from_str(&list_json(&v)).expect("json");
     assert_eq!(
         canon["skillHeader"],
-        serde_json::json!({ "license": "Apache-2.0", "metadata": { "author": "Ann" } })
+        serde_json::json!({ "license": "Apache-2.0", "heading": "Whole-repository review", "metadata": { "author": "Ann" } })
     );
     if let Err(e) = jsonschema::draft7::validate(&schema, &canon) {
         panic!("канон с шапкой обязан быть валиден: {e}");
